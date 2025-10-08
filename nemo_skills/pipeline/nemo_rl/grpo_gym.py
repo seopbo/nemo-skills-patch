@@ -139,6 +139,7 @@ class NemoGymRLTask:
         cmd = (
             f"cd {self.repo_location} && "
             f"source /opt/nemo_rl_venv/bin/activate && "
+            "uv sync --group={build,docs,dev,test} --extra penguin && "
             f"HF_HUB_OFFLINE=1 && "
             f"NRL_FORCE_REBUILD_VENVS=true && "
             f"uv run python examples/penguin/run_grpo_penguin.py "
