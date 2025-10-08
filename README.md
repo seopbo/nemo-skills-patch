@@ -1,3 +1,39 @@
+## Nemo-Gym-RL integration with NeMo Skills
+
+### Setup
+
+1. Add `gym-nemo-rl: /lustre/fsw/portfolios/coreai/users/terryk/enroot-images/gitlab-master.nvidia.com/terryk/images/nemo-rl:main-2aea5add.squashfs` to your cluster config .yaml file. This is the container used for nemo-rl with nemo-gym integration.
+
+2. Clone the NeMo-RL repo to your cluster, for now specifically to `/workspace/nemo-rl`:
+
+```
+# cd to workspace as defined in your cluster config
+git clone https://gitlab-master.nvidia.com/nexus-team/nemo-rl
+cd nemo-rl
+git checkout bxyu/nemo-gym-integration-main
+```
+
+3. Complete these instructions as well to have the repo setup properly.
+
+```
+# Fetch the NeMo Gym submodule, codenamed "Penguin" before release
+# You will need to put your NV Github user name and PAT for the first submodule clone
+git pull && git submodule update --init --recursive
+
+# Add your creds to the Git submodule to you don't need to do so on every pull
+cd 3rdparty/Penguin-workspace/Penguin
+git remote set-url origin https://{your NV Github username}:{your NV Github PAT}@github.com/NVIDIA-NeMo/Gym.git
+cd ../../..
+
+# Initial setup
+source /opt/nemo_rl_venv/bin/activate
+uv sync --group={build,docs,dev,test} --extra penguin
+```
+
+## Running GRPO from NeMo-RL via Gym from NeMo-Skills.
+
+There is a test/example of running GRPO in `./tests/test_nemo_gym_rl.py`, the new command is `grpo_nemo_gym_rl` in the file `nemo_skills/pipeline/nemo_rl/grpo_gym.py`.
+
 # NeMo Skills
 
 NeMo-Skills is a collection of pipelines to improve "skills" of large language models (LLMs). We support everything needed for LLM development, from synthetic data generation, to model training, to evaluation on a wide range of benchmarks. Start developing on a local workstation and move to a large-scale Slurm cluster with just a one-line change.
