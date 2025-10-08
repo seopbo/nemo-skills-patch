@@ -141,7 +141,7 @@ class NemoGymRLTask:
             f"source /opt/nemo_rl_venv/bin/activate && "
             f"HF_HUB_OFFLINE=1 && "
             f"NRL_FORCE_REBUILD_VENVS=true && "
-            f"uv run python examples/penguin/run_grpo/penguin.py "
+            f"uv run python examples/penguin/run_grpo_penguin.py "
             f" --config={self.gym_config_path} "
             f" {self.format_train_args()} "
             f" {self.format_wandb_args()} "
