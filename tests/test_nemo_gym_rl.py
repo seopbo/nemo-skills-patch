@@ -14,7 +14,8 @@ def run_gym_rl_grpo():
     training_data = data_dir + "/train.jsonl"
     validation_data = data_dir + "/validation.jsonl"
 
-    expname = "20251008/penguin_grpo/qwen3_4binstruct/comp_coding_test_01"
+    run_n = 1
+    expname = f"penguin_grpo_qwen3_4binstruct_comp_coding_test_{run_n}"
     gym_config_path = "examples/penguin/grpo_comp_coding_qwen3_4binstruct.yaml"
     model = "Qwen3-4B"
 
