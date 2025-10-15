@@ -13,7 +13,7 @@ cd nemo-rl
 git checkout bxyu/nemo-gym-integration-main
 ```
 
-3. Complete these instructions as well to have the repo setup properly.
+3. Complete these instructions as well to have the repo setup properly (if there are issues with the setup, refer to the [doc](https://docs.google.com/document/d/1z0wLyl6lNpLhLCqd33EH04RdcIl4UTy08_ROEnNRnUA/edit?tab=t.b05geyn4qj77#heading=h.g6xyqy7cjg64)).
 
 ```
 # Fetch the NeMo Gym submodule, codenamed "Penguin" before release
@@ -28,6 +28,26 @@ cd ../../..
 # Initial setup
 source /opt/nemo_rl_venv/bin/activate
 uv sync --group={build,docs,dev,test} --extra penguin
+```
+
+4. Call the root of your NeMo-RL with Gym integration repo as `REPO_LOCATION` (e.g. `/workspace/nemo-rl` or specify as an argument when running GRPO given below). To circumvent running `ng_prepare_data` (potential errors to handle), copy the contents of the directory `/lustre/fsw/portfolios/llmservice/users/eminasyan/nemo-rl/3rdparty/Penguin-workspace/Penguin/data/comp_coding` on the `dfw` cluster to `{REPO_LOCATION}/3rdparty/Penguin-workspace/Penguin/data/comp_coding`.
+
+With the steps done until here, the job runs into the `Unable to find lockfile at uv.lock` error when building nemo-gym (initializing Penguin [here](https://gitlab-master.nvidia.com/nexus-team/nemo-rl/-/blob/bxyu/nemo-gym-integration-main/examples/penguin/run_grpo_penguin.py#L175)).
+
+To fix the issue, complete the following temporary steps:
+
+5. Comment out lines 202-203 in `{REPO_LOCATION}/3rdpart/Penguin-workspace/Penguin/pyproject.toml`:
+```
+#[tool.distutils.egg_info]
+#egg_base = "cache"
+```
+
+6. Add `working_dir` as the `REPO_LOCATION` in `{REPO_LOCATION}/nemo_rl/distributed/virtual_cluster.py` in lines 100-102:
+```
+runtime_env = {
+        "env_vars": env_vars,  # Pass thru all user environment variables
+        "working_dir": os.getcwd(),
+    }
 ```
 
 ## Running GRPO from NeMo-RL via Gym from NeMo-Skills.
