@@ -14,7 +14,7 @@ def run_gym_rl_grpo():
     training_data = data_dir + "/train.jsonl"
     validation_data = data_dir + "/validation.jsonl"
 
-    run_n = 3
+    run_n = 4
     expname = f"penguin_grpo_qwen3_4binstruct_comp_coding_test_{run_n}"
     gym_config_path = "examples/penguin/grpo_comp_coding_qwen3_4binstruct.yaml"
     model = "Qwen3-4B"
@@ -42,7 +42,7 @@ def run_gym_rl_grpo():
         repo_location=repo_dir,
         backend="fsdp",
         disable_wandb=True,
-        dry_run=True,
+        dry_run=False,
     )
 
 if __name__ == "__main__":
