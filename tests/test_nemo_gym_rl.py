@@ -42,7 +42,7 @@ def run_gym_rl_grpo():
         repo_location=repo_dir,
         backend="fsdp",
         disable_wandb=True,
-        dry_run=False,
+        dry_run=True,
     )
 
 if __name__ == "__main__":
