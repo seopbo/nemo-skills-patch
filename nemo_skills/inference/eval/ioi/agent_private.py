@@ -112,6 +112,8 @@ class IOIExecutionGenerationTask(GenerationTask):
             if chat_history:
                 chat_history[-1]["evaluation_time"] = eval_time
             test_case_results = eval_results["test_case_results"]
+            if chat_history:
+                chat_history[-1]["subtask_scores"] = {k: v["score"] for k, v in test_case_results.items()}
 
             # Check if all subtasks passed fully (score == 1 for every output)
             if all(all(o["score"] == 1 for o in v["outputs"]) for v in test_case_results.values()):
