@@ -151,7 +151,6 @@ class IOIExecutionGenerationTask(GenerationTask):
             chat_history.append(
                 {"prompt": prompt_txt, "response": cur_generation_response, "generation_time": gen_time}
             )
-            print(f"Prompt: {prompt_txt}")
 
             # Save checkpoint after each improvement step
             print(f"[Checkpoint] Saving intermediate pos={async_pos}, step={num_steps_completed}")
