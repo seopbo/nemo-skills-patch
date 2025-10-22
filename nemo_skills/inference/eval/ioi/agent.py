@@ -2,8 +2,11 @@ import asyncio
 import logging
 import os
 import re
+
+# Use our own run directory instead of tempfile for better control
+# and cleanup handling.
+import shutil
 import sys
-import tempfile
 import time
 from dataclasses import field
 
@@ -19,17 +22,31 @@ from nemo_skills.utils import get_help_message, get_logger_name, nested_dataclas
 LOG = logging.getLogger(get_logger_name(__file__))
 
 
-async def compile_and_run_cpp(code_string: str, data_point: dict):
-    with tempfile.TemporaryDirectory() as temp_dir:
+async def compile_and_run_cpp(code_string: str, data_point: dict, timeout: int = 30):
+    """Compile the provided C++ code and run it inside a temporary directory.
+
+    A soft timeout (default 30 s) is applied to the execution phase. On timeout
+    the process is killed and a timeout message is returned as stderr.
+    """
+
+    # Create a unique directory for this run – it helps with debugging and keeps
+    # compilation artefacts isolated. It is explicitly removed in the finally
+    # clause so we don't rely on garbage-collection.
+    run_dir = f"/tmp/cpp_run_{os.getpid()}_{time.time_ns()}"
+    os.makedirs(run_dir, exist_ok=True)
+
+    try:
+        # Write supplementary header files supplied in the data point.
         for original_path, content in data_point.get("grader_files", []):
             filename = os.path.basename(original_path)
-            if "checker" in filename or "grader" in filename or not filename.endswith(".h"):
+            if ("checker" in filename) or ("grader" in filename) or (not filename.endswith(".h")):
                 continue
-            with open(os.path.join(temp_dir, filename), "w") as f:
+            with open(os.path.join(run_dir, filename), "w") as f:
                 f.write(content)
 
-        executable_path = os.path.join(temp_dir, "a.out")
-        compile_command = ["g++", "-I", temp_dir, "-x", "c++", "-o", executable_path, "-"]
+        # Compile the solution.
+        executable_path = os.path.join(run_dir, "a.out")
+        compile_command = ["g++", "-I", run_dir, "-x", "c++", "-o", executable_path, "-"]
         compiler_process = await asyncio.create_subprocess_exec(
             *compile_command,
             stdin=asyncio.subprocess.PIPE,
@@ -41,11 +58,21 @@ async def compile_and_run_cpp(code_string: str, data_point: dict):
         if compiler_process.returncode != 0:
             raise RuntimeError(f"C++ compilation failed:\n{compile_stderr.decode()}\nCode:{code_string}")
 
+        # Run the compiled binary with a timeout.
         run_process = await asyncio.create_subprocess_exec(
             executable_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        run_stdout, run_stderr = await run_process.communicate()
-        return run_stdout.decode(), run_stderr.decode()
+        try:
+            run_stdout, run_stderr = await asyncio.wait_for(run_process.communicate(), timeout=timeout)
+            return run_stdout.decode(), run_stderr.decode()
+        except asyncio.TimeoutError:
+            # Kill the process group to avoid lingering processes.
+            run_process.kill()
+            await run_process.wait()
+            return "", f"Execution timed out after {timeout} seconds."
+    finally:
+        # Ensure we never leave temporary artefacts behind.
+        shutil.rmtree(run_dir, ignore_errors=True)
 
 
 def extract_code_block(text: str):
@@ -109,6 +136,8 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     num_self_improve: int = 1
     num_verify: int = 10
     num_majority_verify: int = 5
+    # Maximum wall-clock seconds allowed for running compiled C++ code.
+    run_timeout_seconds: int = 30
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -195,7 +224,9 @@ class IOIExecutionGenerationTask(GenerationTask):
                     exec_stderr = ""
                     compile_error = ""
                     try:
-                        exec_stdout, exec_stderr = await compile_and_run_cpp(test_script_code, data_point)
+                        exec_stdout, exec_stderr = await compile_and_run_cpp(
+                            test_script_code, data_point, timeout=self.cfg.run_timeout_seconds
+                        )
                     except Exception as e:
                         compile_error = str(e)
 
