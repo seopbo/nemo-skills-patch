@@ -3,7 +3,7 @@ from nemo_skills.pipeline.cli import wrap_arguments, grpo_nemo_gym_rl
 def run_gym_rl_grpo():
     account_name = "llmservice_nemo_reasoning"
     partition = "interactive"
-    cluster = "dfw"
+    cluster = "ord"
 
     num_nodes=1
     num_gpus=8
