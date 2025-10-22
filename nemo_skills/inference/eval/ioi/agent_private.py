@@ -29,6 +29,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     prompt_config: str = "eval/ioi/agent/solver"
     improve_after_verify_prompt_config: str = "eval/ioi/agent/improve_with_private_test"
     total_steps: int = 60
+    time_limit: str | None = None  # Optional wall-clock time limit in 'HH:MM:SS'
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -45,6 +46,14 @@ class IOIExecutionGenerationTask(GenerationTask):
             "initial": get_prompt(cfg.prompt_config, **prompt_kwargs),
             "improve_after_verify_solution": get_prompt(cfg.improve_after_verify_prompt_config, **prompt_kwargs),
         }
+        # Parse time limit locally for this task only
+        self._deadline_ts = None
+        if cfg.time_limit:
+            parts = cfg.time_limit.split(":")
+            if len(parts) != 3:
+                raise ValueError("time_limit must be in 'HH:MM:SS' format")
+            h, m, s = map(int, parts)
+            self._deadline_ts = time.time() + (h * 3600 + m * 60 + s)
 
     def log_example_prompt(self, data):
         pass
@@ -152,6 +161,10 @@ class IOIExecutionGenerationTask(GenerationTask):
                     "num_steps_completed": num_steps_completed,
                 },
             )
+            # Time limit check only inside the loop after checkpoint save
+            if self._deadline_ts is not None and time.time() >= self._deadline_ts:
+                print("[TimeLimit] Reached limit after step save; exiting cleanly.")
+                sys.exit(0)
 
         # Reached maximum steps without passing all tests.
         print("[Failure] Reached max improvement steps without passing all tests.")
