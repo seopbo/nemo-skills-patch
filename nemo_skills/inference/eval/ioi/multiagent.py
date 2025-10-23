@@ -77,6 +77,7 @@ def build_question_with_history(question: str, prev_solutions: List[str]) -> str
 class MultiAgentConfig(GenerateSolutionsConfig):
     inference: InferenceConfig = field(default_factory=InferenceConfig)
     server: dict = field(default_factory=dict)
+    time_limit: str | None = None
 
     # Prompts
     solver_prompt_config: str = "eval/ioi/multiagent/code/solver"
@@ -323,6 +324,14 @@ class MultiAgentGenerationTask(GenerationTask):
 
         self.sandbox = LocalSandbox()
 
+        self._deadline_ts = None
+        if cfg.time_limit:
+            parts = cfg.time_limit.split(":")
+            if len(parts) != 3:
+                raise ValueError("time_limit must be in 'HH:MM:SS' format")
+            h, m, s = map(int, parts)
+            self._deadline_ts = time.time() + (h * 3600 + m * 60 + s)
+
         # Instantiate sub-agents
         self.available_agents = {
             "solver": lambda: SolverAgent(self),
@@ -465,6 +474,9 @@ class MultiAgentGenerationTask(GenerationTask):
                     "current_solutions": current_solutions,
                 },
             )
+            if self._deadline_ts is not None and time.time() >= self._deadline_ts:
+                print("[TimeLimit] Reached limit after step save; exiting cleanly.")
+                sys.exit(0)
 
             # Check termination after minimum number of steps (unless skipped)
             if (not self.cfg.skip_termination) and step_num + 0 >= max(1, self.cfg.min_steps_before_terminate):
