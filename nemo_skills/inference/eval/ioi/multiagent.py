@@ -399,8 +399,8 @@ class MultiAgentGenerationTask(GenerationTask):
 
     async def process_single_datapoint(self, data_point, all_data, prompt=None):
         chat_history: List[dict] = []
+        num_steps_completed = 0
 
-        # Prepare agents for this run (list of agent names)
         agents: List[BaseSubAgent] = []
         agent_names = [a.strip() for a in self.cfg.agents]
         for a in agent_names:
@@ -415,17 +415,34 @@ class MultiAgentGenerationTask(GenerationTask):
                 "No agents configured. Please set cfg.agents to include at least one of: solver, execution, solver_tir, execution_tir, chained"
             )
 
-        # Step 0: ask all agents for an initial solution (no history)
-        print(f"[MultiAgent] Step 0: Gathering initial solutions from {len(agents)} agents")
-        initial_tasks = [agent.run(data_point, all_data, prev_solutions=[]) for agent in agents]
-        results = await asyncio.gather(*initial_tasks)
-        current_solutions = []
-        for sol, logs in results:
-            current_solutions.append(sol)
-            chat_history.extend(logs)
+        async_pos = data_point[self.cfg.async_position_key]
+        saved_state = self.load_latest_state(async_pos)
+        if saved_state and saved_state.get("_intermediate", False):
+            chat_history = saved_state.get("steps", [])
+            num_steps_completed = int(saved_state.get("num_steps_completed", 0))
+            current_solutions = list(saved_state.get("current_solutions", []))
+            print(f"[Resume] Restoring pos={async_pos} from step {num_steps_completed}")
+        else:
+            print(f"[MultiAgent] Step 0: Gathering initial solutions from {len(agents)} agents")
+            initial_tasks = [agent.run(data_point, all_data, prev_solutions=[]) for agent in agents]
+            results = await asyncio.gather(*initial_tasks)
+            current_solutions = []
+            for sol, logs in results:
+                current_solutions.append(sol)
+                chat_history.extend(logs)
+            print("[Initial] Gathered initial solutions.")
+            print(f"[Checkpoint] Saving intermediate pos={async_pos}, step={num_steps_completed}")
+            await self.save_intermediate_state(
+                async_pos,
+                {
+                    "generation": current_solutions[0] if current_solutions else "",
+                    "steps": chat_history,
+                    "num_steps_completed": num_steps_completed,
+                    "current_solutions": current_solutions,
+                },
+            )
 
-        # Iterate steps
-        for step_num in range(1, self.cfg.total_steps + 1):
+        for step_num in range(num_steps_completed + 1, self.cfg.total_steps + 1):
             print(f"[MultiAgent] Step {step_num}: Producing new solutions based on prior step outputs")
 
             # Provide previous solutions to each agent and get new proposals
@@ -437,6 +454,17 @@ class MultiAgentGenerationTask(GenerationTask):
                 chat_history.extend(logs)
 
             current_solutions = new_solutions
+            num_steps_completed += 1
+            print(f"[Checkpoint] Saving intermediate pos={async_pos}, step={num_steps_completed}")
+            await self.save_intermediate_state(
+                async_pos,
+                {
+                    "generation": current_solutions[0] if current_solutions else "",
+                    "steps": chat_history,
+                    "num_steps_completed": num_steps_completed,
+                    "current_solutions": current_solutions,
+                },
+            )
 
             # Check termination after minimum number of steps (unless skipped)
             if (not self.cfg.skip_termination) and step_num + 0 >= max(1, self.cfg.min_steps_before_terminate):
@@ -446,21 +474,29 @@ class MultiAgentGenerationTask(GenerationTask):
                     print("[MultiAgent] Termination condition satisfied. Selecting final solution...")
                     if len(agents) == 1:
                         final_solution = current_solutions[0]
-                        return {"generation": final_solution, "steps": chat_history, "num_steps_completed": step_num}
+                        return {
+                            "generation": final_solution,
+                            "steps": chat_history,
+                            "num_steps_completed": num_steps_completed,
+                        }
                     best_idx, sel_logs = await self._select_best(data_point, all_data, current_solutions)
                     chat_history.extend(sel_logs)
                     final_solution = current_solutions[best_idx]
-                    return {"generation": final_solution, "steps": chat_history, "num_steps_completed": step_num}
+                    return {
+                        "generation": final_solution,
+                        "steps": chat_history,
+                        "num_steps_completed": num_steps_completed,
+                    }
 
         # If not terminated within steps, still select the best at the end
         print("[MultiAgent] Reached maximum steps without termination. Selecting final solution anyway...")
         if len(agents) == 1:
             final_solution = current_solutions[0]
-            return {"generation": final_solution, "steps": chat_history, "num_steps_completed": self.cfg.total_steps}
+            return {"generation": final_solution, "steps": chat_history, "num_steps_completed": num_steps_completed}
         best_idx, sel_logs = await self._select_best(data_point, all_data, current_solutions)
         chat_history.extend(sel_logs)
         final_solution = current_solutions[best_idx]
-        return {"generation": final_solution, "steps": chat_history, "num_steps_completed": self.cfg.total_steps}
+        return {"generation": final_solution, "steps": chat_history, "num_steps_completed": num_steps_completed}
 
 
 GENERATION_TASK_CLASS = MultiAgentGenerationTask
