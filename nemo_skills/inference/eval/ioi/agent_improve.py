@@ -287,13 +287,11 @@ class IOIExecutionGenerationTask(GenerationTask):
             # Append all per-step data in a single entry
             chat_history.append(step_log)
 
-            # Early exit if all subtasks passed fully
+            # Print success message if all test cases passed
             if all(all(o["score"] == 1 for o in v["outputs"]) for v in test_case_results.values()):
-                return {
-                    "generation": step_generation_wrapped,
-                    "steps": chat_history,
-                    "num_steps_completed": (step_idx + 1),
-                }
+                print(f"[Success] All test cases passed at step {step_idx + 1}.")
+
+            print(f"[IOIExecution] Position {async_pos} Completed {step_idx + 1} steps.")
 
         final_solution_code = current_solution
         completed_steps = int(self.cfg.execution_steps)
