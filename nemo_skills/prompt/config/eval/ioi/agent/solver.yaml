@@ -16,4 +16,4 @@ system: |-
   ```
 
 
-user: "{question}"
+user: "Maximum Score for this problem is {subtask_score}.\n{question}"

@@ -30,6 +30,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     improve_after_verify_prompt_config: str = "eval/ioi/agent/improve_with_private_test"
     total_steps: int = 60
     time_limit: str | None = None  # Optional wall-clock time limit in 'HH:MM:SS'
+    show_k_solutions: int = 0  # Number of previous solutions to include in improve prompt
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -37,6 +38,14 @@ cs.store(name="base_ioi_generation_config", node=IOIExecutionConfig)
 
 
 class IOIExecutionGenerationTask(GenerationTask):
+    # Shared formats for composing solution blocks
+    SOLUTION_BLOCK_TEMPLATE = (
+        "## Solution{title_suffix} ##\n{code}\n## Test Feedback ##\n{feedback}\n## Solution Score ## {score}"
+    )
+    PREVIOUS_PREAMBLE = (
+        "Here are some previous solutions that were submitted to help you design and improve the solution:"
+    )
+
     def __init__(self, cfg: IOIExecutionConfig):
         super().__init__(cfg)
         prompt_kwargs = {
@@ -54,6 +63,10 @@ class IOIExecutionGenerationTask(GenerationTask):
                 raise ValueError("time_limit must be in 'HH:MM:SS' format")
             h, m, s = map(int, parts)
             self._deadline_ts = time.time() + (h * 3600 + m * 60 + s)
+
+        # Keep a sliding window of evaluated solutions with their scores and feedback
+        # Each entry: {"solution": str, "score": float, "feedback": str} (order denotes recency)
+        self.saved_solutions: list[dict] = []
 
     def log_example_prompt(self, data):
         pass
@@ -77,10 +90,11 @@ class IOIExecutionGenerationTask(GenerationTask):
         # Attempt to resume from latest intermediate state
         async_pos = data_point[self.cfg.async_position_key]
         saved_state = self.load_latest_state(async_pos)
-        if saved_state and saved_state.get("_intermediate", False):
-            chat_history = saved_state.get("steps", [])
-            cur_generation_response = saved_state.get("generation")
-            num_steps_completed = int(saved_state.get("num_steps_completed", 0))
+        if saved_state and ("_intermediate" in saved_state) and saved_state["_intermediate"]:
+            chat_history = saved_state["steps"]
+            cur_generation_response = saved_state["generation"]
+            num_steps_completed = int(saved_state["num_steps_completed"])
+            self.saved_solutions = list(saved_state["saved_solutions"])
             print(f"[Resume] Restoring pos={async_pos} from step {num_steps_completed}")
         else:
             prompt_txt, solution_response, gen_time = await self._call_llm(data_point, all_data, "initial")
@@ -98,6 +112,7 @@ class IOIExecutionGenerationTask(GenerationTask):
                     "generation": cur_generation_response,
                     "steps": chat_history,
                     "num_steps_completed": num_steps_completed,
+                    "saved_solutions": self.saved_solutions,
                 },
             )
 
@@ -132,17 +147,41 @@ class IOIExecutionGenerationTask(GenerationTask):
                 for out in info["outputs"]:
                     if out["score"] != 1:
                         failure_lines.append(
-                            f"{subtask}:{out['test_name']} score={out['score']} msg={out.get('run_stderr', '').strip()}"
+                            f"{subtask}:{out['test_name']} score={out['score']} msg={out['run_stderr'].strip()}"
                         )
             failure_summary = "\n".join(failure_lines)
+
+            # Update saved solutions pool with current evaluated solution (score + feedback)
+            if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
+                subtask_key = data_point["subtask"]
+                cur_score = float(test_case_results[subtask_key]["score"])
+                cur_code_opt = extract_code_block(cur_generation_response)
+                if cur_code_opt is None:
+                    raise ValueError("Failed to extract code block from current generation response.")
+                cur_code = cur_code_opt
+                self._update_saved_solutions(cur_code, cur_score, failure_summary)
+
+            # Build the 'solution' payload for the next prompt
+            subtask_key = data_point["subtask"]
+            cur_score_for_block = float(test_case_results[subtask_key]["score"])
+            current_code_block = extract_code_block(cur_generation_response)
+            if current_code_block is None:
+                raise ValueError("Failed to extract code block from current generation response.")
+
+            if int(self.cfg.show_k_solutions) > 0:
+                prev_text = self._build_previous_solutions_text(self.cfg.show_k_solutions)
+                current_text = self._build_solution_block(current_code_block, failure_summary, cur_score_for_block)
+                solution_payload = prev_text + ("\n\n" if prev_text else "") + current_text
+            else:
+                # K == 0: include only current solution with its feedback and score
+                solution_payload = self._build_solution_block(current_code_block, failure_summary, cur_score_for_block)
 
             # Ask the LLM to improve the solution given the evaluator feedback.
             prompt_txt, improve_resp, gen_time = await self._call_llm(
                 data_point,
                 all_data,
                 "improve_after_verify_solution",
-                solution=extract_code_block(cur_generation_response),
-                test_case_results=failure_summary,
+                solution=solution_payload,
             )
 
             num_steps_completed += 1
@@ -160,6 +199,7 @@ class IOIExecutionGenerationTask(GenerationTask):
                     "generation": cur_generation_response,
                     "steps": chat_history,
                     "num_steps_completed": num_steps_completed,
+                    "saved_solutions": self.saved_solutions,
                 },
             )
             # Time limit check only inside the loop after checkpoint save
@@ -174,6 +214,82 @@ class IOIExecutionGenerationTask(GenerationTask):
             "steps": chat_history,
             "num_steps_completed": num_steps_completed,
         }
+
+    def _update_saved_solutions(self, solution: str, score: float, feedback: str) -> None:
+        """Add current solution to sliding window with score-aware eviction.
+
+        Keeps at most cfg.show_k_solutions previous solutions. Evicts lower-scored entries first;
+        on ties or if none are lower, evicts the oldest by insertion order.
+        """
+        k = int(self.cfg.show_k_solutions or 0)
+        if k <= 0:
+            return
+
+        entry = {"solution": solution, "score": float(score), "feedback": feedback}
+        self.saved_solutions.append(entry)
+
+        # Evict to maintain size k+1 (K previous + current)
+        while len(self.saved_solutions) > k + 1:
+            newest = self.saved_solutions[-1]
+            # Candidates strictly worse than newest
+            worse_indices = [i for i, e in enumerate(self.saved_solutions[:-1]) if e["score"] < newest["score"]]
+            if worse_indices:
+                # Among worse, pick with smallest score, then oldest by order
+                min_score = min(self.saved_solutions[i]["score"] for i in worse_indices)
+                candidates = [i for i in worse_indices if self.saved_solutions[i]["score"] == min_score]
+                idx = min(candidates)  # oldest among worst by index
+                del self.saved_solutions[idx]
+            else:
+                # No strictly worse; evict the oldest overall (index 0), not the newest
+                idx = 0
+                del self.saved_solutions[idx]
+
+    def _build_previous_solutions_text(self, k: int) -> str:
+        """Create a formatted text block listing up to k previous solutions.
+
+        Excludes the most recent solution (current) when possible so it can be
+        provided separately via the 'solution' field, avoiding duplication.
+        """
+        if not k or k <= 0:
+            return ""
+        if not self.saved_solutions:
+            return ""
+
+        # Exclude the latest/current solution from the listed previous ones
+        prev = self.saved_solutions[:-1]
+        if not prev:
+            return ""
+
+        # Take up to k most recent from prev, in reverse-chronological order
+        tail = prev[-k:]
+        tail = list(reversed(tail))
+
+        lines = [self.PREVIOUS_PREAMBLE]
+        for idx, e in enumerate(tail, start=1):
+            lines.append("")
+            # Use shared block template with numbered title suffix
+            lines.append(
+                self.SOLUTION_BLOCK_TEMPLATE.format(
+                    title_suffix=f" {idx}",
+                    code=e["solution"],
+                    feedback=e["feedback"],
+                    score=e["score"],
+                )
+            )
+
+        return "\n".join(lines)
+
+    def _build_solution_block(self, code: str, feedback: str, score: float, title_suffix: str = "") -> str:
+        """Return a single solution block using shared template.
+
+        title_suffix: e.g. " 1" to produce "## Solution 1 ##"; empty to produce "## Solution ##".
+        """
+        return self.SOLUTION_BLOCK_TEMPLATE.format(
+            title_suffix=title_suffix,
+            code=code,
+            feedback=feedback,
+            score=score,
+        )
 
 
 GENERATION_TASK_CLASS = IOIExecutionGenerationTask

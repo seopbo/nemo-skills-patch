@@ -63,6 +63,8 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     execution_max_output_characters: int = 1000
     # How many previous solutions to include in the question context (0 disables)
     n_prev_solutions: int = 0
+    # Number of retries when failing to extract a solution from the LLM output
+    n_retry_improve: int = 3
     time_limit: str | None = None  # Optional wall-clock time limit in 'HH:MM:SS'
 
 
@@ -193,15 +195,32 @@ class IOIExecutionGenerationTask(GenerationTask):
             question_for_solver = (
                 build_question_with_history(base_question, recent_prev) if recent_prev else base_question
             )
-            prompt_txt, solution_response, gen_time = await self._call_llm(
-                {**data_point, "question": question_for_solver}, all_data, "initial"
-            )
+
+            prompt_txt = None
+            solution_response = None
+            gen_time = None
+            current_solution = None
+            # Initial attempt + up to n_retry_improve retries
+            for attempt in range(0, int(self.cfg.n_retry_improve) + 1):
+                prompt_txt, solution_response, gen_time = await self._call_llm(
+                    {**data_point, "question": question_for_solver}, all_data, "initial"
+                )
+                extracted = extract_cpp_block(solution_response["generation"]) or None
+                if extracted:
+                    current_solution = extracted
+                    break
+                if attempt < int(self.cfg.n_retry_improve):
+                    print(
+                        f"failed to extract solution, retrying... attempt {attempt + 1} out of {int(self.cfg.n_retry_improve)}"
+                    )
+                else:
+                    raise ValueError("Initial solution extraction failed after retries")
+
+            # Log only the successful attempt
             chat_history.append(
                 {"prompt": prompt_txt, "response": solution_response["generation"], "generation_time": gen_time}
             )
-            current_solution = extract_cpp_block(solution_response["generation"])
-            if not current_solution:
-                raise ValueError("Initial solution extraction failed")
+
             prev_solutions.append(current_solution)
             if self.cfg.n_prev_solutions > 0:
                 prev_solutions = prev_solutions[-int(self.cfg.n_prev_solutions) :]
@@ -259,15 +278,25 @@ class IOIExecutionGenerationTask(GenerationTask):
             step_log["run_stderr"] = run_stderr
             step_log["compile_stderr"] = compile_stderr
 
-            filled_imp, out_imp, t_imp = await self._exec_improve(
-                question_for_step, current_solution, script, exec_output, all_data
-            )
-            step_log["improve_prompt"] = filled_imp
-            step_log["improve_response"] = out_imp["generation"]
-            step_log["improve_generation_time"] = t_imp
-            new_solution = extract_cpp_block(out_imp["generation"]) or ""
-            if not new_solution:
-                raise ValueError("Failed to extract improved C++ solution")
+            # Improve with retry on extraction failure
+            new_solution = None
+            for attempt in range(0, int(self.cfg.n_retry_improve) + 1):
+                filled_imp, out_imp, t_imp = await self._exec_improve(
+                    question_for_step, current_solution, script, exec_output, all_data
+                )
+                step_log["improve_prompt"] = filled_imp
+                step_log["improve_response"] = out_imp["generation"]
+                step_log["improve_generation_time"] = t_imp
+                extracted = extract_cpp_block(out_imp["generation"]) or None
+                if extracted:
+                    new_solution = extracted
+                    break
+                if attempt < int(self.cfg.n_retry_improve):
+                    print(
+                        f"failed to extract solution, retrying... attempt {attempt + 1} out of {int(self.cfg.n_retry_improve)}"
+                    )
+                else:
+                    raise ValueError("Failed to extract improved C++ solution after retries")
             current_solution = new_solution
             # Maintain rolling history of previous solutions
             prev_solutions.append(current_solution)

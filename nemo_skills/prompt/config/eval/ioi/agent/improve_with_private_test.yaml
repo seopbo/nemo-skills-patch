@@ -18,12 +18,10 @@ user: |-
   You must give your new improved solution at the end between ```cpp and ``` tags.
 
   # Question
+  Maximum Score for this problem is {subtask_score}.
   {question}
 
-  # Proposed Solution
+  # Proposed Solution(s) and Test Case Results
   {solution}
-
-  # Private Test Case Results
-  {test_case_results}
 
   # New Improved Solution
