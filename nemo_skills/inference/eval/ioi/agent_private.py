@@ -157,7 +157,9 @@ class IOIExecutionGenerationTask(GenerationTask):
                 cur_score = float(test_case_results[subtask_key]["score"])
                 cur_code_opt = extract_code_block(cur_generation_response)
                 if cur_code_opt is None:
-                    raise ValueError("Failed to extract code block from current generation response.")
+                    raise ValueError(
+                        f"Failed to extract code block from current generation response. {cur_generation_response}"
+                    )
                 cur_code = cur_code_opt
                 self._update_saved_solutions(cur_code, cur_score, failure_summary)
 
@@ -166,7 +168,9 @@ class IOIExecutionGenerationTask(GenerationTask):
             cur_score_for_block = float(test_case_results[subtask_key]["score"])
             current_code_block = extract_code_block(cur_generation_response)
             if current_code_block is None:
-                raise ValueError("Failed to extract code block from current generation response.")
+                raise ValueError(
+                    f"Failed to extract code block from current generation response. {cur_generation_response}"
+                )
 
             if int(self.cfg.show_k_solutions) > 0:
                 prev_text = self._build_previous_solutions_text(self.cfg.show_k_solutions)
