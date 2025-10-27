@@ -31,6 +31,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     total_steps: int = 60
     time_limit: str | None = None  # Optional wall-clock time limit in 'HH:MM:SS'
     show_k_solutions: int = 0  # Number of previous solutions to include in improve prompt
+    retry_solution: int = 5  # Retry count when code block extraction fails
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -83,6 +84,21 @@ class IOIExecutionGenerationTask(GenerationTask):
         gen_time = time.time() - start_t
         return filled_prompt, llm_out, gen_time
 
+    async def _call_llm_with_code_retry(self, data_point, all_data, prompt_key, async_pos: int, **extra_data):
+        """Call LLM and ensure a code block exists, retrying up to cfg.retry_solution times."""
+        attempts = int(self.cfg.retry_solution)
+        last = "```cpp\n # failed to create a solution```"
+        for attempt in range(1, attempts + 1):
+            filled_prompt, llm_out, gen_time = await self._call_llm(data_point, all_data, prompt_key, **extra_data)
+            last = (filled_prompt, llm_out, gen_time)
+            if extract_code_block(llm_out["generation"]) is not None:
+                return filled_prompt, llm_out, gen_time
+            if attempt < attempts:
+                print(f"Retry {attempt}/{attempts} at async position {async_pos}.")
+        print(f"Failed to create a solution after {attempts} attempts at async position {async_pos}.")
+        # Return last even if no block; caller may decide how to handle
+        return last
+
     async def process_single_datapoint(self, data_point, all_data, prompt=None):
         chat_history = []
         num_steps_completed = 0
@@ -97,7 +113,9 @@ class IOIExecutionGenerationTask(GenerationTask):
             self.saved_solutions = list(saved_state["saved_solutions"])
             print(f"[Resume] Restoring pos={async_pos} from step {num_steps_completed}")
         else:
-            prompt_txt, solution_response, gen_time = await self._call_llm(data_point, all_data, "initial")
+            prompt_txt, solution_response, gen_time = await self._call_llm_with_code_retry(
+                data_point, all_data, "initial", async_pos
+            )
             cur_generation_response = solution_response["generation"]
             chat_history.append(
                 {"prompt": prompt_txt, "response": cur_generation_response, "generation_time": gen_time}
@@ -156,10 +174,6 @@ class IOIExecutionGenerationTask(GenerationTask):
                 subtask_key = data_point["subtask"]
                 cur_score = float(test_case_results[subtask_key]["score"])
                 cur_code_opt = extract_code_block(cur_generation_response)
-                if cur_code_opt is None:
-                    raise ValueError(
-                        f"Failed to extract code block from current generation response. {cur_generation_response}"
-                    )
                 cur_code = cur_code_opt
                 self._update_saved_solutions(cur_code, cur_score, failure_summary)
 
@@ -167,10 +181,6 @@ class IOIExecutionGenerationTask(GenerationTask):
             subtask_key = data_point["subtask"]
             cur_score_for_block = float(test_case_results[subtask_key]["score"])
             current_code_block = extract_code_block(cur_generation_response)
-            if current_code_block is None:
-                raise ValueError(
-                    f"Failed to extract code block from current generation response. {cur_generation_response}"
-                )
 
             if int(self.cfg.show_k_solutions) > 0:
                 prev_text = self._build_previous_solutions_text(self.cfg.show_k_solutions)
@@ -181,10 +191,11 @@ class IOIExecutionGenerationTask(GenerationTask):
                 solution_payload = self._build_solution_block(current_code_block, failure_summary, cur_score_for_block)
 
             # Ask the LLM to improve the solution given the evaluator feedback.
-            prompt_txt, improve_resp, gen_time = await self._call_llm(
+            prompt_txt, improve_resp, gen_time = await self._call_llm_with_code_retry(
                 data_point,
                 all_data,
                 "improve_after_verify_solution",
+                async_pos=async_pos,
                 solution=solution_payload,
             )
 
