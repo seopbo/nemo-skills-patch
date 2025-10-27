@@ -16,4 +16,4 @@ system: |-
   ```
 
 
-user: "Maximum Score for this problem is {subtask_score}.\n{question}"
+user: "### Task Reminder ###\nYou must give your new improved solution at the end between ```cpp and ``` tags. No matter what, you must give a new improved solution even if you think it may have errors.\nMaximum Score for this problem is {subtask_score}.\n{question}"

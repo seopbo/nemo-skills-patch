@@ -15,7 +15,7 @@ system: |-
 user: |-
   ### Task Reminder ###
 
-  You must give your new improved solution at the end between ```cpp and ``` tags.
+  You must give your new improved solution at the end between ```cpp and ``` tags. No matter what, you must give a new improved solution even if you think it may have errors.
 
   # Question
   Maximum Score for this problem is {subtask_score}.
