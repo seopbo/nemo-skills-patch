@@ -34,6 +34,7 @@ class IOIEvaluatorConfig:
     overwrite: bool = False
     memory_limit_override: Optional[int] = None
     time_limit_override: Optional[int] = None
+    print_errors: bool = False
 
 
 _precompile_loop_tls = threading.local()
@@ -370,7 +371,7 @@ class IOIEvaluator(BaseEvaluator):
                     st["passed"] = False
 
                 # Debug prints similar to original implementation
-                if not result.get("compile_success", True):
+                if not result.get("compile_success", True) and self.eval_cfg.print_errors:
                     print(
                         f"Compile failed for problem '{entry['name']}', test '{test_name}':\n"
                         f"--- Solution ---\n{completion}\n"

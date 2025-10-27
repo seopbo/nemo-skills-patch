@@ -153,11 +153,11 @@ class IOIExecutionGenerationTask(GenerationTask):
         starting_solution_code: Optional[str] = None
         prev_solutions: List[str] = []
         if saved_state and saved_state.get("_intermediate", False):
-            chat_history = saved_state.get("steps", [])
-            cur_generation_response = saved_state.get("generation")
-            starting_solution_code = extract_cpp_block(cur_generation_response or "") or None
-            num_steps_completed = int(saved_state.get("num_steps_completed", 0))
-            prev_solutions = list(saved_state.get("prev_solutions", []))
+            chat_history = saved_state["steps"]
+            cur_generation_response = saved_state["generation"]
+            starting_solution_code = extract_cpp_block(cur_generation_response)
+            num_steps_completed = int(saved_state["num_steps_completed"])
+            prev_solutions = list(saved_state["prev_solutions"])
             print(f"[Resume] Restoring pos={async_pos} from step {num_steps_completed}")
         else:
             prompt_txt, solution_response, gen_time = await self._call_llm(data_point, all_data, "initial")
@@ -178,16 +178,15 @@ class IOIExecutionGenerationTask(GenerationTask):
                     "prev_solutions": prev_solutions,
                 },
             )
-            starting_solution_code = extract_cpp_block(cur_generation_response or "") or None
-            if starting_solution_code:
-                prev_solutions.append(starting_solution_code)
-                if self.cfg.n_prev_solutions > 0:
-                    prev_solutions = prev_solutions[-int(self.cfg.n_prev_solutions) :]
+            starting_solution_code = extract_cpp_block(cur_generation_response)
+            prev_solutions.append(starting_solution_code)
+            if self.cfg.n_prev_solutions > 0:
+                prev_solutions = prev_solutions[-int(self.cfg.n_prev_solutions) :]
 
         # Inline execution-improve loop with checkpointing and resume
         current_solution: Optional[str] = starting_solution_code
         if not current_solution:
-            base_question = data_point.get("question", "")
+            base_question = data_point["question"]
             recent_prev = (
                 prev_solutions[-int(self.cfg.n_prev_solutions) :] if int(self.cfg.n_prev_solutions) > 0 else []
             )
@@ -200,7 +199,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             chat_history.append(
                 {"prompt": prompt_txt, "response": solution_response["generation"], "generation_time": gen_time}
             )
-            current_solution = extract_cpp_block(solution_response["generation"]) or ""
+            current_solution = extract_cpp_block(solution_response["generation"])
             if not current_solution:
                 raise ValueError("Initial solution extraction failed")
             prev_solutions.append(current_solution)
