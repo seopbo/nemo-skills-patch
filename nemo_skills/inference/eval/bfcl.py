@@ -60,7 +60,6 @@ class BFCLGenerationConfig(GenerateSolutionsConfig):
     # Inference server configuration {server_params}
     server: dict = field(default_factory=dict)
 
-    remove_thinking: bool = True
     use_client_parsing: bool = True
     model_name: str | None = None
 
@@ -96,7 +95,7 @@ class ClientMessageParser:
         self._validate_and_setup_client_parsing()
 
     def _validate_and_setup_client_parsing(self):
-        # Importing here since bfcl_eval is not a main dependency of NeMo-Skills
+        # Importing here since bfcl_eval is not a main dependency of Nemo-Skills
         from bfcl_eval.constants.model_config import local_inference_model_map
 
         if self.cfg.model_name is None:
@@ -121,13 +120,46 @@ class ClientMessageParser:
         # Initialize the model handler - Temperature is not used but required by the model handler
         model_handler = model_handler_class(self.cfg.model_name, temperature=self.cfg.inference.temperature)
         # We only need the response parser from the model handler
-        self.response_parser = model_handler._parse_query_response_prompting
+        self.response_parser = self.create_response_parser(
+            native_response_parser=model_handler._parse_query_response_prompting
+        )
 
         # Initialize the prompt formatter
         # While BFCL model_handler also has the _format_prompt method, we found errors in it's implementation
         # So we use the tokenizer to format the prompt instead which uses the chat template directly
         tokenizer = AutoTokenizer.from_pretrained(model_handler.model_name_huggingface)
         self.message_formatter = partial(tokenizer.apply_chat_template, tokenize=False, add_generation_prompt=True)
+
+    def create_response_parser(self, native_response_parser):
+        """Create a response parser wrapper around the gorilla implementation that can remove bad tool calls."""
+
+        def wrapper_response_parser(response: dict):
+            parsed_response = native_response_parser(response)["model_responses_message_for_chat_history"]
+            if parsed_response.get("tool_calls", None) is not None:
+                # Remove tool calls which are not dictionaries
+                valid_tool_calls, invalid_tool_calls = [], []
+                for tool_call in parsed_response["tool_calls"]:
+                    if isinstance(tool_call, dict):
+                        valid_tool_calls.append(tool_call)
+                    else:
+                        invalid_tool_calls.append(tool_call)
+
+                if len(valid_tool_calls) == 0:
+                    LOG.warning(f"All tool calls are invalid. Response: {response}")
+                    # Remove tool calls from the parsed response since none are valid
+                    del parsed_response["tool_calls"]
+                else:
+                    if len(valid_tool_calls) != len(parsed_response["tool_calls"]):
+                        LOG.warning(
+                            f"Some tool calls are invalid.\n\n Invalid tool calls: {invalid_tool_calls}.\n\n Response: {response}"
+                        )
+
+                    # Update the tool calls in the parsed response
+                    parsed_response["tool_calls"] = valid_tool_calls
+
+            return parsed_response
+
+        return wrapper_response_parser
 
     def construct_input_dict(self, messages: list[dict], tools: list[dict]):
         try:
@@ -149,7 +181,7 @@ class ClientMessageParser:
 
     def parse_output_dict(self, output_dict: dict):
         """Parse the output dictionary to get the model response."""
-        parsed_response = self.response_parser(output_dict["response"])["model_responses_message_for_chat_history"]
+        parsed_response = self.response_parser(output_dict["response"])
 
         model_response = {
             "role": "assistant",
@@ -351,8 +383,9 @@ class BFCLGenerationTask(GenerationTask):
                 if self.cfg.count_prompt_tokens:
                     output_dict["num_input_tokens_list"].append(model_response.get("num_input_tokens", 0))
 
-                if self.cfg.remove_thinking:
-                    trimmed_response_text = self._remove_thinking_from_message_content(
+                if self.cfg.parse_reasoning:
+                    # TODO: replace with main parse_reasoning method
+                    trimmed_response_text = self._parse_reasoning_from_message_content(
                         self.message_parser.get_response_text(model_response["message"])
                     )
                     self.message_parser.set_response_text(model_response["message"], trimmed_response_text)
@@ -417,13 +450,13 @@ class BFCLGenerationTask(GenerationTask):
 
         return output_dict
 
-    def _remove_thinking_from_message_content(self, model_response_text: str | None):
+    def _parse_reasoning_from_message_content(self, model_response_text: str | None):
         """If specified, remove the thinking part of the model response text."""
         if model_response_text is None:
             return None
 
-        if self.cfg.thinking_end in model_response_text:
-            return model_response_text.split(self.cfg.thinking_end)[-1].lstrip("\n")
+        if self.cfg.end_reasoning_string in model_response_text:
+            return model_response_text.split(self.cfg.end_reasoning_string)[-1].lstrip("\n")
         else:
             # If the thinking didn't finish, we can keep it empty
             return ""

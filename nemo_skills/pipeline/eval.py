@@ -132,7 +132,6 @@ def eval(
     qos: str = typer.Option(None, help="Specify Slurm QoS, e.g. to request interactive nodes"),
     time_min: str = typer.Option(None, help="If specified, will use as a time-min slurm parameter"),
     mount_paths: str = typer.Option(None, help="Comma separated list of paths to mount on the remote machine"),
-    extra_eval_args: str = typer.Option("", help="Additional arguments for evaluation"),
     auto_summarize_results: bool = typer.Option(
         True, help="If True, will automatically launch summarize results tasks"
     ),
@@ -195,8 +194,8 @@ def eval(
         "nemo-skills",
         help="Name of the wandb project to sync samples to.",
     ),
-    skip_hf_home_check: bool = typer.Option(
-        False,
+    skip_hf_home_check: bool | None = typer.Option(
+        None,
         help="If True, skip checking that HF_HOME env var is defined in the cluster config.",
     ),
     installation_command: str | None = typer.Option(
@@ -318,7 +317,6 @@ def eval(
         with_sandbox,
         keep_mounts_for_sandbox,
         wandb_parameters,
-        extra_eval_args,
         eval_requires_judge=eval_requires_judge,
         generation_type=generation_type,
         generation_module=generation_module,
@@ -342,6 +340,7 @@ def eval(
                 job_server_config,
                 job_server_address,
                 job_server_command,
+                job_sandbox_env_overrides,
             ) = job_args
             prev_tasks = _task_dependencies
 
@@ -361,6 +360,7 @@ def eval(
                     with_sandbox=job_needs_sandbox or with_sandbox,
                     keep_mounts_for_sandbox=job_needs_sandbox_to_keep_mounts or keep_mounts_for_sandbox,
                     sandbox_port=None if get_random_port else 6000,
+                    sandbox_env_overrides=job_sandbox_env_overrides,
                     run_after=run_after,
                     reuse_code_exp=reuse_code_exp,
                     reuse_code=reuse_code,
@@ -423,6 +423,7 @@ def eval(
                 expname=f"{expname}-{benchmark}-judge",
                 log_dir=log_dir + "/judge",
                 cluster=cluster,
+                config_dir=config_dir,
                 partition=partition,
                 qos=qos,
                 time_min=time_min,
@@ -439,8 +440,11 @@ def eval(
                 ),
                 **judge_pipeline_args,
             )
-            benchmark_to_judge_tasks[benchmark] = judge_tasks
-            all_tasks.extend(judge_tasks)
+            # _generate can return None when there are no jobs to run (e.g., outputs already exist)
+            # Only record and extend when tasks are present to avoid NoneType errors
+            if judge_tasks:
+                benchmark_to_judge_tasks[benchmark] = judge_tasks
+                all_tasks.extend(judge_tasks)
 
         group_metric_files = defaultdict(list)
         group_tasks = defaultdict(list)

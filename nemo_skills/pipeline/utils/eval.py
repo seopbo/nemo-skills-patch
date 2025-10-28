@@ -15,15 +15,13 @@
 import importlib
 import logging
 import os
-import re
-import shlex
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Dict
 
 import nemo_skills.pipeline.utils as pipeline_utils
 from nemo_skills.dataset.utils import get_dataset_module, import_from_path
-from nemo_skills.evaluation.evaluator import supports_single_eval
 from nemo_skills.inference import GENERATION_MODULE_MAP
 from nemo_skills.inference.generate import GenerationTask
 from nemo_skills.utils import compute_chunk_ids, get_logger_name
@@ -31,65 +29,11 @@ from nemo_skills.utils import compute_chunk_ids, get_logger_name
 LOG = logging.getLogger(get_logger_name(__file__))
 
 
-def parse_eval_args(eval_args: str) -> tuple[str | None, dict]:
-    # TODO we ideally don't want to rely on custom parsing of the command, but
-    # some major refactoring or clever ideas might be needed
-    """Parse eval_args string to extract eval_type and eval_config.
-
-    Handles Hydra argument formats:
-    - ++eval_type=value (override)
-    - +eval_type=value (new)
-    - eval_type=value (config)
-    """
-    if not eval_args:
-        return None, {}
-
-    eval_type = None
-    eval_config = {}
-
-    # Parse eval_args to extract eval_type and eval_config
-    eval_arg_parts = shlex.split(eval_args)
-    for part in eval_arg_parts:
-        # Match eval_type with any Hydra prefix
-        eval_type_match = re.match(r"^(\+{0,2})eval_type=(.+)$", part)
-        if eval_type_match:
-            eval_type = eval_type_match.group(2)
-            continue
-
-        # Match eval_config with any Hydra prefix
-        eval_config_match = re.match(r"^(\+{0,2})eval_config\.(.+)$", part)
-        if eval_config_match:
-            config_part = eval_config_match.group(2)
-            if "=" in config_part:
-                key, value = config_part.split("=", 1)
-                # Handle nested keys like sandbox.timeout
-                if "." in key:
-                    main_key, sub_key = key.split(".", 1)
-                    if main_key not in eval_config:
-                        eval_config[main_key] = {}
-                    eval_config[main_key][sub_key] = value
-                else:
-                    eval_config[key] = value
-
-    return eval_type, eval_config
-
-
-def should_use_single_eval(eval_args: str) -> bool:
-    """Determine if evaluation should be done during generation (single) vs after (batch)."""
-    eval_type, eval_config = parse_eval_args(eval_args)
-
-    if not eval_type:
-        return False
-
-    return supports_single_eval(eval_type, eval_config)
-
-
 @dataclass
 class BenchmarkArgs:
     name: str
     input_file: str
     generation_args: str
-    eval_args: str
     judge_args: str
     judge_pipeline_args: dict
     requires_sandbox: bool
@@ -102,6 +46,8 @@ class BenchmarkArgs:
     score_module: str | None = None
     job_ids: list[int] = field(default_factory=list)
     remaining_jobs: list[dict] = field(default_factory=list)
+    # Per-benchmark sandbox environment overrides in KEY=VALUE form
+    sandbox_env_overrides: list[str] = field(default_factory=list)
 
     @property
     def requires_judge(self):
@@ -180,10 +126,19 @@ def get_benchmark_args_from_module(
     generation_args = get_arg_from_module_or_dict(benchmark_module, "GENERATION_ARGS", "", override_dict=override_dict)
     if prompt_config:
         generation_args = f"++prompt_config={prompt_config} {generation_args}"
+    # this is deprecated, should remove in the future
+    eval_args = get_arg_from_module_or_dict(benchmark_module, "EVAL_ARGS", "", override_dict=override_dict)
+    if eval_args:
+        generation_args = f"{eval_args} {generation_args}"
+    generation_args += f" ++eval_config.split={split} "
     requires_sandbox = get_arg_from_module_or_dict(benchmark_module, "REQUIRES_SANDBOX", False, override_dict)
     keep_mounts_for_sandbox = get_arg_from_module_or_dict(
         benchmark_module, "KEEP_MOUNTS_FOR_SANDBOX", False, override_dict
     )
+
+    # Collect any benchmark-specific environment variables
+    env_vars_from_module = getattr(benchmark_module, "SANDBOX_ENV_VARS", [])
+    sandbox_env_overrides = list(env_vars_from_module) if env_vars_from_module else []
 
     generation_module = get_arg_from_module_or_dict(
         benchmark_module, "GENERATION_MODULE", "nemo_skills.inference.generate", override_dict
@@ -193,7 +148,6 @@ def get_benchmark_args_from_module(
         get_arg_from_module_or_dict(benchmark_module, "JUDGE_PIPELINE_ARGS", {}, override_dict)
     )
     judge_args = get_arg_from_module_or_dict(benchmark_module, "JUDGE_ARGS", "", override_dict)
-    eval_args = get_arg_from_module_or_dict(benchmark_module, "EVAL_ARGS", override_dict=override_dict)
     num_samples = get_arg_from_module_or_dict(benchmark_module, "NUM_SAMPLES", 0, override_dict)
     num_chunks = get_arg_from_module_or_dict(benchmark_module, "NUM_CHUNKS", 0, override_dict)
     if num_chunks == 0:
@@ -211,17 +165,15 @@ def get_benchmark_args_from_module(
 
     # when running locally swe-bench launches apptainer inside docker and this required elevated privileges
     # TODO: is there a better way to handle this?
+    # TODO: handle properly without polluting environment for future calls
     if benchmark == "swe-bench" and cluster_config["executor"] == "local":
         LOG.info("Swe-bench requires extra docker privileges, setting NEMO_SKILLS_PRIVILEGED_DOCKER=1")
         os.environ["NEMO_SKILLS_PRIVILEGED_DOCKER"] = "1"
-
-    eval_args += f" ++split={split} "
 
     return BenchmarkArgs(
         name=benchmark,
         input_file=input_file,
         generation_args=generation_args,
-        eval_args=eval_args,
         judge_args=judge_args,
         judge_pipeline_args=judge_pipeline_args,
         requires_sandbox=requires_sandbox,
@@ -231,6 +183,7 @@ def get_benchmark_args_from_module(
         num_chunks=num_chunks,
         eval_subfolder=eval_subfolder,
         benchmark_group=benchmark_group,
+        sandbox_env_overrides=sandbox_env_overrides,
     )
 
 
@@ -267,7 +220,7 @@ def add_default_args(
                 override_dict=override_dict,
             )
             if data_dir:
-                benchmark_args.eval_args += f" ++data_dir={data_dir} "
+                benchmark_args.generation_args += f" ++eval_config.data_dir={data_dir} "
 
             # TODO: should it be optional?
             benchmark_args.score_module = benchmark_or_group_module.SCORE_MODULE
@@ -287,7 +240,7 @@ def add_default_args(
     )
 
     if data_dir:
-        benchmark_args.eval_args += f" ++data_dir={data_dir} "
+        benchmark_args.generation_args += f" ++eval_config.data_dir={data_dir} "
 
     return [benchmark_args]
 
@@ -311,7 +264,6 @@ def prepare_eval_commands(
     with_sandbox,
     keep_mounts_for_sandbox,
     wandb_parameters,
-    extra_eval_args,
     eval_requires_judge,
     generation_type=None,
     generation_module=None,
@@ -371,7 +323,11 @@ def prepare_eval_commands(
             if benchmark_args.requires_sandbox and not with_sandbox:
                 LOG.warning("Found benchmark (%s) which requires sandbox, enabled sandbox for it.", benchmark)
 
-            if benchmark_args.requires_sandbox and not keep_mounts_for_sandbox:
+            if (
+                benchmark_args.requires_sandbox
+                and benchmark_args.keep_mounts_for_sandbox
+                and not keep_mounts_for_sandbox
+            ):
                 LOG.warning("Found benchmark (%s) which requires sandbox to keep mounts, enabling it.", benchmark)
 
     total_evals = 0
@@ -446,8 +402,11 @@ def prepare_eval_commands(
                 job_benchmarks.add(benchmark)
 
                 effective_generation_module = generation_module or benchmark_args.generation_module
-                if effective_generation_module and os.sep in effective_generation_module:
-                    generation_task = import_from_path(effective_generation_module)
+                if effective_generation_module and (
+                    effective_generation_module.endswith(".py") or os.sep in effective_generation_module
+                ):
+                    path_suffix = ".py" if not effective_generation_module.endswith(".py") else ""
+                    generation_task = import_from_path(effective_generation_module + path_suffix)
                 else:
                     generation_task = importlib.import_module(effective_generation_module)
                 if not hasattr(generation_task, "GENERATION_TASK_CLASS"):
@@ -464,46 +423,18 @@ def prepare_eval_commands(
                         f"Class {generation_task} overrides get_server_command_fn, "
                         "which is not supported for evaluation when grouping jobs."
                     )
-                # Determine evaluation strategy
-                combined_eval_args = f"{benchmark_args.eval_args} {extra_eval_args}".strip()
 
-                if should_use_single_eval(combined_eval_args):
-                    # Add evaluation to generation arguments (single eval)
-                    eval_type, eval_config = parse_eval_args(combined_eval_args)
-                    eval_extra_args = f" ++eval_type={eval_type} "
-
-                    # Add eval_config parameters
-                    for key, value in eval_config.items():
-                        if isinstance(value, dict):
-                            for nested_key, nested_value in value.items():
-                                eval_extra_args += f" ++eval_config.{key}.{nested_key}={nested_value} "
-                        else:
-                            eval_extra_args += f" ++eval_config.{key}={value} "
-
-                    full_extra_arguments = (
-                        f"{generation_task.get_generation_default_args()} "
-                        f"{benchmark_args.generation_args} "
-                        f"{job_extra_arguments} "
-                        f"{eval_extra_args} "
-                    )
-
-                    # No separate eval command
-                    eval_args_for_cmd = None
-                else:
-                    # Use batch evaluation (separate command)
-                    full_extra_arguments = (
-                        f"{generation_task.get_generation_default_args()} "
-                        f"{benchmark_args.generation_args} "
-                        f"{job_extra_arguments} "
-                    )
-                    eval_args_for_cmd = combined_eval_args
+                full_extra_arguments = (
+                    f"{generation_task.get_generation_default_args()} "
+                    f"{benchmark_args.generation_args} "
+                    f"{job_extra_arguments} "
+                )
 
                 cmd = pipeline_utils.get_generation_cmd(
                     input_file=benchmark_args.input_file,
                     output_dir=benchmark_output_dir,
                     extra_arguments=full_extra_arguments,
                     random_seed=seed,
-                    eval_args=eval_args_for_cmd,
                     chunk_id=chunk_id,
                     num_chunks=benchmark_args.num_chunks,
                     script=generation_module or benchmark_args.generation_module,
@@ -517,6 +448,23 @@ def prepare_eval_commands(
                     job_needs_sandbox_to_keep_mounts = any(
                         benchmarks_dict[b].keep_mounts_for_sandbox for b in job_benchmarks
                     )
+                    # Aggregate per-job sandbox env overrides from participating benchmarks (first key wins)
+                    ordered_benchmarks = [b for b in benchmarks_dict.keys() if b in job_benchmarks]
+                    env_map: Dict[str, str] = {}
+                    env_source: Dict[str, str] = {}
+                    for b in ordered_benchmarks:
+                        for override in benchmarks_dict[b].sandbox_env_overrides:
+                            key, value = override.split("=", 1)
+                            if key in env_map and env_map[key] != value:
+                                raise ValueError(
+                                    f"Conflicting sandbox environment overrides for key '{key}': "
+                                    f"'{env_map[key]}' (from {env_source[key]}) vs '{value}' (from {b}). "
+                                    "Please submit the benchmarks as separate jobs or increase num_jobs so they do not share a job."
+                                )
+                            env_map[key] = value
+                            env_source[key] = b
+                    job_sandbox_env_overrides = [f"{k}={v}" for k, v in env_map.items()]
+
                     # TODO: move to a dataclass
                     job_batches.append(
                         (
@@ -528,6 +476,7 @@ def prepare_eval_commands(
                             job_server_address,
                             # a check above guarantees that this is the same for all tasks in a job
                             generation_task.get_server_command_fn(),
+                            job_sandbox_env_overrides,
                         )
                     )
                     job_server_config, job_server_address, job_extra_arguments = pipeline_utils.configure_client(
