@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
+import json
 
 import typer
 
@@ -62,14 +63,14 @@ class NemoGymRLTask:
     log_dir: str
     env_variables: dict
     backend: str
-    gym_config_path: str
+    gym_config_paths: str | list[str]
     repo_location: str
     profile_step_range: str
     extra_arguments: str = ""
 
     def format_train_args(self):
         cmd = (
-            # f"++policy.model_name={self.model} "
+            f"++policy.model_name={self.model} "
             f"++cluster.gpus_per_node={self.num_gpus} "
             f"++cluster.num_nodes={self.num_nodes} "
             f"++checkpointing.checkpoint_must_save_by={self.timeout} "
@@ -86,9 +87,9 @@ class NemoGymRLTask:
         return cmd
 
     def format_data_args(self):
-        cmd = f"+data.train_data_path={self.prompt_data} "
+        cmd = f"+data.train_jsonl_fpath={self.prompt_data} "
         if self.eval_data is not None:
-            cmd += f"+data.val_data_path={self.eval_data} "
+            cmd += f"+data.val_jsonl_fpath={self.eval_data} "
         return cmd
 
     def format_wandb_args(self):
@@ -111,6 +112,14 @@ class NemoGymRLTask:
             )
 
         return cmd
+    
+    def format_penguin_args(self):
+        if isinstance(self.gym_config_paths, str):
+            return f" --config={self.gym_config_paths} "
+        format_configs = json.dumps(self.gym_config_paths)
+        cmd = f" +env.penguin.config_paths={format_configs} "
+        return cmd
+
 
     def get_cmd(self):
         # self.logging_params = self.format_wandb_args()
@@ -162,8 +171,9 @@ class NemoGymRLTask:
             # f"export UV_PROJECT=/opt/NeMo-RL && "
             f"echo 'Running the start_grpo_gym script from nemo_skills' && "
             f"uv run --active python /nemo_run/code/nemo_skills/training/nemo_rl/start_grpo_gym.py "
-            f" --config={self.gym_config_path} "
+            # f" --config={self.gym_config_path} "
             f" {self.format_train_args()} "
+            f" {self.format_data_args()} "
             f" {self.format_wandb_args()} "
             f" {self.extra_arguments} "
         )
@@ -188,7 +198,7 @@ def get_training_cmd(
     env_variables,
     backend,
     profile_step_range,
-    gym_config_path,
+    gym_config_paths,
     repo_location
 ):
     timeout = get_timeout_str(cluster_config, partition)
@@ -210,7 +220,7 @@ def get_training_cmd(
         env_variables=env_variables,
         backend=backend,
         profile_step_range=profile_step_range,
-        gym_config_path=gym_config_path,
+        gym_config_paths=gym_config_paths,
         repo_location=repo_location,
     )
 
@@ -306,7 +316,7 @@ def grpo_nemo_gym_rl(
     ),
     mount_paths: str = typer.Option(None, help="Comma separated list of paths to mount on the remote machine"),
     check_mounted_paths: bool = typer.Option(False, help="Check if mounted paths are available on the remote machine"),
-    gym_config_path: Optional[str] = typer.Option(None, help="Config path for nemo gym to be created or already existing"),
+    gym_config_paths: Optional[str | list[str]] = typer.Option(None, help="Config paths for nemo gym to be created or already existing"),
     repo_location: Optional[str] = typer.Option(None, help="Repo location on the cluster for nemo-rl repo on branch bxyu/nemo-gym-integration-main"),
     skip_hf_home_check: bool = typer.Option(
         False,
@@ -383,7 +393,7 @@ def grpo_nemo_gym_rl(
         env_variables=env_variables,
         backend=backend,
         profile_step_range=profile_step_range,
-        gym_config_path=gym_config_path,
+        gym_config_paths=gym_config_paths,
         repo_location=repo_location,
     )
     LOG.info(f"The training command is {train_cmd}")

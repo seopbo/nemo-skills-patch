@@ -1,7 +1,6 @@
 from nemo_skills.pipeline.cli import wrap_arguments, grpo_nemo_gym_rl
 
 def run_gym_rl_grpo():
-    account_name = "llmservice_nemo_reasoning"
     partition = "interactive"
     cluster = "ord"
 
@@ -16,8 +15,11 @@ def run_gym_rl_grpo():
 
     run_n = 4
     expname = f"penguin_grpo_qwen3_4binstruct_comp_coding_test_{run_n}"
-    gym_config_path = "examples/penguin/grpo_comp_coding_qwen3_4binstruct.yaml"
-    model = "Qwen3-4B"
+    # gym_config_path = "examples/penguin/grpo_comp_coding_qwen3_4binstruct.yaml"
+    model = "Qwen/Qwen3-4B-Instruct-2507"
+
+    vllm_config_path = "responses_api_models/vllm_model/configs/vllm_model_for_training.yaml"
+    resource_server_config_path = "resources_servers/comp_coding/configs/comp_coding.yaml"
 
     num_prompts = 4
     num_steps = 3
@@ -38,7 +40,7 @@ def run_gym_rl_grpo():
         num_training_jobs=num_training_jobs,
         training_data=training_data,
         validation_data=validation_data,
-        gym_config_path=f"{repo_dir}/{gym_config_path}",
+        gym_config_paths=[vllm_config_path, resource_server_config_path],
         repo_location=repo_dir,
         backend="fsdp",
         disable_wandb=True,
