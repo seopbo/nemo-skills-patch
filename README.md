@@ -2,9 +2,9 @@
 
 ### Setup
 
-1. Add `gym-nemo-rl: /lustre/fsw/portfolios/coreai/users/terryk/enroot-images/gitlab-master.nvidia.com/terryk/images/nemo-rl:main-2aea5add.squashfs` to your cluster config .yaml file. This is the container used for nemo-rl with nemo-gym integration.
+1. Add `gym-nemo-rl: /lustre/fsw/portfolios/coreai/users/terryk/enroot-images/gitlab-master.nvidia.com/terryk/images/nemo-rl:main-2aea5add.squashfs` to your cluster config .yaml file on `dfw` or add `gym-nemo-rl: /lustre/fsw/portfolios/llmservice/users/eminasyan/containers/nemo-rl:main-2aea5add.squashfs` to your cluster config .yaml file on `ord`. This is the container used for nemo-rl with nemo-gym integration.
 
-2. Clone the NeMo-RL repo to your cluster, for now specifically to `/workspace/nemo-rl`:
+2. Clone the NeMo-RL repo to your cluster, in this case specifically to `/workspace/nemo-rl` (this is referenced in `./tests/test_nemo_gym_rl.py`, can be modified if needed):
 
 ```
 # cd to workspace as defined in your cluster config
@@ -13,7 +13,9 @@ cd nemo-rl
 git checkout bxyu/nemo-gym-integration-main
 ```
 
-3. Complete these instructions as well to have the repo setup properly (if there are issues with the setup, refer to the [doc](https://docs.google.com/document/d/1z0wLyl6lNpLhLCqd33EH04RdcIl4UTy08_ROEnNRnUA/edit?tab=t.b05geyn4qj77#heading=h.g6xyqy7cjg64)).
+3. Add the mount `- /lustre/fsw/portfolios/llmservice/users/eminasyan/nemo-rl:/opt/NeMo-RL` to the cluster config file (or wherever the nemo-rl repo is cloned on the cluster).
+
+4. [Possibly optional] Complete these instructions as well to have the repo setup properly (if there are issues with the setup, refer to the [doc](https://docs.google.com/document/d/1z0wLyl6lNpLhLCqd33EH04RdcIl4UTy08_ROEnNRnUA/edit?tab=t.b05geyn4qj77#heading=h.g6xyqy7cjg64)).
 
 ```
 # Fetch the NeMo Gym submodule, codenamed "Penguin" before release
@@ -30,29 +32,9 @@ source /opt/nemo_rl_venv/bin/activate
 uv sync --group={build,docs,dev,test} --extra penguin
 ```
 
-4. Call the root of your NeMo-RL with Gym integration repo as `REPO_LOCATION` (e.g. `/workspace/nemo-rl` or specify as an argument when running GRPO given below). To circumvent running `ng_prepare_data` (potential errors to handle), copy the contents of the directory `/lustre/fsw/portfolios/llmservice/users/eminasyan/nemo-rl/3rdparty/Penguin-workspace/Penguin/data/comp_coding` on the `dfw` cluster to `{REPO_LOCATION}/3rdparty/Penguin-workspace/Penguin/data/comp_coding`.
+5. To circumvent running `ng_prepare_data` (potential errors to handle), can copy the contents of the directory `/lustre/fsw/portfolios/llmservice/users/eminasyan/nemo-rl/3rdparty/Penguin-workspace/Penguin/data/comp_coding` from the `dfw` or `ord` clusters to `{REPO_LOCATION}/3rdparty/Penguin-workspace/Penguin/data/comp_coding` (if different data location, modify corresponding fields in `./tests/test_nemo_gym_rl.py`).
 
-With the steps done until here, the job runs into the `Unable to find lockfile at uv.lock` error when building nemo-gym (initializing Penguin [here](https://gitlab-master.nvidia.com/nexus-team/nemo-rl/-/blob/bxyu/nemo-gym-integration-main/examples/penguin/run_grpo_penguin.py#L175)).
-
-To fix the issue, complete the following temporary steps:
-
-5. Comment out lines 202-203 in `{REPO_LOCATION}/3rdpart/Penguin-workspace/Penguin/pyproject.toml`:
-```
-#[tool.distutils.egg_info]
-#egg_base = "cache"
-```
-
-6. Add `working_dir` as the `REPO_LOCATION` in `{REPO_LOCATION}/nemo_rl/distributed/virtual_cluster.py` in lines 100-102:
-```
-runtime_env = {
-        "env_vars": env_vars,  # Pass thru all user environment variables
-        "working_dir": os.getcwd(),
-    }
-```
-
-## Running GRPO from NeMo-RL via Gym from NeMo-Skills.
-
-There is a test/example of running GRPO in `./tests/test_nemo_gym_rl.py`, the new command is `grpo_nemo_gym_rl` in the file `nemo_skills/pipeline/nemo_rl/grpo_gym.py`.
+6. The test/example of running GRPO is located in `./tests/test_nemo_gym_rl.py`, the new command is `grpo_nemo_gym_rl` in the file `nemo_skills/pipeline/nemo_rl/grpo_gym.py`, should be able to run things by only modifying `./tests/test_nemo_gym_rl.py`.
 
 # NeMo Skills
 
