@@ -16,7 +16,6 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import List, Optional
-import json
 
 import typer
 
@@ -116,7 +115,7 @@ class NemoGymRLTask:
     def format_penguin_args(self):
         if isinstance(self.gym_config_paths, str):
             return f" --config={self.gym_config_paths} "
-        format_configs = json.dumps(self.gym_config_paths)
+        format_configs = repr(self.gym_config_paths)
         cmd = f" +env.penguin.config_paths={format_configs} "
         return cmd
 
