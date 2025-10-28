@@ -88,7 +88,7 @@ class NemoGymRLTask:
     def format_data_args(self):
         cmd = f"++data.train_jsonl_fpath={self.prompt_data} "
         if self.eval_data is not None:
-            cmd += f"++data.val_jsonl_fpath={self.eval_data} "
+            cmd += f"++data.validation_jsonl_fpath={self.eval_data} "
         return cmd
 
     def format_wandb_args(self):
