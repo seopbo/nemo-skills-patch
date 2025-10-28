@@ -115,7 +115,7 @@ class NemoGymRLTask:
     def format_penguin_args(self):
         if isinstance(self.gym_config_paths, str):
             return f" --config={self.gym_config_paths} "
-        format_configs = repr(self.gym_config_paths)
+        format_configs = ",".join(self.gym_config_paths)
         cmd = f" +env.penguin.config_paths={format_configs} "
         return cmd
 
