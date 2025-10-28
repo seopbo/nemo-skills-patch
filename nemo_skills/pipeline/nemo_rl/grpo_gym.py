@@ -172,6 +172,7 @@ class NemoGymRLTask:
             f"echo 'Running the start_grpo_gym script from nemo_skills' && "
             f"uv run --active python /nemo_run/code/nemo_skills/training/nemo_rl/start_grpo_gym.py "
             # f" --config={self.gym_config_path} "
+            f" {self.format_penguin_args()} "
             f" {self.format_train_args()} "
             f" {self.format_data_args()} "
             f" {self.format_wandb_args()} "
