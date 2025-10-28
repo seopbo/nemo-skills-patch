@@ -32,7 +32,7 @@ def run_gym_rl_grpo():
         ),
         cluster=cluster,
         expname=expname,
-        hf_model=f"/hf_models/{model}",
+        hf_model=f"{model}",
         output_dir=f"{repo_dir}/results/{expname}",
         partition=partition,
         num_nodes=num_nodes,
