@@ -86,9 +86,9 @@ class NemoGymRLTask:
         return cmd
 
     def format_data_args(self):
-        cmd = f"+data.train_jsonl_fpath={self.prompt_data} "
+        cmd = f"++data.train_jsonl_fpath={self.prompt_data} "
         if self.eval_data is not None:
-            cmd += f"+data.val_jsonl_fpath={self.eval_data} "
+            cmd += f"++data.val_jsonl_fpath={self.eval_data} "
         return cmd
 
     def format_wandb_args(self):
@@ -116,7 +116,7 @@ class NemoGymRLTask:
         if isinstance(self.gym_config_paths, str):
             return f" --config={self.gym_config_paths} "
         format_configs = ",".join(self.gym_config_paths)
-        cmd = f" +env.penguin.config_paths={format_configs} "
+        cmd = f"++env.penguin.config_paths={format_configs} "
         return cmd
 
 
