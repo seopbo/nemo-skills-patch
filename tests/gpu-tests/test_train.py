@@ -228,6 +228,8 @@ def test_gym_nemo_rl(backend):
         training_data="/nemo_run/code/tests/data/small-gym-data.test",
         backend=backend,
         disable_wandb=True,
+        gym_config_paths=["responses_api_models/openai_model/configs/openai_model.yaml",
+                          "resources_servers/library_judge_math/configs/bytedtsinghua_dapo17k.yaml"],
     )
 
     # checking that the final model can be used for evaluation

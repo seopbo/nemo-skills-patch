@@ -15,7 +15,7 @@ git checkout bxyu/nemo-gym-integration-main
 
 3. Add the mount `- /lustre/fsw/portfolios/llmservice/users/eminasyan/nemo-rl:/opt/NeMo-RL` to the cluster config file (or wherever the nemo-rl repo is cloned on the cluster).
 
-4. [Possibly optional] Complete these instructions as well to have the repo setup properly (if there are issues with the setup, refer to the [doc](https://docs.google.com/document/d/1z0wLyl6lNpLhLCqd33EH04RdcIl4UTy08_ROEnNRnUA/edit?tab=t.b05geyn4qj77#heading=h.g6xyqy7cjg64)).
+4. Complete these instructions as well to have the repo setup properly (if there are issues with the setup, refer to the [doc](https://docs.google.com/document/d/1z0wLyl6lNpLhLCqd33EH04RdcIl4UTy08_ROEnNRnUA/edit?tab=t.b05geyn4qj77#heading=h.g6xyqy7cjg64)).
 
 ```
 # Fetch the NeMo Gym submodule, codenamed "Penguin" before release
@@ -23,13 +23,7 @@ git checkout bxyu/nemo-gym-integration-main
 git pull && git submodule update --init --recursive
 
 # Add your creds to the Git submodule to you don't need to do so on every pull
-cd 3rdparty/Penguin-workspace/Penguin
-git remote set-url origin https://{your NV Github username}:{your NV Github PAT}@github.com/NVIDIA-NeMo/Gym.git
-cd ../../..
-
-# Initial setup
-source /opt/nemo_rl_venv/bin/activate
-uv sync --group={build,docs,dev,test} --extra penguin
+git clone https://{your NV Github username}:{your NV Github PAT}@github.com/NVIDIA-NeMo/Gym.git 3rdparty/Penguin-workspace/Penguin
 ```
 
 5. To circumvent running `ng_prepare_data` (potential errors to handle), can copy the contents of the directory `/lustre/fsw/portfolios/llmservice/users/eminasyan/nemo-rl/3rdparty/Penguin-workspace/Penguin/data/comp_coding` from the `dfw` or `ord` clusters to `{REPO_LOCATION}/3rdparty/Penguin-workspace/Penguin/data/comp_coding` (if different data location, modify corresponding fields in `./tests/test_nemo_gym_rl.py`).

@@ -63,7 +63,6 @@ class NemoGymRLTask:
     env_variables: dict
     backend: str
     gym_config_paths: str | list[str]
-    repo_location: str
     profile_step_range: str
     extra_arguments: str = ""
 
@@ -111,7 +110,7 @@ class NemoGymRLTask:
             )
 
         return cmd
-    
+
     def format_penguin_args(self):
         if isinstance(self.gym_config_paths, str):
             return f" --config={self.gym_config_paths} "
@@ -146,7 +145,6 @@ class NemoGymRLTask:
         #     f"  {self.extra_arguments} "
         # )
         # cmd = (
-        #     f"cd {self.repo_location} && "
         #     "cd 3rdparty/Penguin-workspace/Penguin && "
         #     "uv venv --python 3.12 --allow-existing && "
         #     "source .venv/bin/activate && "
@@ -162,7 +160,7 @@ class NemoGymRLTask:
         #     f" {self.extra_arguments} "
         # )
         cmd = (
-            f"cd {self.repo_location} && "
+            f"cd /opt/NeMo-RL/3rdparty/Penguin-workspace/Penguin && "
             f"source /opt/nemo_rl_venv/bin/activate && "
             "uv sync --group={build,docs,dev,test} --extra penguin && "
             f"HF_HUB_OFFLINE=1 && "
@@ -200,7 +198,6 @@ def get_training_cmd(
     backend,
     profile_step_range,
     gym_config_paths,
-    repo_location
 ):
     timeout = get_timeout_str(cluster_config, partition)
 
@@ -222,7 +219,6 @@ def get_training_cmd(
         backend=backend,
         profile_step_range=profile_step_range,
         gym_config_paths=gym_config_paths,
-        repo_location=repo_location,
     )
 
     return task.get_cmd()
@@ -318,7 +314,6 @@ def grpo_nemo_gym_rl(
     mount_paths: str = typer.Option(None, help="Comma separated list of paths to mount on the remote machine"),
     check_mounted_paths: bool = typer.Option(False, help="Check if mounted paths are available on the remote machine"),
     gym_config_paths: Optional[str | list[str]] = typer.Option(None, help="Config paths for nemo gym to be created or already existing"),
-    repo_location: Optional[str] = typer.Option(None, help="Repo location on the cluster for nemo-rl repo on branch bxyu/nemo-gym-integration-main"),
     skip_hf_home_check: bool = typer.Option(
         False,
         help="If True, skip checking that HF_HOME env var is defined in the cluster config.",
@@ -346,7 +341,7 @@ def grpo_nemo_gym_rl(
 
     cluster_config = get_cluster_config(cluster, config_dir)
     cluster_config = resolve_mount_paths(cluster_config, mount_paths)
-    
+
     if log_dir is None:
         log_dir = output_dir
 
@@ -358,8 +353,7 @@ def grpo_nemo_gym_rl(
     )
     if hf_model.startswith("/"):  # could ask to download from HF
         check_if_mounted(cluster_config, hf_model)
-    
-    check_if_mounted(cluster_config, repo_location)
+
     env_variables = get_env_variables(cluster_config)
     if backend == "megatron":
         if "HF_HOME" not in env_variables:
@@ -395,7 +389,6 @@ def grpo_nemo_gym_rl(
         backend=backend,
         profile_step_range=profile_step_range,
         gym_config_paths=gym_config_paths,
-        repo_location=repo_location,
     )
     LOG.info(f"The training command is {train_cmd}")
     LOG.info(f"The environment variables are {env_variables}")
