@@ -193,7 +193,7 @@ The validation set you pass in will directly be used for validation with no addi
     pprint.pprint(config)
 
     init_ray_workingdir()
-    print("Ray initialized.")
+
     (
         policy,
         policy_generation,
@@ -206,18 +206,12 @@ The validation set you pass in will directly be used for validation with no addi
         grpo_state,
         master_config,
     ) = setup(config, tokenizer, train_dataset, val_dataset)
-    print("Done setup.")
-    print("\n▶ Printing all info passed to creating Penguin config...")
-    print(f"  model_name: {policy_generation.cfg['model_name']}")
-    print(f"  base_urls: {policy_generation.dp_openai_server_base_urls}")
-    print(f"  initial_global_config_dict: {config['env']['penguin']}")
+
     penguin_config = PenguinConfig(
         model_name=policy_generation.cfg["model_name"],
         base_urls=policy_generation.dp_openai_server_base_urls,
         initial_global_config_dict=config["env"]["penguin"],
     )
-    print(penguin_config)
-    print("Creating Penguin environment actor...")
     penguin = Penguin.options(
         runtime_env={
             "py_executable": get_actor_python_env(
@@ -225,13 +219,11 @@ The validation set you pass in will directly be used for validation with no addi
             ),
         }
     ).remote(penguin_config)
-    print("Penguin environment actor created.")
     # Blocking wait for penguin to spin up
     ray.get(penguin.health_check.remote())
-    print("Penguin environment actor is healthy.")
     task_to_env = {"penguin": penguin}
     val_task_to_env = task_to_env
-    print("\n▶ Starting GRPO training... ***************************************")
+
     grpo_train(
         policy,
         policy_generation,

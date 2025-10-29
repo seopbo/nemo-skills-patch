@@ -76,11 +76,11 @@ class NemoGymRLTask:
             f"++checkpointing.checkpoint_dir={self.output_dir}/checkpoints "
             f"++policy.dtensor_cfg.clear_cache_every_n_steps=1 "
         )
-        # if self.backend == "megatron":
-        #     cmd += " ++policy.dtensor_cfg.enabled=false ++policy.megatron_cfg.enabled=true "
-        #     cmd += " ++policy.optimizer=None ++policy.dynamic_batching.enabled=false "
-        # else:
-        #     cmd += " ++policy.dtensor_cfg.enabled=true ++policy.megatron_cfg.enabled=false "
+        if self.backend == "megatron":
+            cmd += " ++policy.dtensor_cfg.enabled=false ++policy.megatron_cfg.enabled=true "
+            cmd += " ++policy.optimizer=None ++policy.dynamic_batching.enabled=false "
+        else:
+            cmd += " ++policy.dtensor_cfg.enabled=true ++policy.megatron_cfg.enabled=false "
 
         return cmd
 
@@ -121,44 +121,7 @@ class NemoGymRLTask:
 
 
     def get_cmd(self):
-        # self.logging_params = self.format_wandb_args()
-        # nsight_cmd = get_nsight_cmd(self.profile_step_range)
-        # cmd = (
-        #     f"export PYTHONPATH=$PYTHONPATH:/nemo_run/code:/opt/NeMo-RL && "
-        #     f"export UV_PROJECT=/opt/NeMo-RL && "
-        #     f"{nsight_cmd}"
-        #     f"echo 'Starting training' && "
-        #     f"uv run --active python /nemo_run/code/nemo_skills/training/nemo_rl/start_grpo.py "
-        #     f"  {self.format_train_args()} "
-        #     f"  {self.format_data_args()} "
-        #     f"  {self.logging_params} "
-        #     f"  {self.extra_arguments} "
-        # )
-        # cmd = (
-        #     f"pkill -f VllmAsyncGenerationWorker && "
-        #     f"uv run ray stop --force && "
-        #     f'uv run python -c "import ray; ray.shutdown()" && '
-        #     f"uv run python examples/penguin/run_grpo_penguin.py "
-        #     f"--config={self.gym_config_path} "
-        #     f"  {self.format_wandb_args()} "
-        #     f"  {self.format_train_args()} "
-        #     f"  {self.extra_arguments} "
-        # )
-        # cmd = (
-        #     "cd 3rdparty/Penguin-workspace/Penguin && "
-        #     "uv venv --python 3.12 --allow-existing && "
-        #     "source .venv/bin/activate && "
-        #     "uv lock && uv sync --active --extra dev && "
-        #     "cd ../../.. && source /opt/nemo_rl_venv/bin/activate && "
-        #     "uv sync --group={build,docs,dev,test} --extra penguin && "
-        #     f"HF_HUB_OFFLINE=1 && "
-        #     f"NRL_FORCE_REBUILD_VENVS=true && "
-        #     f"uv run python examples/penguin/run_grpo_penguin.py "
-        #     f" --config={self.gym_config_path} "
-        #     f" {self.format_train_args()} "
-        #     f" {self.format_wandb_args()} "
-        #     f" {self.extra_arguments} "
-        # )
+        nsight_cmd = get_nsight_cmd(self.profile_step_range)
         cmd = (
             f"cd /opt/NeMo-RL && "
             f"source /opt/nemo_rl_venv/bin/activate && "
@@ -166,10 +129,9 @@ class NemoGymRLTask:
             f"HF_HUB_OFFLINE=1 && "
             f"NRL_FORCE_REBUILD_VENVS=true && "
             f"export PYTHONPATH=$PYTHONPATH:/nemo_run/code:/opt/NeMo-RL && "
-            # f"export UV_PROJECT=/opt/NeMo-RL && "
+            f"{nsight_cmd}"
             f"echo 'Running the start_grpo_gym script from nemo_skills' && "
             f"uv run --active python /nemo_run/code/nemo_skills/training/nemo_rl/start_grpo_gym.py "
-            # f" --config={self.gym_config_path} "
             f" {self.format_penguin_args()} "
             f" {self.format_train_args()} "
             f" {self.format_data_args()} "
@@ -423,32 +385,32 @@ def grpo_nemo_gym_rl(
                     skip_hf_home_check=skip_hf_home_check,
                 )
 
-        # prev_task = add_task(
-        #     exp,
-        #     cmd=get_checkpoint_convert_cmd(
-        #         output_dir=output_dir,
-        #         final_hf_path=final_hf_path or f"{output_dir}/final_hf_model",
-        #         step=conversion_step,
-        #         backend=backend,
-        #     ),
-        #     task_name=f"{expname}-convert-final-ckpt",
-        #     log_dir=f"{log_dir}/convert-final-ckpt",
-        #     container=cluster_config["containers"]["nemo-rl"],
-        #     cluster_config=cluster_config,
-        #     partition=partition,
-        #     qos=qos,
-        #     time_min=time_min,
-        #     num_nodes=1,
-        #     num_tasks=1,
-        #     num_gpus=num_gpus,
-        #     run_after=run_after,
-        #     reuse_code=reuse_code,
-        #     reuse_code_exp=reuse_code_exp,
-        #     task_dependencies=[prev_task] if prev_task is not None else None,
-        #     slurm_kwargs={"exclusive": exclusive} if exclusive else None,
-        #     installation_command=installation_command,
-        #     skip_hf_home_check=skip_hf_home_check,
-        # )
+        prev_task = add_task(
+            exp,
+            cmd=get_checkpoint_convert_cmd(
+                output_dir=output_dir,
+                final_hf_path=final_hf_path or f"{output_dir}/final_hf_model",
+                step=conversion_step,
+                backend=backend,
+            ),
+            task_name=f"{expname}-convert-final-ckpt",
+            log_dir=f"{log_dir}/convert-final-ckpt",
+            container=cluster_config["containers"]["nemo-rl"],
+            cluster_config=cluster_config,
+            partition=partition,
+            qos=qos,
+            time_min=time_min,
+            num_nodes=1,
+            num_tasks=1,
+            num_gpus=num_gpus,
+            run_after=run_after,
+            reuse_code=reuse_code,
+            reuse_code_exp=reuse_code_exp,
+            task_dependencies=[prev_task] if prev_task is not None else None,
+            slurm_kwargs={"exclusive": exclusive} if exclusive else None,
+            installation_command=installation_command,
+            skip_hf_home_check=skip_hf_home_check,
+        )
 
         # explicitly setting sequential to False since we set dependencies directly
         run_exp(exp, cluster_config, sequential=False, dry_run=dry_run)
