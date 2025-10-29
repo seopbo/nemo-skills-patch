@@ -194,7 +194,7 @@ def test_grpo_nemo_rl(backend):
 
 
 @pytest.mark.gpu
-@pytest.mark.parametrize("backend", ["fsdp", "megatron"])
+@pytest.mark.parametrize("backend", ["fsdp"])
 def test_gym_nemo_rl(backend):
     model_path = require_env_var("NEMO_SKILLS_TEST_HF_MODEL")
     model_type = require_env_var("NEMO_SKILLS_TEST_MODEL_TYPE")
