@@ -208,9 +208,10 @@ def test_gym_nemo_rl(backend):
     grpo_nemo_gym_rl(
         ctx=wrap_arguments(
             # "++data.prompt.prompt_config=qwen/math-cot "
+            "++grpo.val_at_start=false "
             "++grpo.max_num_steps=5 "
             "++grpo.num_prompts_per_step=2 "
-            "++policy.max_total_sequence_length=256 "
+            "++policy.max_total_sequence_length=1024 "
             "++policy.dtensor_cfg.tensor_parallel_size=1 "
             "++checkpointing.save_period=2 "
             "++policy.train_global_batch_size=2 "
@@ -226,6 +227,7 @@ def test_gym_nemo_rl(backend):
         num_gpus=1,
         num_training_jobs=1,
         training_data="/nemo_run/code/tests/data/small-gym-data.test",
+        validation_data="/nemo_run/code/tests/data/small-gym-data.test",
         backend=backend,
         disable_wandb=True,
         gym_config_paths=["responses_api_models/vllm_model/configs/vllm_model_for_training.yaml",
