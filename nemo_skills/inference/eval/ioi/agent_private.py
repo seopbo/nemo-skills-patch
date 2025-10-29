@@ -127,7 +127,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             await self.save_intermediate_state(
                 async_pos,
                 {
-                    **data_point,
+                    "id": data_point["id"],
                     "generation": cur_generation_response,
                     "steps": chat_history,
                     "num_steps_completed": num_steps_completed,
@@ -212,7 +212,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             await self.save_intermediate_state(
                 async_pos,
                 {
-                    **data_point,
+                    "id": data_point["id"],
                     "generation": cur_generation_response,
                     "steps": chat_history,
                     "num_steps_completed": num_steps_completed,
@@ -227,7 +227,7 @@ class IOIExecutionGenerationTask(GenerationTask):
         # Reached maximum steps without passing all tests.
         print("[Failure] Reached max improvement steps without passing all tests.")
         return {
-            **data_point,
+            "id": data_point["id"],
             "generation": cur_generation_response,
             "steps": chat_history,
             "num_steps_completed": num_steps_completed,
