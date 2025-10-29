@@ -256,7 +256,6 @@ class BaseModel:
             "tools": tools,
             "extra_body": extra_body,
         }
-        print("ARGUMENTS, kwargs: ", kwargs)
 
         # TODO: remove this after we no longer use gpt-oss or it's fixed in vllm
         max_retries = 2
