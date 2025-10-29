@@ -275,7 +275,7 @@ def grpo_nemo_gym_rl(
     ),
     mount_paths: str = typer.Option(None, help="Comma separated list of paths to mount on the remote machine"),
     check_mounted_paths: bool = typer.Option(False, help="Check if mounted paths are available on the remote machine"),
-    gym_config_paths: Optional[str | list[str]] = typer.Option(None, help="Config paths for nemo gym to be created or already existing"),
+    gym_config_paths: list[str] = typer.Option(None, help="Config paths for nemo gym to be created or already existing"),
     skip_hf_home_check: bool = typer.Option(
         False,
         help="If True, skip checking that HF_HOME env var is defined in the cluster config.",
