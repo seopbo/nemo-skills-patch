@@ -551,11 +551,39 @@ class GenerationTask:
         # Override this method to customize the prefilling behavior.
         return None
 
-    async def save_intermediate_state(self, async_position: int, state: dict) -> None:
-        """Persist a minimal, resumable snapshot for a position into the -async file.
+    # --- Simple intermediate state file helpers (JSON object, not JSONL) ---
+    def _intermediate_path(self) -> str:
+        return self.cfg.output_file + "-intermediate.json"
 
-        The snapshot is flagged with _intermediate: true so it can be ignored by the
-        final restore step and by skip logic unless a final record is written later.
+    def _load_intermediate_map(self) -> dict:
+        try:
+            with open(self._intermediate_path(), "rt", encoding="utf-8") as fin:
+                data = json.load(fin)
+                if isinstance(data, dict):
+                    # Coerce keys to int for simpler lookups
+                    try:
+                        return {int(k): v for k, v in data.items()}
+                    except Exception:
+                        return data
+        except FileNotFoundError:
+            pass
+        except json.JSONDecodeError:
+            pass
+        return {}
+
+    def _write_intermediate_map(self, state_map: dict) -> None:
+        with open(self._intermediate_path(), "wt", encoding="utf-8") as fout:
+            json.dump(state_map, fout)
+
+    def _remove_intermediate_entry_internal(self, async_position: int) -> None:
+        state_map = self._load_intermediate_map()
+        state_map.pop(str(int(async_position)), None)
+        self._write_intermediate_map(state_map)
+
+    async def save_intermediate_state(self, async_position: int, state: dict) -> None:
+        """Persist a minimal, resumable snapshot into a single JSON object file.
+
+        Uses `<output_file>-intermediate.json` as a dict mapping async_position -> state.
         """
         # Ensure we have a lock even if called outside async_loop for some reason
         if self.output_lock is None:
@@ -568,18 +596,14 @@ class GenerationTask:
         }
 
         async with self.output_lock:
-            with open(self.cfg.output_file + "-async", "at", encoding="utf-8", buffering=1) as fout:
-                fout.write(json.dumps(payload) + "\n")
+            state_map = self._load_intermediate_map()
+            state_map[int(async_position)] = payload
+            self._write_intermediate_map(state_map)
 
     def load_latest_state(self, async_position: int) -> dict | None:
-        """Load the latest (final or intermediate) snapshot for a position from the -async file."""
-        latest = None
-        with open(self.cfg.output_file + "-async", "rt", encoding="utf-8") as fin:
-            for line in fin:
-                record = json.loads(line)
-                if record[self.cfg.async_position_key] == async_position:
-                    latest = record
-        return latest
+        """Load the latest snapshot for a position from the intermediate JSON map."""
+        state_map = self._load_intermediate_map()
+        return state_map.get(int(async_position))
 
     async def process_single_datapoint(
         self, data_point, all_data, prompt=None, generation_params_override: dict | None = None
@@ -655,6 +679,11 @@ class GenerationTask:
         # Thread-safe output writing
         async with self.output_lock:
             self.dump_outputs([output], [data_point], fout)
+            # Clear intermediate state for this position now that final output was saved
+            try:
+                self._remove_intermediate_entry_internal(data_point[self.cfg.async_position_key])
+            except Exception:
+                pass
             pbar.update(1)
 
     async def async_loop(self, data):
@@ -725,6 +754,11 @@ class GenerationTask:
                         fout.write(json.dumps(gen_dict) + "\n")
 
         Path(self.cfg.output_file + "-async").unlink()
+        # Clean up intermediate map file if present
+        try:
+            Path(self._intermediate_path()).unlink()
+        except FileNotFoundError:
+            pass
         self.cleanup_litellm_cache()
 
     def wait_for_server(self):
@@ -772,7 +806,11 @@ class GenerationTask:
             return
 
         if not self.cfg.skip_filled:
-            for output_path in [Path(self.cfg.output_file), Path(self.cfg.output_file + "-async")]:
+            for output_path in [
+                Path(self.cfg.output_file),
+                Path(self.cfg.output_file + "-async"),
+                Path(self.cfg.output_file + "-intermediate.json"),
+            ]:
                 if output_path.exists():
                     output_path.unlink()
 
