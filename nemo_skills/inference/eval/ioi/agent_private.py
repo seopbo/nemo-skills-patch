@@ -118,7 +118,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             )
             cur_generation_response = solution_response["generation"]
             chat_history.append(
-                {"prompt": prompt_txt, "response": cur_generation_response, "generation_time": gen_time}
+                {"num_generated_tokens": solution_response["num_generated_tokens"], "generation_time": gen_time}
             )
 
             print("[Initial] Generated initial solution.")
@@ -127,6 +127,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             await self.save_intermediate_state(
                 async_pos,
                 {
+                    **data_point,
                     "generation": cur_generation_response,
                     "steps": chat_history,
                     "num_steps_completed": num_steps_completed,
@@ -211,6 +212,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             await self.save_intermediate_state(
                 async_pos,
                 {
+                    **data_point,
                     "generation": cur_generation_response,
                     "steps": chat_history,
                     "num_steps_completed": num_steps_completed,
@@ -225,6 +227,7 @@ class IOIExecutionGenerationTask(GenerationTask):
         # Reached maximum steps without passing all tests.
         print("[Failure] Reached max improvement steps without passing all tests.")
         return {
+            **data_point,
             "generation": cur_generation_response,
             "steps": chat_history,
             "num_steps_completed": num_steps_completed,
