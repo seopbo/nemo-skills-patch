@@ -128,7 +128,7 @@ def main():
         model_name_or_path=model_name_or_path,
         tokenizer_name_or_path=tokenizer_name_or_path,
         overwrite=True,
-        hf_overrides=hf_overrides,
+        # hf_overrides=hf_overrides,
     )
     print(f"Saved HF checkpoint to: {hf_ckpt}")
 
