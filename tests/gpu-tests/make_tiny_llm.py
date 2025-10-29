@@ -29,7 +29,7 @@ if args.model_type == "qwen":
         hidden_size=64,
         intermediate_size=64,
         head_dim=32,
-        max_position_embeddings=256,
+        max_position_embeddings=8192,
         num_attention_heads=2,
         num_hidden_layers=2,
     )
