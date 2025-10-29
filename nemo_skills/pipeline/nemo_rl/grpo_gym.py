@@ -160,7 +160,7 @@ class NemoGymRLTask:
         #     f" {self.extra_arguments} "
         # )
         cmd = (
-            f"cd /opt/NeMo-RL/3rdparty/Penguin-workspace/Penguin && "
+            f"cd /opt/NeMo-RL && "
             f"source /opt/nemo_rl_venv/bin/activate && "
             "uv sync --group={build,docs,dev,test} --extra penguin && "
             f"HF_HUB_OFFLINE=1 && "
@@ -403,7 +403,7 @@ def grpo_nemo_gym_rl(
                     cmd=train_cmd,
                     task_name=f"{expname}-grpo-gym-{job_id}",
                     log_dir=f"{log_dir}/training-logs",
-                    container=cluster_config["containers"]["gym-nemo-rl"],
+                    container=cluster_config["containers"]["nemo-rl"],
                     num_gpus=num_gpus,
                     num_nodes=num_nodes,
                     cluster_config=cluster_config,

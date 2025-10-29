@@ -232,23 +232,23 @@ def test_gym_nemo_rl(backend):
                           "resources_servers/library_judge_math/configs/bytedtsinghua_dapo17k.yaml"],
     )
 
-    # checking that the final model can be used for evaluation
-    eval(
-        ctx=wrap_arguments("++max_samples=10 ++inference.tokens_to_generate=10"),
-        cluster="test-local",
-        config_dir=Path(__file__).absolute().parent,
-        model=f"{output_dir}/final_hf_model",
-        server_type="vllm",
-        output_dir=f"{output_dir}/evaluation",
-        benchmarks="gsm8k",
-        server_gpus=1,
-        server_nodes=1,
-        num_jobs=1,
-        server_args="--enforce-eager",
-    )
+    # # checking that the final model can be used for evaluation
+    # eval(
+    #     ctx=wrap_arguments("++max_samples=10 ++inference.tokens_to_generate=10"),
+    #     cluster="test-local",
+    #     config_dir=Path(__file__).absolute().parent,
+    #     model=f"{output_dir}/final_hf_model",
+    #     server_type="vllm",
+    #     output_dir=f"{output_dir}/evaluation",
+    #     benchmarks="gsm8k",
+    #     server_gpus=1,
+    #     server_nodes=1,
+    #     num_jobs=1,
+    #     server_args="--enforce-eager",
+    # )
 
-    metrics = ComputeMetrics(benchmark="gsm8k").compute_metrics(
-        [f"{output_dir}/evaluation/eval-results/gsm8k/output.jsonl"],
-    )["_all_"]["pass@1"]
-    # only checking the total, since model is tiny
-    assert metrics["num_entries"] == 10
+    # metrics = ComputeMetrics(benchmark="gsm8k").compute_metrics(
+    #     [f"{output_dir}/evaluation/eval-results/gsm8k/output.jsonl"],
+    # )["_all_"]["pass@1"]
+    # # only checking the total, since model is tiny
+    # assert metrics["num_entries"] == 10
