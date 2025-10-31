@@ -19,7 +19,7 @@ import typer
 
 from nemo_skills.pipeline import utils as pipeline_utils
 from nemo_skills.pipeline.app import app, typer_unpacker
-from nemo_skills.pipeline.utils import add_task, check_mounts, get_exp, run_exp
+from nemo_skills.pipeline.utils import add_task, check_mounts, get_exp, parse_sbatch_arguments, run_exp
 from nemo_skills.utils import get_logger_name, setup_logging
 
 LOG = logging.getLogger(get_logger_name(__file__))
@@ -54,8 +54,9 @@ def run_cmd(
     ),
     qos: str = typer.Option(None, help="Specify Slurm QoS, e.g. to request interactive nodes"),
     time_min: str = typer.Option(None, help="If specified, will use as a time-min slurm parameter"),
-    num_gpus: int | None = typer.Option(None, help="Number of GPUs to use"),
+    num_gpus: int | None = typer.Option(None, help="Number of GPUs per node to use"),
     num_nodes: int = typer.Option(1, help="Number of nodes to use"),
+    num_tasks: int = typer.Option(1, help="Number of tasks per node"),
     model: str = typer.Option(None, help="Path to the model to evaluate"),
     server_address: str = typer.Option(None, help="Address of the server hosting the model"),
     server_type: pipeline_utils.SupportedServers | None = typer.Option(None, help="Type of server to use"),
@@ -112,12 +113,16 @@ def run_cmd(
         help="If True, skip checking that HF_HOME env var is defined in the cluster config.",
     ),
     dry_run: bool = typer.Option(False, help="If True, will not run the job, but will validate all arguments."),
+    sbatch_arguments: str = typer.Option(
+        "",
+        help="Additional sbatch arguments to pass to the job scheduler. Values should be provided as a JSON string or as a `dict` if invoking from code.",
+    ),
     _reuse_exp: str = typer.Option(None, help="Internal option to reuse an experiment object.", hidden=True),
     _task_dependencies: List[str] = typer.Option(
         None, help="Internal option to specify task dependencies.", hidden=True
     ),
 ):
-    """Run a pre-defined module or script in the NeMo-Skills container."""
+    """Run a pre-defined module or script in the Nemo-Skills container."""
     setup_logging(disable_hydra_logs=False, use_rich=True)
     extra_arguments = f"{' '.join(ctx.args)}"
 
@@ -198,8 +203,8 @@ def run_cmd(
                 task_dependencies=prev_tasks,
                 num_gpus=num_gpus,
                 num_nodes=num_nodes,
-                num_tasks=[1] * len(commands),
-                slurm_kwargs={"exclusive": exclusive} if exclusive else None,
+                num_tasks=[num_tasks] * len(commands),
+                slurm_kwargs=parse_sbatch_arguments(sbatch_arguments, exclusive),
                 installation_command=installation_command,
                 skip_hf_home_check=skip_hf_home_check,
             )

@@ -31,6 +31,7 @@ from nemo_skills.pipeline.utils import (
     get_mounted_path,
     get_nsight_cmd,
     get_timeout_str,
+    parse_sbatch_arguments,
     resolve_mount_paths,
     run_exp,
     temporary_env_update,
@@ -166,7 +167,7 @@ def get_training_cmd(
     return task.get_cmd()
 
 
-def get_checkpoint_convert_cmd(output_dir, final_hf_path, step, backend):
+def get_checkpoint_convert_cmd(output_dir, final_hf_path, step, backend, max_position_embeddings=None):
     cmd = "export PYTHONPATH=$PYTHONPATH:/nemo_run/code && export UV_PROJECT=/opt/NeMo-RL && cd /nemo_run/code && "
     if backend == "fsdp":
         cmd += "uv run --active python -m nemo_skills.training.nemo_rl.convert_dcp_to_hf "
@@ -175,8 +176,9 @@ def get_checkpoint_convert_cmd(output_dir, final_hf_path, step, backend):
     else:
         raise ValueError("Invalid backend: must be 'fsdp' or 'megatron'")
 
-    cmd += f"   --training-folder={output_dir} "
-    cmd += f"   --hf-ckpt-path={final_hf_path} "
+    cmd += f" --training-folder={output_dir} "
+    cmd += f" --hf-ckpt-path={final_hf_path} "
+    cmd += f" --max-position-embeddings={max_position_embeddings} "
     if step != "last":
         try:
             step = int(step)
@@ -200,11 +202,11 @@ def get_checkpoint_average_cmd(output_dir, average_steps, backend, remove_checkp
     steps = [int(x.strip()) for x in average_steps.split(",") if x.strip()]
     steps_str = " ".join(map(str, steps))
 
-    cmd += f"--checkpoint_dir {output_dir} "
-    cmd += f"--steps {steps_str} "
-    cmd += f"   --backend={backend} "
+    cmd += f" --checkpoint_dir {output_dir} "
+    cmd += f" --steps {steps_str} "
+    cmd += f" --backend={backend} "
     if remove_checkpoints_after_average:
-        cmd += "--remove_checkpoints_after_average "
+        cmd += " --remove_checkpoints_after_average "
 
     return cmd
 
@@ -229,7 +231,7 @@ def sft_nemo_rl(
     training_data: str = typer.Option(None, help="Path to the training data"),
     validation_data: Optional[str] = typer.Option(None, help="Path to the validation data"),
     num_nodes: int = typer.Option(1, help="Number of nodes"),
-    num_gpus: int = typer.Option(..., help="Number of GPUs"),
+    num_gpus: int = typer.Option(..., help="Number of GPUs per node"),
     num_training_jobs: int = typer.Option(1, help="Number of training jobs"),
     conversion_step: str = typer.Option(
         default="last",
@@ -303,9 +305,17 @@ def sft_nemo_rl(
         "E.g. 'pip install my_package'",
     ),
     dry_run: bool = typer.Option(False, help="If True, will not run the job, but will validate all arguments."),
+    sbatch_arguments: str = typer.Option(
+        "",
+        help="Additional sbatch arguments to pass to the job scheduler. Values should be provided as a JSON string or as a `dict` if invoking from code.",
+    ),
     _reuse_exp: str = typer.Option(None, help="Internal option to reuse an experiment object.", hidden=True),
     _task_dependencies: List[str] = typer.Option(
         None, help="Internal option to specify task dependencies.", hidden=True
+    ),
+    max_position_embeddings: int = typer.Option(
+        None,
+        help="Max position embeddings to use for conversion. If not specified, will be inferred from the model config.",
     ),
 ):
     """Runs NeMo-RL SFT training.
@@ -374,6 +384,8 @@ def sft_nemo_rl(
 
     server_config = None
     env_update = {"RAY_LOG_SYNC_FREQUENCY": 20} if profile_step_range else {}
+    slurm_kwargs = parse_sbatch_arguments(sbatch_arguments, exclusive)
+
     with get_exp(expname, cluster_config, _reuse_exp) as exp:
         prev_task = _task_dependencies
         with temporary_env_update(cluster_config, env_update):
@@ -395,7 +407,7 @@ def sft_nemo_rl(
                     reuse_code=reuse_code,
                     reuse_code_exp=reuse_code_exp,
                     task_dependencies=[prev_task] if prev_task is not None else None,
-                    slurm_kwargs={"exclusive": exclusive} if exclusive else None,
+                    slurm_kwargs=slurm_kwargs,
                     heterogeneous=True if server_config is not None else False,
                     with_sandbox=False,
                     with_ray=True,
@@ -411,6 +423,7 @@ def sft_nemo_rl(
                     final_hf_path=final_hf_path or f"{output_dir}/final_hf_model",
                     step=conversion_step,
                     backend=backend,
+                    max_position_embeddings=max_position_embeddings,
                 ),
                 task_name=f"{expname}-convert-final-ckpt",
                 log_dir=f"{log_dir}/convert-final-ckpt",
@@ -426,7 +439,7 @@ def sft_nemo_rl(
                 reuse_code=reuse_code,
                 reuse_code_exp=reuse_code_exp,
                 task_dependencies=[prev_task] if prev_task is not None else None,
-                slurm_kwargs={"exclusive": exclusive} if exclusive else None,
+                slurm_kwargs=slurm_kwargs,
                 installation_command=installation_command,
                 skip_hf_home_check=skip_hf_home_check,
             )
@@ -442,6 +455,7 @@ def sft_nemo_rl(
                         final_hf_path=f"{output_dir}/hf_model_step_{step}",
                         step=step,
                         backend=backend,
+                        max_position_embeddings=max_position_embeddings,
                     ),
                     task_name=f"{expname}-convert-ckpt-step_{step}",
                     log_dir=f"{log_dir}/convert-ckpt-step",
@@ -457,7 +471,7 @@ def sft_nemo_rl(
                     reuse_code=reuse_code,
                     reuse_code_exp=reuse_code_exp,
                     task_dependencies=[prev_task] if prev_task is not None else None,
-                    slurm_kwargs={"exclusive": exclusive} if exclusive else None,
+                    slurm_kwargs=slurm_kwargs,
                     installation_command=installation_command,
                     skip_hf_home_check=skip_hf_home_check,
                 )
@@ -485,7 +499,7 @@ def sft_nemo_rl(
                 reuse_code=reuse_code,
                 reuse_code_exp=reuse_code_exp,
                 task_dependencies=task_dependencies,
-                slurm_kwargs={"exclusive": exclusive} if exclusive else None,
+                slurm_kwargs=slurm_kwargs,
                 installation_command=installation_command,
                 skip_hf_home_check=skip_hf_home_check,
             )

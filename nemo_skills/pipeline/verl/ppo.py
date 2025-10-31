@@ -22,6 +22,7 @@ import typer
 
 import nemo_skills.pipeline.utils as pipeline_utils
 from nemo_skills.pipeline.app import app, typer_unpacker
+from nemo_skills.pipeline.utils import parse_sbatch_arguments
 from nemo_skills.pipeline.utils.server import get_free_port
 from nemo_skills.pipeline.verl import verl_app
 from nemo_skills.utils import get_logger_name, setup_logging, validate_wandb_project_name
@@ -220,7 +221,6 @@ def get_training_cmd(
 class SupportedServers(str, Enum):
     trtllm = "trtllm"
     vllm = "vllm"
-    nemo = "nemo"
     openai = "openai"
     sglang = "sglang"
 
@@ -240,7 +240,7 @@ def ppo_verl(
     prompt_data: str = typer.Option(None, help="Path to the prompt data"),
     eval_data: str = typer.Option(None, help="Path to the eval data"),
     num_nodes: int = typer.Option(1, help="Number of nodes"),
-    num_gpus: int = typer.Option(..., help="Number of GPUs"),
+    num_gpus: int = typer.Option(..., help="Number of GPUs per node"),
     num_training_jobs: int = typer.Option(1, help="Number of training jobs"),
     server_model: str = typer.Option(None, help="Path to the model or model name in API"),
     server_address: str = typer.Option(
@@ -306,6 +306,10 @@ def ppo_verl(
         "E.g. 'pip install my_package'",
     ),
     dry_run: bool = typer.Option(False, help="If True, will not run the job, but will validate all arguments."),
+    sbatch_arguments: str = typer.Option(
+        "",
+        help="Additional sbatch arguments to pass to the job scheduler. Values should be provided as a JSON string or as a `dict` if invoking from code.",
+    ),
     _reuse_exp: str = typer.Option(None, help="Internal option to reuse an experiment object.", hidden=True),
     _task_dependencies: List[str] = typer.Option(
         None, help="Internal option to specify task dependencies.", hidden=True
@@ -421,7 +425,7 @@ def ppo_verl(
                 reuse_code=reuse_code,
                 reuse_code_exp=reuse_code_exp,
                 task_dependencies=[prev_task] if prev_task is not None else None,
-                slurm_kwargs={"exclusive": exclusive} if exclusive else None,
+                slurm_kwargs=parse_sbatch_arguments(sbatch_arguments, exclusive),
                 heterogeneous=True if server_config is not None else False,
                 with_sandbox=with_sandbox,
                 installation_command=installation_command,

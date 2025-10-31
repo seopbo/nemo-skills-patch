@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import json
 import logging
 import os
 import sys
@@ -105,6 +106,48 @@ def get_timeout_str(cluster_config, partition, with_save_delay: bool = True) -> 
     return timeout_str
 
 
+def parse_sbatch_arguments(sbatch_arguments: str | None, exclusive: bool | None = None) -> dict | None:
+    """
+    Parse sbatch arguments from either a JSON string or a dictionary.
+
+    This utility function handles sbatch arguments that can be provided in two ways:
+    1. As a JSON string (typically from CLI)
+    2. As a dictionary (when invoked from Python code)
+
+    Args:
+        sbatch_arguments: Either a JSON string or a dictionary containing sbatch arguments.
+                         Can also be None or empty string.
+        exclusive: If True, adds the exclusive flag to the slurm kwargs.
+
+    Returns:
+        A dictionary of slurm kwargs, or None if no arguments are provided.
+
+    Raises:
+        ValueError: If sbatch_arguments is a string but cannot be parsed as JSON.
+    """
+    slurm_kwargs = {"exclusive": exclusive} if exclusive else {}
+
+    if sbatch_arguments:
+        if isinstance(sbatch_arguments, dict):
+            # Already a dictionary, just update
+            slurm_kwargs.update(sbatch_arguments)
+        elif isinstance(sbatch_arguments, str):
+            # Parse JSON string
+            try:
+                sbatch_kwargs = json.loads(sbatch_arguments)
+                slurm_kwargs.update(sbatch_kwargs)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Failed to parse sbatch_arguments with JSON: {e}")
+        else:
+            raise ValueError(f"sbatch_arguments must be a string or dict, got {type(sbatch_arguments).__name__}")
+
+    # Return None if empty to maintain existing behavior
+    if not len(slurm_kwargs):
+        return None
+
+    return slurm_kwargs
+
+
 def get_env_variables(cluster_config):
     """
     Will get the environment variables from the cluster config and the user environment.
@@ -157,6 +200,7 @@ def get_env_variables(cluster_config):
         "AZURE_OPENAI_API_KEY",
         "OPENAI_API_KEY",
         "HF_TOKEN",
+        "NGC_API_KEY",
     }
     default_factories = {
         "HF_TOKEN": lambda: str(token) if (token := get_token()) else "",
@@ -210,6 +254,13 @@ def get_env_variables(cluster_config):
             else:
                 raise ValueError(f"Cannot resolve environment variable {key} inside the placeholder value: {value}")
 
+    # Unless NGC_API_KEY is explicitly set we will populate it to be equal to NVIDIA_API_KEY
+    if "NGC_API_KEY" not in env_vars:
+        if "NVIDIA_API_KEY" in env_vars:
+            env_vars["NGC_API_KEY"] = env_vars["NVIDIA_API_KEY"]
+            if "NGC_API_KEY" not in _logged_optional_env_vars:
+                LOG.info("Populating NGC_API_KEY to be equal to NVIDIA_API_KEY")
+                _logged_optional_env_vars.add("NGC_API_KEY")
     return env_vars
 
 
@@ -353,11 +404,12 @@ def _get_tunnel_cached(
     job_dir: str,
     host: str,
     user: str,
+    port: int | None = None,
     identity: str | None = None,
     shell: str | None = None,
     pre_command: str | None = None,
 ):
-    return run.SSHTunnel(
+    kwargs = dict(
         host=host,
         user=user,
         identity=identity,
@@ -365,6 +417,17 @@ def _get_tunnel_cached(
         pre_command=pre_command,
         job_dir=job_dir,
     )
+    if port is not None:
+        kwargs["port"] = port
+    try:
+        return run.SSHTunnel(**kwargs)
+    except TypeError as exc:
+        if port is not None and "port" in str(exc):
+            raise RuntimeError(
+                "The configured SSH tunnel requires the `port` parameter, but your nemo_run version "
+                "does not support it. Please upgrade nemo_run."
+            ) from exc
+        raise
 
 
 def tunnel_hash(tunnel):
