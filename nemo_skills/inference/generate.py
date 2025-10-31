@@ -825,8 +825,8 @@ class GenerationTask:
                 if output_path.exists():
                     output_path.unlink()
 
-            self.wait_for_server()
-            asyncio.run(self.async_loop(data))
+        self.wait_for_server()
+        asyncio.run(self.async_loop(data))
 
         if self.should_run_evaluation and self.evaluator is None:
             self.run_batch_evaluation()
