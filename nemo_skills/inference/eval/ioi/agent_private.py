@@ -146,11 +146,12 @@ class IOIExecutionGenerationTask(GenerationTask):
             if chat_history:
                 chat_history[-1]["evaluation_time"] = eval_time
             test_case_results = eval_results["test_case_results"]
+            normalized_results = self._normalize_test_case_results(test_case_results)
             if chat_history:
-                chat_history[-1]["subtask_scores"] = {k: v["score"] for k, v in test_case_results.items()}
+                chat_history[-1]["subtask_scores"] = {k: v["score"] for k, v in normalized_results.items()}
 
             # Check if all subtasks passed fully (score == 1 for every output)
-            if all(all(o["score"] == 1 for o in v["outputs"]) for v in test_case_results.values()):
+            if all(all(float(o.get("score", 0.0)) == 1.0 for o in v["outputs"]) for v in normalized_results.values()):
                 print(f"[Success] All test cases passed at step {step_num}.")
                 return {
                     "generation": cur_generation_response,
@@ -162,25 +163,32 @@ class IOIExecutionGenerationTask(GenerationTask):
 
             # Prepare a concise failure summary (only non-perfect cases)
             failure_lines = []
-            for subtask, info in test_case_results.items():
+            for subtask, info in normalized_results.items():
                 for out in info["outputs"]:
-                    if out["score"] != 1:
+                    if float(out.get("score", 0.0)) != 1.0:
                         failure_lines.append(
-                            f"{subtask}:{out['test_name']} score={out['score']} msg={out['run_stderr'].strip()}"
+                            f"{subtask}:{out['test_name']} score={out['score']} run_stdout={out['run_stdout'].strip()} run_stderr={out['run_stderr'].strip()}"
                         )
             failure_summary = "\n".join(failure_lines)
 
             # Update saved solutions pool with current evaluated solution (score + feedback)
             if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
-                subtask_key = data_point["subtask"]
-                cur_score = float(test_case_results[subtask_key]["score"])
+                # Prefer the configured subtask when present, otherwise use the first (e.g., ICPC overall)
+                preferred_key = data_point.get("subtask")
+                if preferred_key in normalized_results:
+                    cur_score = float(normalized_results[preferred_key]["score"])
+                else:
+                    cur_score = float(next(iter(normalized_results.values()))["score"])
                 cur_code_opt = extract_code_block(cur_generation_response)
                 cur_code = cur_code_opt
                 self._update_saved_solutions(cur_code, cur_score, failure_summary)
 
             # Build the 'solution' payload for the next prompt
-            subtask_key = data_point["subtask"]
-            cur_score_for_block = float(test_case_results[subtask_key]["score"])
+            subtask_key = data_point.get("subtask")
+            if subtask_key in normalized_results:
+                cur_score_for_block = float(normalized_results[subtask_key]["score"])
+            else:
+                cur_score_for_block = float(next(iter(normalized_results.values()))["score"])
             current_code_block = extract_code_block(cur_generation_response)
 
             if int(self.cfg.show_k_solutions) > 0:
@@ -231,6 +239,31 @@ class IOIExecutionGenerationTask(GenerationTask):
             "generation": cur_generation_response,
             "steps": chat_history,
             "num_steps_completed": num_steps_completed,
+        }
+
+    def _normalize_test_case_results(self, test_case_results: dict) -> dict:
+        """Normalize evaluator outputs to a common shape:
+        {subtask: {"score": float, "outputs": list}}.
+
+        Supports both IOI-style per-subtask dicts and ICPC-style flat dict with
+        keys {"score": bool|float, "outputs": list} by mapping the latter to
+        a single "overall" subtask.
+        """
+        # ICPC-style: flat dict with outputs list
+        if (
+            isinstance(test_case_results, dict)
+            and "outputs" in test_case_results
+            and "score" in test_case_results
+            and isinstance(test_case_results.get("outputs"), list)
+        ):
+            raw_score = test_case_results.get("score")
+            score_num = float(raw_score) if isinstance(raw_score, (int, float)) else (1.0 if raw_score else 0.0)
+            return {"overall": {"score": score_num, "outputs": test_case_results.get("outputs", [])}}
+
+        # IOI-style: dict of subtasks
+        return {
+            k: {"score": float(v.get("score", 0.0)), "outputs": list(v.get("outputs", []))}
+            for k, v in test_case_results.items()
         }
 
     def _update_saved_solutions(self, solution: str, score: float, feedback: str) -> None:
