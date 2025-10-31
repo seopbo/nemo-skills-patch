@@ -152,7 +152,7 @@ class IOIExecutionGenerationTask(GenerationTask):
 
             # Check if all subtasks passed fully (score == 1 for every output)
             if all(all(float(o.get("score", 0.0)) == 1.0 for o in v["outputs"]) for v in normalized_results.values()):
-                print(f"[Success] All test cases passed at step {step_num}.")
+                print(f"[Success] Problem {data_point['id']}: All test cases passed at step {step_num}.")
                 return {
                     "generation": cur_generation_response,
                     "steps": chat_history,
