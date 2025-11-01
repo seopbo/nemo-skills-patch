@@ -174,7 +174,6 @@ class IOIExecutionGenerationTask(GenerationTask):
                             f"{subtask}:{out['test_name']} score={out['score']} run_stdout={out['run_stdout'].strip()} run_stderr={out['run_stderr'].strip()}"
                         )
             failure_summary = "\n".join(failure_lines)
-            print(f"Failure summary: {failure_summary}")
 
             # Update saved solutions pool with current evaluated solution (score + feedback)
             if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
