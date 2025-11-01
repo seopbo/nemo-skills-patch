@@ -316,7 +316,6 @@ class ICPCEvaluator(BaseEvaluator):
             tasks = []
             for test_data in batch:
                 test_name, test_case = test_data
-                print(f"Test Name: {test_name}")
                 tasks.append(
                     {
                         "generated_code": completion,

@@ -155,7 +155,7 @@ class IOIExecutionGenerationTask(GenerationTask):
                 chat_history[-1]["subtask_scores"] = {k: v["score"] for k, v in normalized_results.items()}
 
             # Check if all subtasks passed fully (score == 1 for every output)
-            if all(all(float(o.get("score", 0.0)) == 1.0 for o in v["outputs"]) for v in normalized_results.values()):
+            if all(all(float(o["score"]) == 1.0 for o in v["outputs"]) for v in normalized_results.values()):
                 print(f"[Success] Problem {data_point['id']}: All test cases passed at step {step_num}.")
                 return {
                     "generation": cur_generation_response,
@@ -260,9 +260,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             and "score" in test_case_results
             and isinstance(test_case_results.get("outputs"), list)
         ):
-            raw_score = test_case_results.get("score")
-            score_num = float(raw_score) if isinstance(raw_score, (int, float)) else (1.0 if raw_score else 0.0)
-            return {"overall": {"score": score_num, "outputs": test_case_results.get("outputs", [])}}
+            return {"overall": {"score": int(test_case_results["score"]), "outputs": test_case_results["outputs"]}}
 
         # IOI-style: dict of subtasks
         return {
