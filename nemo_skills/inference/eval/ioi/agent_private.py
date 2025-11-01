@@ -103,6 +103,10 @@ class IOIExecutionGenerationTask(GenerationTask):
         chat_history = []
         num_steps_completed = 0
 
+        # ICPC does not have a subtask score, we add it manually (max score is 1)
+        if data_point.get("subtask_score") is None:
+            data_point["subtask_score"] = "1"
+
         # Attempt to resume from latest intermediate state
         async_pos = data_point[self.cfg.async_position_key]
         saved_state = self.load_latest_state(async_pos)
