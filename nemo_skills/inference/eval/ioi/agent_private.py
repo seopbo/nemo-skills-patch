@@ -168,19 +168,15 @@ class IOIExecutionGenerationTask(GenerationTask):
 
             # Prepare a concise failure summary (only non-perfect cases)
             failure_lines = []
+            line_limit = int(self.cfg.failure_summary_max_characters)
             for subtask, info in normalized_results.items():
                 for out in info["outputs"]:
                     if float(out.get("score", 0.0)) != 1.0:
-                        failure_lines.append(
-                            f"{subtask}:{out['test_name']} score={out['score']} run_stdout={out['run_stdout'].strip()} run_stderr={out['run_stderr'].strip()}"
-                        )
+                        line = f"{subtask}:{out['test_name']} score={out['score']} run_stdout={out['run_stdout'].strip()} run_stderr={out['run_stderr'].strip()}"
+                        if len(line) > line_limit:
+                            line = line[:line_limit] + "<failure summary cut>"
+                        failure_lines.append(line)
             failure_summary = "\n".join(failure_lines)
-
-            if len(failure_summary) > self.cfg.failure_summary_max_characters:
-                print(
-                    f"[Step] {step_num + 1}/{self.cfg.total_steps} Problem {data_point['id']}: Failure summary too long, truncating to {self.cfg.failure_summary_max_characters} characters."
-                )
-                failure_summary = failure_summary[: self.cfg.failure_summary_max_characters] + "<failure summary cut>"
 
             # Update saved solutions pool with current evaluated solution (score + feedback)
             if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
