@@ -180,9 +180,10 @@ class IOIExecutionGenerationTask(GenerationTask):
                 # Prefer the configured subtask when present, otherwise use the first (e.g., ICPC overall)
                 preferred_key = data_point.get("subtask")
                 if preferred_key in normalized_results:
-                    cur_score = float(normalized_results[preferred_key]["score"])
+                    target_subtask = normalized_results[preferred_key]
                 else:
-                    cur_score = float(next(iter(normalized_results.values()))["score"])
+                    target_subtask = next(iter(normalized_results.values()))
+                cur_score = self._compute_subtask_score(target_subtask)
                 cur_code_opt = extract_code_block(cur_generation_response)
                 cur_code = cur_code_opt
                 self._update_saved_solutions(cur_code, cur_score, failure_summary)
@@ -190,9 +191,10 @@ class IOIExecutionGenerationTask(GenerationTask):
             # Build the 'solution' payload for the next prompt
             subtask_key = data_point.get("subtask")
             if subtask_key in normalized_results:
-                cur_score_for_block = float(normalized_results[subtask_key]["score"])
+                target_subtask = normalized_results[subtask_key]
             else:
-                cur_score_for_block = float(next(iter(normalized_results.values()))["score"])
+                target_subtask = next(iter(normalized_results.values()))
+            cur_score_for_block = self._compute_subtask_score(target_subtask)
             current_code_block = extract_code_block(cur_generation_response)
 
             if int(self.cfg.show_k_solutions) > 0:
@@ -260,7 +262,8 @@ class IOIExecutionGenerationTask(GenerationTask):
             and "score" in test_case_results
             and isinstance(test_case_results.get("outputs"), list)
         ):
-            return {"overall": {"score": int(test_case_results["score"]), "outputs": test_case_results["outputs"]}}
+            # ICPC-style: preserve fractional score (proportion of tests passed)
+            return {"overall": {"score": float(test_case_results["score"]), "outputs": test_case_results["outputs"]}}
 
         # IOI-style: dict of subtasks
         return {
@@ -296,6 +299,23 @@ class IOIExecutionGenerationTask(GenerationTask):
                 # No strictly worse; evict the oldest overall (index 0), not the newest
                 idx = 0
                 del self.saved_solutions[idx]
+
+    def _compute_subtask_score(self, subtask_data: dict) -> float:
+        """Return fractional score when per-test outputs are available, otherwise fallback to provided score.
+
+        For ICPC-style results, each output contains a per-test score (0/1). We compute the
+        proportion of passed tests. For IOI-style, we respect the provided subtask score.
+        """
+        outputs = subtask_data.get("outputs")
+        if isinstance(outputs, list) and outputs:
+            try:
+                total = len(outputs)
+                passed = sum(1.0 if float(o.get("score", 0.0)) == 1.0 else 0.0 for o in outputs)
+                return float(passed / total)
+            except Exception:
+                # Fallback to provided score on any unexpected shape
+                pass
+        return float(subtask_data.get("score", 0.0))
 
     def _build_previous_solutions_text(self, k: int) -> str:
         """Create a formatted text block listing up to k previous solutions.
