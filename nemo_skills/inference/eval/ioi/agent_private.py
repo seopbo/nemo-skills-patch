@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import re
 import sys
@@ -22,6 +23,12 @@ def extract_code_block(text: str):
     return matches[-1].strip() if matches else None
 
 
+def extract_failure_summary(text: str):
+    text = text.split("<|end|><|start|>assistant<|channel|>final<|message|>")[-1]
+    matches = re.findall(r"```report(.*?)```", text, re.DOTALL)
+    return matches[-1].strip() if matches else None
+
+
 @nested_dataclass(kw_only=True)
 class IOIExecutionConfig(GenerateSolutionsConfig):
     inference: InferenceConfig = field(default_factory=InferenceConfig)
@@ -33,6 +40,8 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     show_k_solutions: int = 0  # Number of previous solutions to include in improve prompt
     retry_solution: int = 5  # Retry count when code block extraction fails
     failure_summary_max_characters: int = 1000
+    filter_failure_summary: bool = False
+    summarize_failure_summary: bool = False
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -56,6 +65,7 @@ class IOIExecutionGenerationTask(GenerationTask):
         self.prompts = {
             "initial": get_prompt(cfg.prompt_config, **prompt_kwargs),
             "improve_after_verify_solution": get_prompt(cfg.improve_after_verify_prompt_config, **prompt_kwargs),
+            "failure_summary": get_prompt("eval/ioi/agent/failure_summary", **prompt_kwargs),
         }
         # Parse time limit locally for this task only
         self._deadline_ts = None
@@ -169,14 +179,58 @@ class IOIExecutionGenerationTask(GenerationTask):
             # Prepare a concise failure summary (only non-perfect cases)
             failure_lines = []
             line_limit = int(self.cfg.failure_summary_max_characters)
+            filtered_count = 0
+            total_failures = 0
+            long_lines_for_summary = []
             for subtask, info in normalized_results.items():
                 for out in info["outputs"]:
                     if float(out.get("score", 0.0)) != 1.0:
+                        total_failures += 1
                         line = f"{subtask}:{out['test_name']} score={out['score']} run_stdout={out['run_stdout'].strip()} run_stderr={out['run_stderr'].strip()}"
                         if len(line) > line_limit:
-                            line = line[:line_limit] + "<failure summary cut>"
+                            if self.cfg.summarize_failure_summary:
+                                long_lines_for_summary.append(line)
+                                continue
+                            if self.cfg.filter_failure_summary:
+                                filtered_count += 1
+                                continue
+                            else:
+                                line = line[:line_limit] + "<failure summary cut>"
                         failure_lines.append(line)
+
+            # Summarize long failures in parallel if enabled
+            if self.cfg.summarize_failure_summary and long_lines_for_summary:
+                print(f"Problem {data_point['id']} calling LLM to summarize {len(long_lines_for_summary)} failures")
+
+                async def summarize_line(line: str):
+                    _, resp, _ = await self._call_llm(
+                        data_point,
+                        all_data,
+                        "failure_summary",
+                        failure_line=line,
+                        line_limit=line_limit,
+                    )
+                    summarized = extract_failure_summary(resp["generation"])
+                    if not summarized:
+                        return None
+                    return summarized
+
+                summarized_results = await asyncio.gather(
+                    *[summarize_line(line) for line in long_lines_for_summary], return_exceptions=True
+                )
+                for res, orig in zip(summarized_results, long_lines_for_summary):
+                    if isinstance(res, Exception) or not isinstance(res, str):
+                        print("discarding failure summary as we failed to summarize")
+                        continue
+                    failure_lines.append(res)
             failure_summary = "\n".join(failure_lines)
+
+            if self.cfg.filter_failure_summary:
+                print(
+                    f"Problem {data_point['id']} filtered failure summary: {filtered_count}/{total_failures} filtered."
+                )
+
+            print(f"Problem {data_point['id']} failure summary: {failure_summary}")
 
             # Update saved solutions pool with current evaluated solution (score + feedback)
             if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
