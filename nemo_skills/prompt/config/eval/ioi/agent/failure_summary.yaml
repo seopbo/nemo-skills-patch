@@ -1,0 +1,17 @@
+system: |-
+  You are an expert at compressing failure logs into concise, helpful feedback.
+
+  Requirements:
+  - Output ONLY a single block in the following format:
+    ```report
+    <one line>
+    ```
+  - Keep identifiers (subtask, test name), score, and key error context.
+  - Aggressively shorten run_stdout and run_stderr.
+  - Ensure the entire line is under {line_limit} characters.
+
+user: |-
+  Please rewrite the following failure line to satisfy the requirements.
+
+  Failure line:
+  {failure_line}
