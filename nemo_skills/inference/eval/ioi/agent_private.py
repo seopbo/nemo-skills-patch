@@ -32,6 +32,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     time_limit: str | None = None  # Optional wall-clock time limit in 'HH:MM:SS'
     show_k_solutions: int = 0  # Number of previous solutions to include in improve prompt
     retry_solution: int = 5  # Retry count when code block extraction fails
+    failure_summary_max_characters: int = 1000
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -174,6 +175,12 @@ class IOIExecutionGenerationTask(GenerationTask):
                             f"{subtask}:{out['test_name']} score={out['score']} run_stdout={out['run_stdout'].strip()} run_stderr={out['run_stderr'].strip()}"
                         )
             failure_summary = "\n".join(failure_lines)
+
+            if len(failure_summary) > self.cfg.failure_summary_max_characters:
+                print(
+                    f"[Step] {step_num + 1}/{self.cfg.total_steps} Problem {data_point['id']}: Failure summary too long, truncating to {self.cfg.failure_summary_max_characters} characters."
+                )
+                failure_summary = failure_summary[: self.cfg.failure_summary_max_characters] + "<failure summary cut>"
 
             # Update saved solutions pool with current evaluated solution (score + feedback)
             if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
