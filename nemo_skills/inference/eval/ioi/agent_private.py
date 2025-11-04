@@ -51,7 +51,7 @@ cs.store(name="base_ioi_generation_config", node=IOIExecutionConfig)
 class IOIExecutionGenerationTask(GenerationTask):
     # Shared formats for composing solution blocks
     SOLUTION_BLOCK_TEMPLATE = (
-        "## Solution{title_suffix} ##\n{code}\n## Test Feedback ##\n{feedback}\n## Solution Score ## {score}"
+        "## Solution{title_suffix} ##\n{code}\n## Test Feedback ##\n{feedback}\n## {score_label} ## {score}"
     )
     PREVIOUS_PREAMBLE = (
         "Here are some previous solutions that were submitted to help you design and improve the solution:"
@@ -113,6 +113,7 @@ class IOIExecutionGenerationTask(GenerationTask):
     async def process_single_datapoint(self, data_point, all_data, prompt=None):
         chat_history = []
         num_steps_completed = 0
+        announced_full = False
 
         # ICPC does not have a subtask score, we add it manually (max score is 1)
         if data_point.get("subtask_score") is None:
@@ -165,6 +166,42 @@ class IOIExecutionGenerationTask(GenerationTask):
             if chat_history:
                 chat_history[-1]["subtask_scores"] = {k: v["score"] for k, v in normalized_results.items()}
 
+            # ICPC-specific handling: sample vs full tests
+            icpc_mode = (
+                isinstance(test_case_results, dict)
+                and "outputs" in test_case_results
+                and "sample_score" in test_case_results
+                and isinstance(test_case_results.get("outputs"), list)
+            )
+
+            if icpc_mode:
+                outputs_all = test_case_results.get("outputs", [])
+                sample_outputs = [o for o in outputs_all if o.get("test_type") == "sample"]
+
+                def _avg(outputs_list):
+                    if not outputs_list:
+                        return 0.0
+                    try:
+                        total = len(outputs_list)
+                        passed = sum(1.0 if float(o.get("score", 0.0)) == 1.0 else 0.0 for o in outputs_list)
+                        return float(passed / total)
+                    except Exception:
+                        return 0.0
+
+                sample_passed = bool(test_case_results.get("sample_score"))
+                sample_avg = _avg(sample_outputs)
+                overall_avg = _avg(outputs_all)
+            else:
+                outputs_all = []
+                sample_outputs = []
+                sample_passed = False
+                sample_avg = 0.0
+                overall_avg = 0.0
+
+            if icpc_mode and sample_passed and not announced_full:
+                print(f"Problem {data_point['id']} Step {step_num + 1} passed sample tests, moving to full tests.")
+                announced_full = True
+
             # Check if all subtasks passed fully (score == 1 for every output)
             if all(all(float(o["score"]) == 1.0 for o in v["outputs"]) for v in normalized_results.values()):
                 print(f"[Success] Problem {data_point['id']}: All test cases passed at step {step_num}.")
@@ -182,11 +219,17 @@ class IOIExecutionGenerationTask(GenerationTask):
             filtered_count = 0
             total_failures = 0
             long_lines_for_summary = []
-            for subtask, info in normalized_results.items():
-                for out in info["outputs"]:
+            if icpc_mode:
+                # Only include sample failures until samples pass; afterwards include all
+                outputs_for_summary = outputs_all if sample_passed else sample_outputs
+                for out in outputs_for_summary:
                     if float(out.get("score", 0.0)) != 1.0:
                         total_failures += 1
-                        line = f"{subtask}:{out['test_name']} score={out['score']} run_stdout={out['run_stdout'].strip()} run_stderr={out['run_stderr'].strip()}"
+                        line = (
+                            f"overall:{out['test_name']} score={out['score']} "
+                            f"run_stdout={out.get('run_stdout', '').strip()} "
+                            f"run_stderr={out.get('run_stderr', '').strip()}"
+                        )
                         if len(line) > line_limit:
                             if self.cfg.summarize_failure_summary:
                                 long_lines_for_summary.append(line)
@@ -197,6 +240,22 @@ class IOIExecutionGenerationTask(GenerationTask):
                             else:
                                 line = line[:line_limit] + "<failure summary cut>"
                         failure_lines.append(line)
+            else:
+                for subtask, info in normalized_results.items():
+                    for out in info["outputs"]:
+                        if float(out.get("score", 0.0)) != 1.0:
+                            total_failures += 1
+                            line = f"{subtask}:{out['test_name']} score={out['score']} run_stdout={out['run_stdout'].strip()} run_stderr={out['run_stderr'].strip()}"
+                            if len(line) > line_limit:
+                                if self.cfg.summarize_failure_summary:
+                                    long_lines_for_summary.append(line)
+                                    continue
+                                if self.cfg.filter_failure_summary:
+                                    filtered_count += 1
+                                    continue
+                                else:
+                                    line = line[:line_limit] + "<failure summary cut>"
+                            failure_lines.append(line)
 
             # Summarize long failures in parallel if enabled
             if self.cfg.summarize_failure_summary and long_lines_for_summary:
@@ -232,35 +291,58 @@ class IOIExecutionGenerationTask(GenerationTask):
 
             print(f"Problem {data_point['id']} failure summary: {failure_summary}")
 
-            # Update saved solutions pool with current evaluated solution (score + feedback)
-            if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
-                # Prefer the configured subtask when present, otherwise use the first (e.g., ICPC overall)
-                preferred_key = data_point.get("subtask")
-                if preferred_key in normalized_results:
-                    target_subtask = normalized_results[preferred_key]
-                else:
-                    target_subtask = next(iter(normalized_results.values()))
-                cur_score = self._compute_subtask_score(target_subtask)
-                cur_code_opt = extract_code_block(cur_generation_response)
-                cur_code = cur_code_opt
-                self._update_saved_solutions(cur_code, cur_score, failure_summary)
-
-            # Build the 'solution' payload for the next prompt
-            subtask_key = data_point.get("subtask")
-            if subtask_key in normalized_results:
-                target_subtask = normalized_results[subtask_key]
+            # Determine target subtask for non-ICPC style and compute scores/labels
+            preferred_key = data_point.get("subtask")
+            if preferred_key in normalized_results:
+                target_subtask = normalized_results[preferred_key]
             else:
                 target_subtask = next(iter(normalized_results.values()))
-            cur_score_for_block = self._compute_subtask_score(target_subtask)
+
+            if icpc_mode:
+                score_label_for_block = "Sample test score" if not sample_passed else "Solution Scores"
+                if not sample_passed:
+                    cur_score_for_block = float(sample_avg)
+                    display_score_for_block = f"{sample_avg:.3f}"
+                else:
+                    cur_score_for_block = float(overall_avg)
+                    display_score_for_block = f"sample={sample_avg:.3f}, overall={overall_avg:.3f}"
+            else:
+                score_label_for_block = "Solution Score"
+                cur_score_for_block = self._compute_subtask_score(target_subtask)
+                display_score_for_block = f"{cur_score_for_block:.3f}"
+
+            # Update saved solutions pool with current evaluated solution (score + feedback)
+            if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
+                cur_code_opt = extract_code_block(cur_generation_response)
+                cur_code = cur_code_opt
+                self._update_saved_solutions(
+                    cur_code,
+                    float(cur_score_for_block),
+                    failure_summary,
+                    score_label_for_block,
+                    display_score_for_block,
+                )
+
+            # Build the 'solution' payload for the next prompt
             current_code_block = extract_code_block(cur_generation_response)
 
             if int(self.cfg.show_k_solutions) > 0:
                 prev_text = self._build_previous_solutions_text(self.cfg.show_k_solutions)
-                current_text = self._build_solution_block(current_code_block, failure_summary, cur_score_for_block)
+                current_text = self._build_solution_block(
+                    current_code_block,
+                    failure_summary,
+                    display_score_for_block,
+                    score_label=score_label_for_block,
+                )
                 solution_payload = prev_text + ("\n\n" if prev_text else "") + current_text
             else:
                 # K == 0: include only current solution with its feedback and score
-                solution_payload = self._build_solution_block(current_code_block, failure_summary, cur_score_for_block)
+                solution_payload = self._build_solution_block(
+                    current_code_block,
+                    failure_summary,
+                    display_score_for_block,
+                    score_label=score_label_for_block,
+                )
 
             # Ask the LLM to improve the solution given the evaluator feedback.
             prompt_txt, improve_resp, gen_time = await self._call_llm_with_code_retry(
@@ -328,7 +410,14 @@ class IOIExecutionGenerationTask(GenerationTask):
             for k, v in test_case_results.items()
         }
 
-    def _update_saved_solutions(self, solution: str, score: float, feedback: str) -> None:
+    def _update_saved_solutions(
+        self,
+        solution: str,
+        score: float,
+        feedback: str,
+        score_label: str,
+        score_display: str,
+    ) -> None:
         """Add current solution to sliding window with score-aware eviction.
 
         Keeps at most cfg.show_k_solutions previous solutions. Evicts lower-scored entries first;
@@ -338,7 +427,13 @@ class IOIExecutionGenerationTask(GenerationTask):
         if k <= 0:
             return
 
-        entry = {"solution": solution, "score": float(score), "feedback": feedback}
+        entry = {
+            "solution": solution,
+            "score": float(score),  # numeric for eviction
+            "feedback": feedback,
+            "score_label": score_label,
+            "score_display": score_display,
+        }
         self.saved_solutions.append(entry)
 
         # Evict to maintain size k+1 (K previous + current)
@@ -403,13 +498,21 @@ class IOIExecutionGenerationTask(GenerationTask):
                     title_suffix=f" {idx}",
                     code=e["solution"],
                     feedback=e["feedback"],
-                    score=e["score"],
+                    score=e.get("score_display", f"{float(e['score']):.3f}"),
+                    score_label=e.get("score_label", "Solution Score"),
                 )
             )
 
         return "\n".join(lines)
 
-    def _build_solution_block(self, code: str, feedback: str, score: float, title_suffix: str = "") -> str:
+    def _build_solution_block(
+        self,
+        code: str,
+        feedback: str,
+        score: str,
+        title_suffix: str = "",
+        score_label: str = "Solution Score",
+    ) -> str:
         """Return a single solution block using shared template.
 
         title_suffix: e.g. " 1" to produce "## Solution 1 ##"; empty to produce "## Solution ##".
@@ -419,6 +522,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             code=code,
             feedback=feedback,
             score=score,
+            score_label=score_label,
         )
 
 
