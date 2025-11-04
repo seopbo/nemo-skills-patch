@@ -380,7 +380,6 @@ class ICPCEvaluator(BaseEvaluator):
             tasks = []
             for test_data in batch:
                 test_name, test_case, test_type = test_data
-                print(f"Test Name: {test_name}")
                 tasks.append(
                     {
                         "generated_code": completion,
@@ -428,7 +427,6 @@ class ICPCEvaluator(BaseEvaluator):
                 batch = problem_inputs[i : i + batch_size]
                 tasks = []
                 for test_data in batch:
-                    print(f"Test Name: {test_data['file_name']}")
                     tasks.append(
                         {
                             "generated_code": completion,
