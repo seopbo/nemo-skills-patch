@@ -39,9 +39,6 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     time_limit: str | None = None  # Optional wall-clock time limit in 'HH:MM:SS'
     show_k_solutions: int = 0  # Number of previous solutions to include in improve prompt
     retry_solution: int = 5  # Retry count when code block extraction fails
-    failure_summary_max_characters: int = 1000
-    filter_failure_summary: bool = False
-    summarize_failure_summary: bool = False
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -174,16 +171,10 @@ class IOIExecutionGenerationTask(GenerationTask):
 
             print(f"[Step {step_num + 1}/{self.cfg.total_steps}] Self-improving solution.")
 
-            # Update saved solutions pool (score only used for ranking; not provided to the model)
+            # Update saved solutions pool (keep only k most recent)
             if self.cfg.show_k_solutions and self.cfg.show_k_solutions > 0:
-                preferred_key = data_point.get("subtask")
-                if preferred_key in normalized_results:
-                    target_subtask = normalized_results[preferred_key]
-                else:
-                    target_subtask = next(iter(normalized_results.values()))
-                cur_score = self._compute_subtask_score(target_subtask)
                 cur_code = extract_code_block(cur_generation_response)
-                self._update_saved_solutions(cur_code, cur_score, "")
+                self._update_saved_solutions(cur_code)
 
             # Build the 'solution' payload for the next prompt using only code
             current_code_block = extract_code_block(cur_generation_response)
@@ -260,34 +251,17 @@ class IOIExecutionGenerationTask(GenerationTask):
             for k, v in test_case_results.items()
         }
 
-    def _update_saved_solutions(self, solution: str, score: float, feedback: str) -> None:
-        """Add current solution to sliding window with score-aware eviction.
-
-        Keeps at most cfg.show_k_solutions previous solutions. Evicts lower-scored entries first;
-        on ties or if none are lower, evicts the oldest by insertion order.
-        """
+    def _update_saved_solutions(self, solution: str) -> None:
+        """Add current solution to sliding window and keep only k most recent."""
         k = int(self.cfg.show_k_solutions or 0)
         if k <= 0:
             return
 
-        entry = {"solution": solution, "score": float(score), "feedback": feedback}
-        self.saved_solutions.append(entry)
+        self.saved_solutions.append({"solution": solution})
 
         # Evict to maintain size k+1 (K previous + current)
         while len(self.saved_solutions) > k + 1:
-            newest = self.saved_solutions[-1]
-            # Candidates strictly worse than newest
-            worse_indices = [i for i, e in enumerate(self.saved_solutions[:-1]) if e["score"] < newest["score"]]
-            if worse_indices:
-                # Among worse, pick with smallest score, then oldest by order
-                min_score = min(self.saved_solutions[i]["score"] for i in worse_indices)
-                candidates = [i for i in worse_indices if self.saved_solutions[i]["score"] == min_score]
-                idx = min(candidates)  # oldest among worst by index
-                del self.saved_solutions[idx]
-            else:
-                # No strictly worse; evict the oldest overall (index 0), not the newest
-                idx = 0
-                del self.saved_solutions[idx]
+            del self.saved_solutions[0]
 
     def _compute_subtask_score(self, subtask_data: dict) -> float:
         """Return fractional score when per-test outputs are available, otherwise fallback to provided score.
