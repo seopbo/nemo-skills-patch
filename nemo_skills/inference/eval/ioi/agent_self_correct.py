@@ -39,6 +39,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     time_limit: str | None = None  # Optional wall-clock time limit in 'HH:MM:SS'
     show_k_solutions: int = 0  # Number of previous solutions to include in improve prompt
     retry_solution: int = 5  # Retry count when code block extraction fails
+    skip_termination: bool = False  # If true, do not stop on success; continue improving
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -163,11 +164,12 @@ class IOIExecutionGenerationTask(GenerationTask):
             # Check if all subtasks passed fully (score == 1 for every output)
             if all(all(float(o["score"]) == 1.0 for o in v["outputs"]) for v in normalized_results.values()):
                 print(f"[Success] Problem {data_point['id']}: All test cases passed at step {step_num}.")
-                return {
-                    "generation": cur_generation_response,
-                    "steps": chat_history,
-                    "num_steps_completed": num_steps_completed,
-                }
+                if not self.cfg.skip_termination:
+                    return {
+                        "generation": cur_generation_response,
+                        "steps": chat_history,
+                        "num_steps_completed": num_steps_completed,
+                    }
 
             print(f"[Step {step_num + 1}/{self.cfg.total_steps}] Self-improving solution.")
 
@@ -198,7 +200,12 @@ class IOIExecutionGenerationTask(GenerationTask):
             cur_generation_response = improve_resp["generation"]
 
             chat_history.append(
-                {"prompt": prompt_txt, "response": cur_generation_response, "generation_time": gen_time}
+                {
+                    "prompt": prompt_txt,
+                    "response": cur_generation_response,
+                    "generation_time": gen_time,
+                    "num_generated_tokens": improve_resp["num_generated_tokens"],
+                }
             )
 
             # Save checkpoint after each improvement step
@@ -218,8 +225,9 @@ class IOIExecutionGenerationTask(GenerationTask):
                 print("[TimeLimit] Reached limit after step save; exiting cleanly.")
                 sys.exit(0)
 
-        # Reached maximum steps without passing all tests.
-        print("[Failure] Reached max improvement steps without passing all tests.")
+        if not self.cfg.skip_termination:
+            # Reached maximum steps without passing all tests.
+            print("[Failure] Reached max improvement steps without passing all tests.")
         return {
             "id": data_point["id"],
             "generation": cur_generation_response,
