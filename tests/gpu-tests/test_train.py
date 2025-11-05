@@ -231,7 +231,7 @@ def test_gym_nemo_rl(backend):
         backend=backend,
         disable_wandb=True,
         gym_config_paths=["responses_api_models/vllm_model/configs/vllm_model_for_training.yaml",
-                          "resources_servers/python_math_exec/configs/python_math_exec.yaml"],
+                          "resources_servers/library_judge_math/configs/bytedtsinghua_dapo17k.yaml"],
     )
 
     # checking that the final model can be used for evaluation
