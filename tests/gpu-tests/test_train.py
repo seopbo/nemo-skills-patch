@@ -232,6 +232,7 @@ def test_gym_nemo_rl(backend):
         disable_wandb=True,
         gym_config_paths=["responses_api_models/vllm_model/configs/vllm_model_for_training.yaml",
                           "resources_servers/library_judge_math/configs/bytedtsinghua_dapo17k.yaml"],
+        with_sandbox=True,
     )
 
     # # checking that the final model can be used for evaluation
