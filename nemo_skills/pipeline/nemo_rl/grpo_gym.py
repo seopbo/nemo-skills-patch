@@ -129,7 +129,7 @@ class NemoGymRLTask:
             f"export HF_HUB_OFFLINE=1 && "
             f"export NRL_FORCE_REBUILD_VENVS=true && "
             f"export PYTHONPATH=$PYTHONPATH:/nemo_run/code:/opt/NeMo-RL && "
-            f"export RAY_RUNTIME_ENV_USE_UV=1 && "
+            # f"export RAY_RUNTIME_ENV_USE_UV=1 && "
             f"{nsight_cmd}"
             f"echo 'Running the start_grpo_gym script from nemo_skills' && "
             f"uv run --active python /nemo_run/code/nemo_skills/training/nemo_rl/start_grpo_gym.py "
