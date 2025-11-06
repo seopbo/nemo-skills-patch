@@ -36,7 +36,7 @@ def main():
         logging_args = ""
 
     cmd = (
-        f"python3 -m vllm.entrypoints.openai.api_server "
+        f"pip install blobfile && python3 -m vllm.entrypoints.openai.api_server "
         f'    --model="{args.model}" '
         f'    --served-model-name="{args.model}"'
         f"    --trust-remote-code "
