@@ -102,6 +102,8 @@ def init_ray_workingdir():
         # Modify the arguments
         runtime_env = kwargs.get("runtime_env", {})
         runtime_env["working_dir"] = os.getcwd()
+        piplist = runtime_env.setdefault("pip", [])
+        piplist.append("git+https://github.com/NVIDIA-NeMo/Skills.git")
         kwargs["runtime_env"] = runtime_env
         print(f"--> runtime_env is {runtime_env}\n\n")
         # Call the original
@@ -161,7 +163,7 @@ def main() -> None:
 
     # We assert here since this is right after the final config has been materialized.
     assert _should_use_penguin(config)
-
+    print(f"\n the data paths are {config['data']['train_jsonl_fpath']} and {config['data']['validation_jsonl_fpath']}")
     print("\n▶ Setting up data...")
     train_dataset = setup_single_penguin_dataset(
         jsonl_fpath=config["data"]["train_jsonl_fpath"],
