@@ -274,6 +274,7 @@ class BaseModel:
                             result = self._parse_chat_completion_response(
                                 response, include_response=include_response, **kwargs
                             )
+                            result["response"] = response # temporary for nemo gym
                     elif endpoint_type == EndpointType.text:
                         assert isinstance(prompt, str), "Text completion requests must be a string."
                         request_params = self._build_completion_request_params(prompt=prompt, stream=stream, **kwargs)
@@ -298,7 +299,7 @@ class BaseModel:
                         raise TypeError(f"Unsupported completion type: {endpoint_type}")
                     if not stream:
                         self._maybe_apply_stop_phrase_removal(result, remove_stop_phrases, stop_phrases)
-                    return result, response # temporary for nemo gym
+                    return result
 
                 except openai.BadRequestError as e:
                     if "output messages (reasoning and final)" in str(e):
