@@ -274,6 +274,7 @@ class BaseModel:
                             result = self._parse_chat_completion_response(
                                 response, include_response=include_response, **kwargs
                             )
+                            result = response # temporary for nemo gym
                     elif endpoint_type == EndpointType.text:
                         assert isinstance(prompt, str), "Text completion requests must be a string."
                         request_params = self._build_completion_request_params(prompt=prompt, stream=stream, **kwargs)
@@ -349,7 +350,7 @@ class BaseModel:
         if output is None:
             output = ""
         result = {"generation": output, "num_generated_tokens": response.usage.completion_tokens}
-        LOG.info(f"response before parsing is {response}")
+
         # Add reasoning_content if available
         if hasattr(choice.message, "reasoning_content") and choice.message.reasoning_content:
             result["reasoning_content"] = choice.message.reasoning_content
