@@ -256,7 +256,7 @@ class BaseModel:
             "tools": tools,
             "extra_body": extra_body,
         }
-        print(f"inside generate_async, include_response is {include_response}")
+
         # TODO: remove this after we no longer use gpt-oss or it's fixed in vllm
         max_retries = 2
         retry_count = 0

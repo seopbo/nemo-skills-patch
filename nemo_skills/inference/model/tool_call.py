@@ -150,6 +150,10 @@ class ToolCallingWrapper:
 
                 continue
 
+            if "response" in generation:
+                print("unparsed response included in the generation")
+                result_steps["response"] = generation["response"]
+
             break
 
         result_steps["generation"] = "".join(result_steps["generation"])
