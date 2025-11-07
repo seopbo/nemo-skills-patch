@@ -587,7 +587,7 @@ class GenerationTask:
         Should work even if process_single_datapoint is doing multiple requests in parallel
         as long as those requests also use this function.
         """
-        import pdb; pdb.set_trace()
+        # import pdb; pdb.set_trace()
         async with self.semaphore:
             return await self.llm.generate_async(**generation_params)
 
