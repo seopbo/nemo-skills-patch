@@ -397,7 +397,7 @@ def generate(
                 extra_arguments=extra_arguments_original,
                 get_random_port=get_random_port,
             )
-            print(f"server details: {server_config}, {server_address}, {extra_arguments}")
+
             # Build generation command (same as before)
             cmd = pipeline_utils.get_generation_cmd(
                 input_file=input_file,

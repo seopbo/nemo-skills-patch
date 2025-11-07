@@ -419,7 +419,7 @@ class GenerationTask:
 
     def log_example_prompt(self, data):
         data_point = deepcopy(data[0])
-        LOG.info(f"first data point is {data_point}\n overall data is {data}\n")
+
         LOG.info("Example prompt:\nData dictionary: %s\nPrompt: %s", data_point, self.fill_prompt(data_point, data))
 
     def load_data(self):
@@ -587,7 +587,6 @@ class GenerationTask:
         Should work even if process_single_datapoint is doing multiple requests in parallel
         as long as those requests also use this function.
         """
-        # import pdb; pdb.set_trace()
         async with self.semaphore:
             return await self.llm.generate_async(**generation_params)
 

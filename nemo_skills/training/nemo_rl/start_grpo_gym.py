@@ -102,10 +102,6 @@ def init_ray_workingdir():
         # Modify the arguments
         runtime_env = kwargs.get("runtime_env", {})
         runtime_env["working_dir"] = os.getcwd()
-        # piplist = runtime_env.setdefault("pip", [])
-        # ns_install = "git+https://github.com/NVIDIA-NeMo/Skills.git"
-        # if ns_install not in piplist:
-        #     piplist.append("git+https://github.com/NVIDIA-NeMo/Skills.git")
         kwargs["runtime_env"] = runtime_env
         print(f"--> runtime_env is {runtime_env}\n\n")
         # Call the original
