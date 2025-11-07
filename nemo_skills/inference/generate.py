@@ -572,7 +572,7 @@ class GenerationTask:
         if self.cfg.code_execution:
             if self.cfg.override_max_code_executions and self.cfg.total_code_executions_in_prompt is not None:
                 generation_params["max_code_executions"] = data_point["total_code_executions"]
-
+        print(f"inside process_single_datapoint, generation params are {generation_params}")
         result = await self.generate_with_semaphore(**generation_params)
 
         if self.cfg.count_prompt_tokens:
@@ -588,6 +588,7 @@ class GenerationTask:
         Should work even if process_single_datapoint is doing multiple requests in parallel
         as long as those requests also use this function.
         """
+        print(f"inside generate_with_semaphore, params are {generation_params}")
         async with self.semaphore:
             return await self.llm.generate_async(**generation_params)
 

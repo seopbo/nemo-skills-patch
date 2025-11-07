@@ -256,7 +256,7 @@ class BaseModel:
             "tools": tools,
             "extra_body": extra_body,
         }
-
+        print(f"inside generate_async, include_response is {include_response}")
         # TODO: remove this after we no longer use gpt-oss or it's fixed in vllm
         max_retries = 2
         retry_count = 0
@@ -274,7 +274,6 @@ class BaseModel:
                             result = self._parse_chat_completion_response(
                                 response, include_response=include_response, **kwargs
                             )
-                            result["response"] = response # temporary for nemo gym
                     elif endpoint_type == EndpointType.text:
                         assert isinstance(prompt, str), "Text completion requests must be a string."
                         request_params = self._build_completion_request_params(prompt=prompt, stream=stream, **kwargs)
