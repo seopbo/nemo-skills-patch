@@ -121,6 +121,7 @@ class ToolCallingWrapper:
         while True:
             if isinstance(tokens_to_generate, int) and tokens_to_generate <= 0:
                 break
+            print(f"{conversation}\n{tools}\n{tokens_to_generate}\n{endpoint_type}\n{generation_kwargs}")
             generation = await self.model.generate_async(
                 prompt=conversation,
                 tools=tools,
