@@ -187,6 +187,8 @@ class TerminalBenchGenerationTask(GenerationTask):
             build_cmd = (
                 f"cd {TB_REPO_PATH} && "
                 f"source .venv/bin/activate && "
+                # Install Docker
+                f"curl -fsSL https://get.docker.com | sh && "
                 # Build Docker image
                 f"tb tasks build --task-id {data_point['task_id']} --tasks-dir nv-internal && "
                 # Convert Docker image to Apptainer image
