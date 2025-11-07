@@ -188,7 +188,7 @@ class TerminalBenchGenerationTask(GenerationTask):
                 f"cd {TB_REPO_PATH} && "
                 f"source .venv/bin/activate && "
                 # Build Docker image
-                f"tb tasks build --task-id {data_point['task_id']} --dataset-path nv-internal && "
+                f"tb tasks build --task-id {data_point['task_id']} --tasks-dir nv-internal && "
                 # Convert Docker image to Apptainer image
                 f"apptainer build {container_path} docker-daemon://tb__{data_point['task_id']}__client"
             )
