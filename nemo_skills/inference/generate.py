@@ -419,7 +419,7 @@ class GenerationTask:
 
     def log_example_prompt(self, data):
         data_point = deepcopy(data[0])
-
+        LOG.info(f"first data point is {data_point}\n overall data is {data}\n")
         LOG.info("Example prompt:\nData dictionary: %s\nPrompt: %s", data_point, self.fill_prompt(data_point, data))
 
     def load_data(self):
