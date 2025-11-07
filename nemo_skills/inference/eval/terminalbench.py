@@ -179,14 +179,32 @@ class TerminalBenchGenerationTask(GenerationTask):
         logs_dir = self.output_dir / "run-logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
 
+        if data_point.get("container_formatter") is not None:
+            container_path = data_point["container_formatter"].format(task_id=data_point["task_id"])
+        else:
+            # Build image on the fly
+            container_path = f"{data_point['task_id']}.sif"
+            build_cmd = (
+                f"cd {TB_REPO_PATH} && "
+                f"source .venv/bin/activate && "
+                # Build Docker image
+                f"tb tasks build --task-id {data_point['task_id']} --dataset-path nv-internal && "
+                # Convert Docker image to Apptainer image
+                f"apptainer build {container_path} docker-daemon://tb__{data_point['task_id']}__client"
+            )
+            try:
+                await self._run_command(build_cmd, logs_dir / f"{data_point['task_id']}.build.log")
+            except ValueError:
+                raise ValueError(
+                    f"Container build for task {data_point['task_id']} failed.\n"
+                    "This may be because Docker is not available on your system. "
+                    "If that is the case, you can build Apptainer .sif images elsewhere and use them, e.g. like this:\n"
+                    "ns prepare_data terminal-bench --container_formatter /your_mounted_images_folder/{task_id}.sif"
+                )
+
         # TODO: how to handle custom datasets?
         #       currently tasks are stored directly inside the repo as subfolders.
         #       will we need datasets that are stored outside of the tb repo we're cloning?
-        #
-        # TODO: how to handle containers?
-        #       currently the container names are stored in docker-compose.yaml for each task (see nv-internal folder),
-        #       and the code handles downloading .sif files or reusing existing ones inside of --images-base-path.
-        #       should we reuse that logic, or make the user download and reference the containers like in swe-bench?
         tb_cmd = (
             f"cd {TB_REPO_PATH} && "
             f"source .venv/bin/activate && "
@@ -197,7 +215,7 @@ class TerminalBenchGenerationTask(GenerationTask):
             f"    --dataset-path nv-internal "
             f"    --task-id {data_point['task_id']} "
             f"    --backend singularity "
-            f"    --images-base-path /terminal-bench-images "
+            f"    --image-path {container_path} "
             f"    --output-path runs "
             f"    --run-id {data_point['task_id']} && "
             f"cp -r runs/{data_point['task_id']} {runs_dir}"

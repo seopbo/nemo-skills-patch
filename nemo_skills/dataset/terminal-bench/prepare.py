@@ -98,6 +98,15 @@ NV_INTERNAL_TASKS = [
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--container_formatter",
+        type=str,
+        default=None,
+        help="Container formatter string. "
+        "If not specified, containers will be built on the fly before running evaluation. This requires Docker. "
+        "You can build .sif containers and store them in a mounted directory "
+        "which you can reference here to avoid rebuilding all the time.",
+    )
+    parser.add_argument(
         "--setup", type=str, default="default", help="Setup name (used as nemo-skills split parameter)."
     )
     args = parser.parse_args()
@@ -105,4 +114,5 @@ if __name__ == "__main__":
     output_file = Path(__file__).parent / f"{args.setup}.jsonl"
     with open(output_file, "w") as fout:
         for task in NV_INTERNAL_TASKS:
-            print(json.dumps({"task_id": task}), file=fout)
+            row = {"task_id": task, "container_formatter": args.container_formatter}
+            print(json.dumps(row), file=fout)
