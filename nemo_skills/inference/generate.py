@@ -567,6 +567,7 @@ class GenerationTask:
             "prompt": self.fill_prompt(data_point, all_data),
             "stop_phrases": [self.cfg.stop_phrase] if self.cfg.stop_phrase else None,
             "include_response": True, # temp used in nemo gym
+            "logprobs": inference_params["top_logprobs"] is not None
         }
 
         if self.cfg.code_execution:
