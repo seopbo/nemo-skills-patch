@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import random
 import re
 import sys
 import time
@@ -389,10 +390,19 @@ class IOIExecutionGenerationTask(GenerationTask):
             f"Memory capacity K = {k}.",
             "Here are the current memory candidates with their sample test scores:",
         ]
-        for idx, e in enumerate(self.saved_solutions, start=1):
+        # Randomize display order to minimize positional bias
+        shuffled_indices = list(range(len(self.saved_solutions)))
+        random.shuffle(shuffled_indices)
+        display_to_actual_index = {
+            display_idx + 1: actual_idx for display_idx, actual_idx in enumerate(shuffled_indices)
+        }
+        for display_idx, actual_idx in enumerate(shuffled_indices, start=1):
+            e = self.saved_solutions[actual_idx]
             memory_text_lines.append("")
-            memory_text_lines.append(f"[#{idx}] sample_score={e.get('sample_score', 0.0):.3f}")
-            memory_text_lines.append(self._build_solution_block(e.get("solution", ""), title_suffix=f" #{idx}"))
+            memory_text_lines.append(f"[#{display_idx}] sample_score={e.get('sample_score', 0.0):.3f}")
+            memory_text_lines.append(
+                self._build_solution_block(e.get("solution", ""), title_suffix=f" #{display_idx}")
+            )
         memory_text = "\n".join(memory_text_lines)
 
         # Compose current solution block
@@ -411,15 +421,16 @@ class IOIExecutionGenerationTask(GenerationTask):
         verdict = extract_verdict(llm_out["generation"])
         if verdict and verdict != "no":
             try:
-                idx = int(verdict)
-                if 1 <= idx <= len(self.saved_solutions):
-                    self.saved_solutions[idx - 1] = {
+                display_idx = int(verdict)
+                if 1 <= display_idx <= len(self.saved_solutions):
+                    actual_idx = display_to_actual_index.get(display_idx)
+                    self.saved_solutions[actual_idx] = {
                         "solution": code,
                         "step": int(step_index),
                         "sample_score": float(sample_score),
                     }
                     print(
-                        f"Async Pos : {async_pos} Step : {step_index} Problem {problem_id}: Overwritten position {idx} in memory"
+                        f"Async Pos : {async_pos} Step : {step_index} Problem {problem_id}: Overwritten display position {display_idx} (actual {actual_idx + 1}) in memory"
                     )
                 else:
                     print(
