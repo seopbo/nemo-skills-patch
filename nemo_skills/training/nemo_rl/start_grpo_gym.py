@@ -96,7 +96,7 @@ def init_ray_workingdir():
     # Store the original function from the shared ray object
     original_ray_init = ray.init
 
-    # Define your new function
+    # Define new function
     def patched_ray_init(*args, **kwargs):
         print("--> Intercepting ray.init call to insert working directory.")
         # Modify the arguments
@@ -107,17 +107,11 @@ def init_ray_workingdir():
         # Call the original
         return original_ray_init(*args, **kwargs)
 
-    # --- The Magic Moment ✨ ---
-    # This modifies the SINGLE, SHARED ray module object.
-    # You are changing what the name 'init' points to on that object.
     ray.init = patched_ray_init
 
-    # Now, call the imported function
     print("Calling init_ray()...")
     init_ray()
-    print("...done.")
 
-    # It's good practice to restore it afterwards
     ray.init = original_ray_init
 
 
