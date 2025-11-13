@@ -84,6 +84,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     randomize_k_solutions: bool = False
     min_random_k_solutions: int = 1
     model_choose_steps: bool = False
+    average_model_choose_steps: int = 1
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -170,6 +171,18 @@ class IOIExecutionGenerationTask(GenerationTask):
                 print(f"Retry choose-steps {attempt}/{attempts} at async position {async_pos}.")
         return chosen
 
+    async def _decide_steps_average_parallel(
+        self, data_point, all_data, async_pos: int, num_samples: int
+    ) -> int | None:
+        """Run multiple choose-steps queries in parallel and return the rounded average."""
+        n = max(1, int(num_samples or 1))
+        tasks = [self._decide_steps_with_retry(data_point, all_data, async_pos) for _ in range(n)]
+        results = await asyncio.gather(*tasks)
+        ints = [r for r in results if isinstance(r, int)]
+        if not ints:
+            return None
+        return int(round(sum(ints) / len(ints)))
+
     async def process_single_datapoint(self, data_point, all_data, prompt=None):
         chat_history = []
         num_steps_completed = 0
@@ -219,7 +232,13 @@ class IOIExecutionGenerationTask(GenerationTask):
                     selected_k = original_show_k
             # Decide number of improvement steps (optional)
             if getattr(self.cfg, "model_choose_steps", False):
-                decided = await self._decide_steps_with_retry(data_point, all_data, async_pos)
+                num_samples = max(1, int(getattr(self.cfg, "average_model_choose_steps", 1) or 1))
+                if num_samples == 1:
+                    decided = await self._decide_steps_with_retry(data_point, all_data, async_pos)
+                else:
+                    decided = await self._decide_steps_average_parallel(
+                        data_point, all_data, async_pos, num_samples=num_samples
+                    )
                 if isinstance(decided, int):
                     # Clip to [1, total_steps]
                     decided_total_steps = max(1, min(int(self.cfg.total_steps), decided))
