@@ -151,8 +151,7 @@ def _create_job_unified(
                 )
                 components.append(sandbox_cmd)
 
-            # Create client script with cross-component references
-            # For multi-model, client needs to reference ALL server scripts
+            # Create client script with cross-component references to all servers
             client_script = GenerationClientScript(
                 output_dir=generation_params["output_dir"],
                 input_file=generation_params.get("input_file"),
@@ -166,15 +165,12 @@ def _create_job_unified(
                 wandb_parameters=generation_params.get("wandb_parameters"),
                 with_sandbox=with_sandbox,
                 script=generation_params.get("script", "nemo_skills.inference.generate"),
-                # Cross-component reference (only to first server and sandbox for now)
-                # TODO: Update GenerationClientScript to handle multiple servers
-                server=server_scripts[0] if server_scripts else None,
+                # Multi-server support (works for single and multi-model)
+                servers=server_scripts if server_scripts else None,
+                server_addresses_prehosted=generation_params.get("server_addresses_prehosted"),
+                model_names=generation_params.get("model_names"),
+                server_types=generation_params.get("server_types"),
                 sandbox=sandbox_script,
-                # Store all server info for multi-model command building
-                _all_servers=server_scripts if num_models > 1 else None,
-                _server_addresses_prehosted=generation_params.get("server_addresses_prehosted", []),
-                _model_names=generation_params.get("model_names", []),
-                _server_types=generation_params.get("server_types", []),
             )
 
             client_cmd = Command(

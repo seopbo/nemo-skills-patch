@@ -15,10 +15,9 @@
 from __future__ import annotations
 
 import logging
-import shlex
 from contextlib import nullcontext
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Tuple, Union
 
 import nemo_run as run
 
@@ -31,7 +30,6 @@ from nemo_skills.pipeline.utils import (
     run_exp,
     temporary_env_update,
 )
-from nemo_skills.pipeline.utils.commands import wrap_command
 from nemo_skills.pipeline.utils.exp import (
     REUSE_CODE_EXP,
     get_packaging_job_key,
@@ -39,7 +37,6 @@ from nemo_skills.pipeline.utils.exp import (
     tunnel_hash,
 )
 from nemo_skills.pipeline.utils.mounts import is_mounted_filepath
-from nemo_skills.pipeline.utils.packager import get_registered_external_repo
 from nemo_skills.utils import get_logger_name
 
 """
@@ -156,149 +153,63 @@ LOG = logging.getLogger(get_logger_name(__file__))
 
 @dataclass
 class Command:
-    """Declarative command for running tasks in containers.
+    """Declarative command for running tasks in containers using run.Script objects.
 
-    The command can be:
-    - A run.Script object: Recommended approach with explicit fields and type safety
-    - A string: Legacy support, evaluated immediately
-    - A callable (lambda): Legacy support, evaluated lazily
-
-    Script approach (recommended):
+    Example:
         server = ServerScript(server_type="vllm", model_path="/models/llama", ...)
-        Command(script=server, container="vllm", ...)
-
-    Legacy string/callable approach (deprecated):
-        Command(command="python train.py", container="nemo-skills", ...)
+        Command(script=server, container="vllm", name="my_server")
     """
 
-    # New: Script-based interface (recommended)
-    script: Optional[run.Script] = None
-
-    # Legacy: string/callable command (deprecated, for backward compatibility)
-    command: Optional[Union[str, Callable]] = None
-
+    script: run.Script
     container: str = "nemo-skills"
     gpus: Optional[int] = None
     nodes: int = 1
     name: str = "command"
-    working_dir: str = "/nemo_run/code"
-    env_vars: Dict[str, str] = field(default_factory=dict)
     installation_command: Optional[str] = None
 
-    # Legacy metadata support (deprecated - use Script fields instead)
-    port: Optional[int] = None
-    metadata: Dict[str, any] = field(default_factory=dict)
-    het_group_index: Optional[int] = None  # Set per-job by Pipeline (not global)
-
-    def __post_init__(self):
-        # Validate: either script or command must be provided, not both
-        if self.script is None and self.command is None:
-            raise ValueError("Either 'script' or 'command' must be provided")
-        if self.script is not None and self.command is not None:
-            raise ValueError("Cannot provide both 'script' and 'command'. Use 'script' for new code.")
-
-        # If using legacy command string, wrap with environment setup
-        if self.command is not None and isinstance(self.command, str) and (self.env_vars or self.working_dir):
-            self.command = wrap_command(self.command, self.working_dir, self.env_vars)
-
-    def hostname_ref(self) -> str:
-        """Get hostname reference for hetjob cross-component communication."""
-        if self.het_group_index is None:
-            return "127.0.0.1"  # Local fallback
-        # For heterogeneous SLURM jobs, resolve nodelist to actual hostname
-        return f"$(scontrol show hostnames $SLURM_JOB_NODELIST_HET_GROUP_{self.het_group_index} | head -n1)"
-
-    def meta_ref(self, key: str) -> str:
-        """Get metadata value (like port). Fails if key not found."""
-        if key not in self.metadata:
-            raise KeyError(
-                f"Metadata key '{key}' not found in Command '{self.name}'. "
-                f"Available keys: {list(self.metadata.keys())}"
-            )
-        return str(self.metadata[key])
-
-    def prepare_for_execution(self, cluster_config: Dict) -> Tuple[Union[run.Script, str], Dict]:
-        """Prepare command for execution.
+    def prepare_for_execution(self, cluster_config: Dict) -> Tuple[run.Script, Dict]:
+        """Prepare script for execution.
 
         This method:
-        1. For Script interface: evaluates lazy commands, applies installation_command, returns Script
-        2. For legacy interface: evaluates callables, wraps with installation_command, returns string
-        3. Builds execution config from Script fields or metadata
+        1. Evaluates lazy commands (if script.inline is callable)
+        2. Applies installation_command wrapper
+        3. Builds execution config from Script fields
 
         Returns:
-            Tuple of (Script_object_or_string, execution_config)
+            Tuple of (Script_object, execution_config)
         """
         runtime_metadata = {}
 
-        # Handle Script-based interface (recommended)
-        if self.script is not None:
-            # If script.inline is callable (lazy command building), evaluate it now
-            if callable(self.script.inline):
-                result = self.script.inline()
+        # If script.inline is callable (lazy command building), evaluate it now
+        if callable(self.script.inline):
+            result = self.script.inline()
 
-                if isinstance(result, tuple):
-                    evaluated_command, runtime_metadata = result
-                else:
-                    evaluated_command = result
-
-                # Update script.inline with evaluated command
-                object.__setattr__(self.script, "inline", evaluated_command)
-
-            # Wrap with installation_command if provided
-            if self.installation_command:
-                wrapped_command = install_packages_wrap(self.script.inline, self.installation_command)
-                object.__setattr__(self.script, "inline", wrapped_command)
-
-            # Build execution config from Script fields
-            execution_config = {
-                "num_tasks": getattr(self.script, "num_tasks", 1),
-                "num_gpus": self.gpus if self.gpus is not None else getattr(self.script, "num_gpus", 0),
-                "num_nodes": self.nodes if self.nodes != 1 else getattr(self.script, "num_nodes", 1),
-                "log_prefix": getattr(self.script, "log_prefix", "main"),
-                "environment": runtime_metadata.get("environment", {}),
-                "mounts": None,  # Mounts not currently exposed by Scripts
-                "container": self.container,
-            }
-
-            # Return the Script object itself, not a string
-            return self.script, execution_config
-
-        # Handle legacy command interface (deprecated)
-        else:
-            # Evaluate if callable (for cross-component references like hostname_ref)
-            if callable(self.command):
-                result = self.command()
-
-                if isinstance(result, tuple):
-                    final_command, runtime_metadata = result
-                    # Deep merge metadata, especially environment dict
-                    for key, value in runtime_metadata.items():
-                        if key == "environment" and key in self.metadata:
-                            # Merge environment dicts instead of replacing
-                            self.metadata[key].update(value)
-                        else:
-                            self.metadata[key] = value
-                else:
-                    final_command = result
+            if isinstance(result, tuple):
+                evaluated_command, runtime_metadata = result
             else:
-                final_command = self.command
+                evaluated_command = result
 
-            # Build execution config from metadata (legacy)
-            execution_config = {
-                "num_tasks": self.metadata.get("num_tasks", 1),
-                "num_gpus": self.metadata.get("gpus", self.gpus or 0),
-                "num_nodes": self.metadata.get("nodes", self.nodes),
-                "environment": self.metadata.get("environment", {}),
-                "log_prefix": self.metadata.get("log_prefix", "main"),
-                "mounts": self.metadata.get("mounts"),
-                "container": self.metadata.get("container", self.container),
-            }
+            # Update script.inline with evaluated command
+            object.__setattr__(self.script, "inline", evaluated_command)
 
-            # Wrap with installation_command if provided
-            if self.installation_command:
-                final_command = install_packages_wrap(final_command, self.installation_command)
+        # Wrap with installation_command if provided
+        if self.installation_command:
+            wrapped_command = install_packages_wrap(self.script.inline, self.installation_command)
+            object.__setattr__(self.script, "inline", wrapped_command)
 
-            return final_command, execution_config
+        # Build execution config from Script fields
+        execution_config = {
+            "num_tasks": getattr(self.script, "num_tasks", 1),
+            "num_gpus": self.gpus if self.gpus is not None else getattr(self.script, "num_gpus", 0),
+            "num_nodes": self.nodes if self.nodes != 1 else getattr(self.script, "num_nodes", 1),
+            "log_prefix": getattr(self.script, "log_prefix", "main"),
+            "environment": runtime_metadata.get("environment", {}),
+            "mounts": None,  # Mounts not currently exposed by Scripts
+            "container": self.container,
+        }
+
+        # Return the Script object itself
+        return self.script, execution_config
 
     def get_name(self) -> str:
         return self.name
@@ -536,23 +447,15 @@ class Pipeline:
 
             return exp
 
-    def _prepare_command(self, command, cluster_config: Dict) -> Tuple[Union[run.Script, str], Dict]:
-        """Prepare command and handle mpirun wrapping.
+    def _prepare_command(self, command, cluster_config: Dict) -> Tuple[run.Script, Dict]:
+        """Prepare command for execution.
 
         Returns:
-            Tuple of (Script_or_string, exec_config)
+            Tuple of (Script_object, exec_config)
         """
-        script_or_cmd, exec_config = command.prepare_for_execution(cluster_config)
-
-        # Handle mpirun wrapping for non-SLURM executors (only for legacy string commands)
-        num_tasks = exec_config["num_tasks"]
-        if cluster_config["executor"] != "slurm" and num_tasks > 1:
-            if isinstance(script_or_cmd, str):
-                # Legacy string command - wrap with mpirun
-                script_or_cmd = f"mpirun --allow-run-as-root -np {num_tasks} bash -c {shlex.quote(script_or_cmd)}"
-            # For Script objects, mpirun wrapping should be handled by the executor
-
-        return script_or_cmd, exec_config
+        script, exec_config = command.prepare_for_execution(cluster_config)
+        # Note: mpirun wrapping for multi-task scripts is handled by the executor
+        return script, exec_config
 
     def _resolve_container(self, exec_config: Dict, command, cluster_config: Dict) -> str:
         """Resolve container name to image path."""
@@ -628,7 +531,7 @@ class Pipeline:
         if log_dir is None:
             raise ValueError(f"CommandGroup '{groups[0].name}' must have log_dir set, or provide it to pipeline.run()")
 
-        commands: List[str] = []
+        scripts: List[run.Script] = []
         executors: List = []
         het_group_indices: List[int] = []
 
@@ -659,18 +562,12 @@ class Pipeline:
                 # Assign het_group_index ONLY for heterogeneous jobs (per-job, not global)
                 # Non-heterogeneous jobs use localhost, so het_group_index should remain None
                 if heterogeneous:
-                    command.het_group_index = het_idx
-                    # Also assign to Script if using Script interface
-                    if command.script is not None:
-                        command.script.het_group_index = het_idx
+                    command.script.het_group_index = het_idx
                 else:
-                    command.het_group_index = None
-                    # Also assign to Script if using Script interface
-                    if command.script is not None:
-                        command.script.het_group_index = None
+                    command.script.het_group_index = None
 
-                final_cmd, exec_config = self._prepare_command(command, cluster_config)
-                commands.append(final_cmd)
+                script, exec_config = self._prepare_command(command, cluster_config)
+                scripts.append(script)
 
                 # Adjust GPU allocation (first component gets job-level GPUs for sbatch) for single-group jobs
                 exec_config["num_gpus"] = exec_config["num_gpus"] or 0
@@ -743,15 +640,7 @@ class Pipeline:
                 # If reuse_code=False, clear cache
                 REUSE_CODE_EXP.pop(tunnel_hash(tunnel), None)
 
-        # Handle executor="none" path replacements (single-group only)
-        # Only apply to legacy string commands, not Script objects
-        if (not heterogeneous) and cluster_config["executor"] == "none":
-            for idx in range(len(commands)):
-                if isinstance(commands[idx], str):
-                    commands[idx] = commands[idx].replace(
-                        "/nemo_run/code/nemo_skills", str(get_registered_external_repo("nemo_skills").path)
-                    )
-                    commands[idx] = commands[idx].replace("/nemo_run/code", "./")
+        # Note: Path replacements for executor="none" are no longer needed with Script interface
 
         # Ray metadata handling
         if self.with_ray and cluster_config["executor"] == "slurm":
@@ -762,38 +651,21 @@ class Pipeline:
         # Add to experiment and return task ID
         # Note: Internal dependencies (task handles from same experiment) go to exp.add()
         #       External dependencies (SLURM job IDs from other experiments) go to executor
-        if (not heterogeneous) and len(commands) == 1:
-            # Pass Script or string directly to exp.add()
-            if isinstance(commands[0], run.Script):
-                # Script object - pass directly with metadata
-                if metadata:
-                    commands[0].metadata = metadata
-                task_id = exp.add(
-                    commands[0],
-                    executor=executors[0],
-                    name="nemo-run",
-                    dependencies=internal_deps,
-                )
-            else:
-                # Legacy string command - wrap in run.Script
-                task_id = exp.add(
-                    run.Script(inline=commands[0], metadata=metadata),
-                    executor=executors[0],
-                    name="nemo-run",
-                    dependencies=internal_deps,
-                )
+        if (not heterogeneous) and len(scripts) == 1:
+            # Single script - pass directly to exp.add()
+            if metadata:
+                scripts[0].metadata = metadata
+            task_id = exp.add(
+                scripts[0],
+                executor=executors[0],
+                name="nemo-run",
+                dependencies=internal_deps,
+            )
         else:
-            # Multiple commands or heterogeneous job
-            scripts = []
-            for idx, cmd in enumerate(commands):
-                if isinstance(cmd, run.Script):
-                    # Script object - pass directly with metadata
-                    if metadata and idx == 0:
-                        cmd.metadata = metadata
-                    scripts.append(cmd)
-                else:
-                    # Legacy string command - wrap in run.Script
-                    scripts.append(run.Script(inline=cmd, metadata=(metadata if idx == 0 else None)))
+            # Multiple scripts or heterogeneous job
+            # Apply metadata to first script only
+            if metadata:
+                scripts[0].metadata = metadata
 
             task_id = exp.add(
                 scripts,

@@ -256,8 +256,8 @@ class GenerationClientScript(BaseJobScript):
     """Script for LLM generation/inference client.
 
     This script wraps generation command builders and provides:
-    - Cross-component references to server and sandbox
-    - Lazy command building when cross-refs are present
+    - Cross-component references to multiple servers and sandbox
+    - Lazy command building for runtime hostname resolution
     - Type-safe generation configuration
     - Environment variable handling for sandbox/server communication
 
@@ -274,24 +274,32 @@ class GenerationClientScript(BaseJobScript):
         wandb_parameters: WandB logging configuration (optional)
         with_sandbox: Whether sandbox is enabled
         script: Module or file path for generation script (default: nemo_skills.inference.generate)
-        server: Reference to ServerScript for cross-component communication (optional)
+        servers: List of ServerScript references (None for pre-hosted servers)
+        server_addresses_prehosted: Addresses for pre-hosted servers (parallel to servers list)
+        model_names: Model names for multi-model generation (optional)
+        server_types: Server types for multi-model generation (optional)
         sandbox: Reference to SandboxScript for cross-component communication (optional)
         log_prefix: Prefix for log files (default: "main")
 
-    Example:
-        # Without cross-component references
+    Examples:
+        # Single server
         client = GenerationClientScript(
             output_dir="/results",
             input_file="/data/input.jsonl",
-            extra_arguments="++inference.temperature=0.7",
+            servers=[server_script],
+            model_names=["llama-8b"],
+            server_types=["vllm"],
         )
 
-        # With server and sandbox references (lazy command building)
+        # Multi-model with self-hosted and pre-hosted servers
         client = GenerationClientScript(
             output_dir="/results",
             input_file="/data/input.jsonl",
-            server=server_script,  # Will resolve server address at runtime
-            sandbox=sandbox_script,  # Will set NEMO_SKILLS_SANDBOX_PORT env var
+            servers=[server1, server2, None],  # None = pre-hosted
+            server_addresses_prehosted=["", "", "https://api.openai.com"],
+            model_names=["llama-8b", "llama-70b", "gpt-4"],
+            server_types=["vllm", "vllm", "openai"],
+            sandbox=sandbox_script,
             with_sandbox=True,
         )
     """
@@ -309,88 +317,48 @@ class GenerationClientScript(BaseJobScript):
     with_sandbox: bool = False
     script: str = "nemo_skills.inference.generate"
 
-    # Cross-component references (optional)
-    server: Optional["ServerScript"] = None
+    # Cross-component references for single/multi-model
+    servers: Optional[List[Optional["ServerScript"]]] = None
+    server_addresses_prehosted: Optional[List[str]] = None
+    model_names: Optional[List[str]] = None
+    server_types: Optional[List[str]] = None
     sandbox: Optional["SandboxScript"] = None
-
-    # Multi-model support (internal fields, set by _create_job_unified)
-    _all_servers: Optional[List[Optional["ServerScript"]]] = None
-    _server_addresses_prehosted: Optional[List[str]] = None
-    _model_names: Optional[List[str]] = None
-    _server_types: Optional[List[str]] = None
 
     log_prefix: str = field(default="main", init=False)
 
     def __post_init__(self):
-        """Initialize generation client script.
+        """Initialize generation client script with lazy command building.
 
-        If cross-component references (server/sandbox) are present, builds
-        command lazily via a callable. The callable is evaluated later when
-        het_group_index is assigned, allowing hostname_ref() to work correctly.
+        Builds command lazily via a callable that is evaluated when het_group_index
+        is assigned, allowing hostname_ref() to resolve correctly for heterogeneous jobs.
 
-        For multi-model generation, uses _all_servers to build runtime addresses.
-
-        Otherwise, builds command immediately.
+        This works for both cases:
+        - With cross-refs: Resolves server hostnames and sandbox ports at runtime
+        - Without cross-refs: Just builds the command string (no runtime resolution needed)
         """
-        # Check if we need lazy command building (has cross-component refs or multi-model)
-        has_cross_refs = self.sandbox is not None or self._all_servers is not None
 
-        if has_cross_refs:
-            # Lazy command building - will be evaluated when het_group_index is set
-            def build_cmd() -> Tuple[str, Dict]:
-                """Build command at runtime when cross-refs are resolved."""
-                env_vars = {}
+        def build_cmd() -> Tuple[str, Dict]:
+            """Build command at runtime when cross-refs are resolved."""
+            env_vars = {}
 
-                # Add sandbox port to environment if sandbox is referenced
-                if self.sandbox:
-                    env_vars["NEMO_SKILLS_SANDBOX_PORT"] = str(self.sandbox.port)
+            # Add sandbox port to environment if sandbox is referenced
+            if self.sandbox:
+                env_vars["NEMO_SKILLS_SANDBOX_PORT"] = str(self.sandbox.port)
 
-                # Build server addresses for multi-model
-                server_addresses = None
-                model_names = None
-                server_types = None
+            # Build server addresses if servers are provided
+            server_addresses = None
+            if self.servers is not None:
+                server_addresses = []
+                for server_idx, server_script in enumerate(self.servers):
+                    if server_script is not None:
+                        # Self-hosted: construct address from hostname and port refs
+                        addr = f"{server_script.hostname_ref()}:{server_script.port}"
+                    else:
+                        # Pre-hosted: use the address from server_addresses_prehosted
+                        addr = self.server_addresses_prehosted[server_idx]
+                    server_addresses.append(addr)
 
-                if self._all_servers is not None:
-                    # Multi-model: build runtime addresses
-                    server_addresses = []
-                    for server_idx, server_script in enumerate(self._all_servers):
-                        if server_script is not None:
-                            # Self-hosted: construct address from hostname and port refs
-                            addr = f"{server_script.hostname_ref()}:{server_script.port}"
-                        else:
-                            # Pre-hosted: use the original address from config
-                            addr = self._server_addresses_prehosted[server_idx]
-                        server_addresses.append(addr)
-
-                    model_names = self._model_names
-                    server_types = self._server_types
-
-                # Build generation command
-                cmd = get_generation_cmd(
-                    output_dir=self.output_dir,
-                    input_file=self.input_file,
-                    input_dir=self.input_dir,
-                    extra_arguments=self.extra_arguments,
-                    random_seed=self.random_seed,
-                    chunk_id=self.chunk_id,
-                    num_chunks=self.num_chunks,
-                    preprocess_cmd=self.preprocess_cmd,
-                    postprocess_cmd=self.postprocess_cmd,
-                    wandb_parameters=self.wandb_parameters,
-                    with_sandbox=self.with_sandbox,
-                    script=self.script,
-                    # Multi-model parameters
-                    server_addresses=server_addresses,
-                    model_names=model_names,
-                    server_types=server_types,
-                )
-
-                # Return command and runtime metadata (environment vars)
-                return cmd, {"environment": env_vars}
-
-            self.inline = build_cmd
-        else:
-            # No cross-refs, build immediately
+            # Build generation command
             cmd = get_generation_cmd(
                 output_dir=self.output_dir,
                 input_file=self.input_file,
@@ -404,8 +372,17 @@ class GenerationClientScript(BaseJobScript):
                 wandb_parameters=self.wandb_parameters,
                 with_sandbox=self.with_sandbox,
                 script=self.script,
+                # Multi-model parameters (None for single-model)
+                server_addresses=server_addresses,
+                model_names=self.model_names,
+                server_types=self.server_types,
             )
-            self.inline = cmd
+
+            # Return command and runtime metadata (environment vars)
+            return cmd, {"environment": env_vars}
+
+        # Always use lazy command building
+        self.inline = build_cmd
 
         # Set entrypoint for run.Script (required by parent class)
         object.__setattr__(self, "entrypoint", "bash")
