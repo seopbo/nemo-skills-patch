@@ -12,6 +12,36 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
+import logging
+import shlex
+from contextlib import nullcontext
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Tuple, Union
+
+import nemo_run as run
+
+from nemo_skills.pipeline.utils import (
+    get_env_variables,
+    get_executor,
+    get_exp,
+    get_exp_handles,
+    get_tunnel,
+    run_exp,
+    temporary_env_update,
+)
+from nemo_skills.pipeline.utils.commands import wrap_command
+from nemo_skills.pipeline.utils.exp import (
+    REUSE_CODE_EXP,
+    get_packaging_job_key,
+    install_packages_wrap,
+    tunnel_hash,
+)
+from nemo_skills.pipeline.utils.mounts import is_mounted_filepath
+from nemo_skills.pipeline.utils.packager import get_registered_external_repo
+from nemo_skills.utils import get_logger_name
+
 """
 Simplified declarative pipeline system using only Command for all task types.
 
@@ -120,34 +150,6 @@ Advanced Example (Multiple jobs with dependencies and heterogeneous components):
     )
     pipeline.run()
 """
-
-import logging
-import shlex
-from contextlib import nullcontext
-from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Optional, Tuple, Union
-
-import nemo_run as run
-
-from nemo_skills.pipeline.utils import (
-    get_env_variables,
-    get_executor,
-    get_exp,
-    get_exp_handles,
-    get_tunnel,
-    run_exp,
-    temporary_env_update,
-)
-from nemo_skills.pipeline.utils.commands import wrap_command
-from nemo_skills.pipeline.utils.exp import (
-    REUSE_CODE_EXP,
-    get_packaging_job_key,
-    install_packages_wrap,
-    tunnel_hash,
-)
-from nemo_skills.pipeline.utils.mounts import is_mounted_filepath
-from nemo_skills.pipeline.utils.packager import get_registered_external_repo
-from nemo_skills.utils import get_logger_name
 
 LOG = logging.getLogger(get_logger_name(__file__))
 
