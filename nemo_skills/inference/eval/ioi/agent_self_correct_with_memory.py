@@ -48,6 +48,25 @@ def extract_verdict(text: str):
     return matches[-1].strip().lower() if matches else None
 
 
+def extract_steps(text: str):
+    """Extract integer step count from a fenced steps block:
+
+    ```steps
+    17
+    ```
+    """
+    text = text.split("<|end|><|start|>assistant<|channel|>final<|message|>")[-1]
+    matches = re.findall(r"```steps(.*?)```", text, re.DOTALL)
+    if not matches:
+        return None
+    content = matches[-1].strip()
+    m = re.search(r"-?\d+", content)
+    try:
+        return int(m.group(0)) if m else None
+    except Exception:
+        return None
+
+
 @nested_dataclass(kw_only=True)
 class IOIExecutionConfig(GenerateSolutionsConfig):
     inference: InferenceConfig = field(default_factory=InferenceConfig)
@@ -56,11 +75,15 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     improve_after_verify_prompt_config: str = "eval/ioi/agent/improve_with_private_test"
     self_improve_prompt_config: str = "eval/ioi/agent/self_correct/self_improve"
     memory_verdict_prompt_config: str = "eval/ioi/agent/self_correct/memory_verdict"
+    model_choose_steps_prompt_config: str = "eval/ioi/agent/self_correct/choose_steps"
     total_steps: int = 60
     time_limit: str | None = None  # Optional wall-clock time limit in 'HH:MM:SS'
     show_k_solutions: int = 0  # Number of previous solutions to include in improve prompt
     retry_solution: int = 5  # Retry count when code block extraction fails
     max_char_for_stored_solution: int = 20000
+    randomize_k_solutions: bool = False
+    min_random_k_solutions: int = 1
+    model_choose_steps: bool = False
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -84,6 +107,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             "self_improve": get_prompt(cfg.self_improve_prompt_config, **prompt_kwargs),
             "failure_summary": get_prompt("eval/ioi/agent/failure_summary", **prompt_kwargs),
             "memory_verdict": get_prompt(cfg.memory_verdict_prompt_config, **prompt_kwargs),
+            "choose_steps": get_prompt(cfg.model_choose_steps_prompt_config, **prompt_kwargs),
         }
         # Parse time limit locally for this task only
         self._deadline_ts = None
@@ -128,6 +152,24 @@ class IOIExecutionGenerationTask(GenerationTask):
         # Return last even if no block; caller may decide how to handle
         return last
 
+    async def _decide_steps_with_retry(self, data_point, all_data, async_pos: int) -> int | None:
+        """Ask the model to choose number of improvement steps. Retries on parse failure."""
+        attempts = int(self.cfg.retry_solution)
+        chosen = None
+        for attempt in range(1, attempts + 1):
+            _, llm_out, _ = await self._call_llm(
+                data_point,
+                all_data,
+                "choose_steps",
+                total_steps=int(self.cfg.total_steps),
+            )
+            chosen = extract_steps(llm_out["generation"])
+            if isinstance(chosen, int):
+                return chosen
+            if attempt < attempts:
+                print(f"Retry choose-steps {attempt}/{attempts} at async position {async_pos}.")
+        return chosen
+
     async def process_single_datapoint(self, data_point, all_data, prompt=None):
         chat_history = []
         num_steps_completed = 0
@@ -135,6 +177,11 @@ class IOIExecutionGenerationTask(GenerationTask):
         # ICPC does not have a subtask score, we add it manually (max score is 1)
         if data_point.get("subtask_score") is None:
             data_point["subtask_score"] = "1"
+
+        # Capture original and effective K for this run (may be randomized)
+        original_show_k = int(self.cfg.show_k_solutions or 0)
+        selected_k = original_show_k
+        decided_total_steps = int(self.cfg.total_steps)
 
         # Attempt to resume from latest intermediate state
         async_pos = data_point[self.cfg.async_position_key]
@@ -145,6 +192,10 @@ class IOIExecutionGenerationTask(GenerationTask):
             num_steps_completed = int(saved_state["num_steps_completed"])
             self.saved_solutions = list(saved_state["saved_solutions"])
             print(f"[Resume] Restoring pos={async_pos} from step {num_steps_completed}")
+            if original_show_k > 0:
+                selected_k = int(saved_state.get("selected_k", selected_k))
+            if getattr(self.cfg, "model_choose_steps", False):
+                decided_total_steps = int(saved_state.get("decided_total_steps", decided_total_steps))
         else:
             prompt_txt, solution_response, gen_time = await self._call_llm_with_code_retry(
                 data_point, all_data, "initial", async_pos
@@ -156,6 +207,27 @@ class IOIExecutionGenerationTask(GenerationTask):
 
             print("[Initial] Generated initial solution.")
             # Save checkpoint after initial solution
+            # Determine effective K for this run (optionally randomized)
+            if original_show_k > 0:
+                if getattr(self.cfg, "randomize_k_solutions", False):
+                    min_k = int(getattr(self.cfg, "min_random_k_solutions", 1) or 1)
+                    min_k = max(1, min_k)
+                    if min_k > original_show_k:
+                        min_k = original_show_k
+                    selected_k = random.randint(min_k, original_show_k)
+                else:
+                    selected_k = original_show_k
+            # Decide number of improvement steps (optional)
+            if getattr(self.cfg, "model_choose_steps", False):
+                decided = await self._decide_steps_with_retry(data_point, all_data, async_pos)
+                if isinstance(decided, int):
+                    # Clip to [1, total_steps]
+                    decided_total_steps = max(1, min(int(self.cfg.total_steps), decided))
+                else:
+                    decided_total_steps = int(self.cfg.total_steps)
+                print(
+                    f"Async Pos : {async_pos} Step : {num_steps_completed} Problem {data_point['id']}: Decided improvement steps = {decided_total_steps} (max {int(self.cfg.total_steps)})"
+                )
             print(f"[Checkpoint] Saving intermediate pos={async_pos}, step={num_steps_completed}")
             await self.save_intermediate_state(
                 async_pos,
@@ -165,10 +237,12 @@ class IOIExecutionGenerationTask(GenerationTask):
                     "steps": chat_history,
                     "num_steps_completed": num_steps_completed,
                     "saved_solutions": self.saved_solutions,
+                    "selected_k": selected_k,
+                    "decided_total_steps": decided_total_steps,
                 },
             )
 
-        for step_num in range(num_steps_completed, self.cfg.total_steps):
+        for step_num in range(num_steps_completed, decided_total_steps):
             # Evaluate the current solution using the external evaluator.
             # Time the external evaluator to capture evaluation latency.
             eval_start_t = time.time()
@@ -201,7 +275,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             sample_avg = _avg(sample_outputs)
 
             # Update memory with current code solution and score (use sample_avg)
-            if int(self.cfg.show_k_solutions) > 0:
+            if int(selected_k) > 0:
                 current_code_block = extract_code_block(cur_generation_response)
                 await self._maybe_update_memory(
                     code=current_code_block,
@@ -210,6 +284,7 @@ class IOIExecutionGenerationTask(GenerationTask):
                     chat_history_ref=chat_history,
                     async_pos=async_pos,
                     problem_id=data_point["id"],
+                    k_override=selected_k,
                 )
 
             # Check if all subtasks passed fully (score == 1 for every output)
@@ -220,8 +295,8 @@ class IOIExecutionGenerationTask(GenerationTask):
 
             # Build the 'solution' payload for the next prompt using only code
             current_code_block = extract_code_block(cur_generation_response)
-            if int(self.cfg.show_k_solutions) > 0:
-                prev_text = self._build_previous_solutions_text(self.cfg.show_k_solutions)
+            if int(selected_k) > 0:
+                prev_text = self._build_previous_solutions_text(selected_k)
                 current_text = self._build_solution_block(current_code_block)
                 solution_payload = prev_text + ("\n\n" if prev_text else "") + current_text
             else:
@@ -258,6 +333,7 @@ class IOIExecutionGenerationTask(GenerationTask):
                     "steps": chat_history,
                     "num_steps_completed": num_steps_completed,
                     "saved_solutions": self.saved_solutions,
+                    "selected_k": selected_k,
                 },
             )
             # Time limit check only inside the loop after checkpoint save
@@ -265,44 +341,20 @@ class IOIExecutionGenerationTask(GenerationTask):
                 print("[TimeLimit] Reached limit after step save; exiting cleanly.")
                 sys.exit(0)
 
-        # Final evaluation of memory solutions (if any) in parallel
+        # Final evaluation of memory solutions (if any) using the helper
         memory_solutions_results = []
-        if int(self.cfg.show_k_solutions) > 0 and self.saved_solutions:
-            payloads = []
-            for e in self.saved_solutions[-int(self.cfg.show_k_solutions) :]:
-                code = e.get("solution") if isinstance(e, dict) else e
-                if not code:
-                    continue
-                payloads.append({**data_point, "generation": f"```cpp\n{code}\n```"})
-            if payloads:
-                eval_tasks = [self.evaluator.eval_single(p) for p in payloads]
-                eval_results_list = await asyncio.gather(*eval_tasks)
-                for idx, (entry, res) in enumerate(
-                    zip(self.saved_solutions[-len(eval_results_list) :], eval_results_list), start=1
-                ):
-                    tcr = res.get("test_case_results", {})
-                    outputs_all = tcr.get("outputs", [])
-                    sample_outputs = [o for o in outputs_all if o.get("test_type") == "sample"]
-
-                    def _avg(outputs_list):
-                        if not outputs_list:
-                            return 0.0
-                        try:
-                            total = len(outputs_list)
-                            passed = sum(1.0 if float(o.get("score", 0.0)) == 1.0 else 0.0 for o in outputs_list)
-                            return float(passed / total)
-                        except Exception:
-                            return 0.0
-
-                    sample_avg = _avg(sample_outputs)
-                    memory_solutions_results.append(
-                        {
-                            "solution": entry.get("solution") if isinstance(entry, dict) else entry,
-                            "step": entry.get("step") if isinstance(entry, dict) else None,
-                            "sample_score": sample_avg,
-                            "test_case_results": tcr,
-                        }
-                    )
+        if int(selected_k) > 0 and self.saved_solutions:
+            details_by_idx = await self._evaluate_memory_solutions(data_point, return_details=True)
+            for idx, info in details_by_idx.items():
+                entry = self.saved_solutions[idx]
+                memory_solutions_results.append(
+                    {
+                        "solution": entry.get("solution") if isinstance(entry, dict) else entry,
+                        "step": entry.get("step") if isinstance(entry, dict) else None,
+                        "sample_score": info.get("sample_score"),
+                        "test_case_results": info.get("test_case_results"),
+                    }
+                )
 
         return {
             "id": data_point["id"],
@@ -336,6 +388,70 @@ class IOIExecutionGenerationTask(GenerationTask):
             for k, v in test_case_results.items()
         }
 
+    async def _evaluate_memory_solutions(self, data_point: dict, return_details: bool = False) -> dict:
+        """Evaluate all saved memory solutions.
+
+        When return_details is False (default), returns:
+            {memory_idx: {subtask: score}}
+        When return_details is True, returns:
+            {
+              memory_idx: {
+                "subtask_scores": {subtask: score},
+                "test_case_results": <raw evaluator results>,
+                "sample_score": <float>
+              }
+            }
+        """
+        if not self.saved_solutions:
+            return {}
+
+        idx_payloads = []
+        for idx, entry in enumerate(self.saved_solutions):
+            code = entry.get("solution") if isinstance(entry, dict) else entry
+            if not code:
+                continue
+            idx_payloads.append((idx, {**data_point, "generation": f"```cpp\n{code}\n```"}))
+
+        if not idx_payloads:
+            return {}
+
+        eval_tasks = [self.evaluator.eval_single(payload) for _, payload in idx_payloads]
+        eval_results_list = await asyncio.gather(*eval_tasks)
+
+        if return_details:
+            details_by_idx = {}
+            for (idx, _), res in zip(idx_payloads, eval_results_list):
+                tcr = res.get("test_case_results", {})
+                normalized = self._normalize_test_case_results(tcr)
+                # Compute sample average if available
+                outputs_all = tcr.get("outputs", [])
+                sample_outputs = [o for o in outputs_all if o.get("test_type") == "sample"]
+
+                def _avg(outputs_list):
+                    if not outputs_list:
+                        return 0.0
+                    try:
+                        total = len(outputs_list)
+                        passed = sum(1.0 if float(o.get("score", 0.0)) == 1.0 else 0.0 for o in outputs_list)
+                        return float(passed / total)
+                    except Exception:
+                        return 0.0
+
+                sample_avg = _avg(sample_outputs)
+                details_by_idx[idx] = {
+                    "subtask_scores": {k: v["score"] for k, v in normalized.items()},
+                    "test_case_results": tcr,
+                    "sample_score": sample_avg,
+                }
+            return details_by_idx
+        else:
+            scores_by_idx = {}
+            for (idx, _), res in zip(idx_payloads, eval_results_list):
+                tcr = res.get("test_case_results", {})
+                normalized = self._normalize_test_case_results(tcr)
+                scores_by_idx[idx] = {k: v["score"] for k, v in normalized.items()}
+            return scores_by_idx
+
     def _update_saved_solutions(self, solution: str) -> None:
         """Add current solution to sliding window and keep only k most recent."""
         k = int(self.cfg.show_k_solutions or 0)
@@ -349,7 +465,14 @@ class IOIExecutionGenerationTask(GenerationTask):
             del self.saved_solutions[0]
 
     async def _maybe_update_memory(
-        self, code: str, step_index: int, sample_score: float, chat_history_ref: list, async_pos: int, problem_id
+        self,
+        code: str,
+        step_index: int,
+        sample_score: float,
+        chat_history_ref: list,
+        async_pos: int,
+        problem_id,
+        k_override: int | None = None,
     ) -> None:
         """Populate and manage memory of candidate solutions.
 
@@ -359,7 +482,7 @@ class IOIExecutionGenerationTask(GenerationTask):
         - Store step index and sample score alongside code.
         - Snapshot current candidate solutions (just code strings) into chat history entry.
         """
-        k = int(self.cfg.show_k_solutions or 0)
+        k = int((k_override if k_override is not None else self.cfg.show_k_solutions) or 0)
         if k <= 0 or not code:
             return
 
