@@ -156,19 +156,25 @@ LOG = logging.getLogger(get_logger_name(__file__))
 class Command:
     """Declarative command for running tasks in containers.
 
-    The command can be either:
-    - A string: evaluated immediately
-    - A callable (lambda): evaluated lazily when the task is prepared
+    The command can be:
+    - A run.Script object: Recommended approach with explicit fields and type safety
+    - A string: Legacy support, evaluated immediately
+    - A callable (lambda): Legacy support, evaluated lazily
 
-    Lambdas are ONLY needed for cross-component references (hostname_ref, meta_ref).
-    The het_group_index isn't assigned until pipeline execution, so these must be lazy:
-        # Lambda is ESSENTIAL here - server.hostname_ref() and meta_ref() don't exist yet
-        client = Command(command=lambda: f"curl {server.hostname_ref()}:{server.meta_ref('port')}")
+    Script approach (recommended):
+        server = ServerScript(server_type="vllm", model_path="/models/llama", ...)
+        Command(script=server, container="vllm", ...)
+
+    Legacy string/callable approach (deprecated):
+        Command(command="python train.py", container="nemo-skills", ...)
     """
 
-    # Command can be a string or callable (lambda).
-    # Lambdas are primarily used for cross-component references (hostname_ref, meta_ref).
-    command: Union[str, Callable]
+    # New: Script-based interface (recommended)
+    script: Optional[run.Script] = None
+
+    # Legacy: string/callable command (deprecated, for backward compatibility)
+    command: Optional[Union[str, Callable]] = None
+
     container: str = "nemo-skills"
     gpus: Optional[int] = None
     nodes: int = 1
@@ -176,13 +182,21 @@ class Command:
     working_dir: str = "/nemo_run/code"
     env_vars: Dict[str, str] = field(default_factory=dict)
     installation_command: Optional[str] = None
-    port: Optional[int] = None  # Can be set from metadata
-    metadata: Dict[str, any] = field(default_factory=dict)  # Stores metadata from command builders
+
+    # Legacy metadata support (deprecated - use Script fields instead)
+    port: Optional[int] = None
+    metadata: Dict[str, any] = field(default_factory=dict)
     het_group_index: Optional[int] = None  # Set per-job by Pipeline (not global)
 
     def __post_init__(self):
-        # Wrap plain strings with environment setup
-        if isinstance(self.command, str) and (self.env_vars or self.working_dir):
+        # Validate: either script or command must be provided, not both
+        if self.script is None and self.command is None:
+            raise ValueError("Either 'script' or 'command' must be provided")
+        if self.script is not None and self.command is not None:
+            raise ValueError("Cannot provide both 'script' and 'command'. Use 'script' for new code.")
+
+        # If using legacy command string, wrap with environment setup
+        if self.command is not None and isinstance(self.command, str) and (self.env_vars or self.working_dir):
             self.command = wrap_command(self.command, self.working_dir, self.env_vars)
 
     def hostname_ref(self) -> str:
@@ -205,44 +219,75 @@ class Command:
         """Prepare command for execution.
 
         This method:
-        1. Evaluates callables (resolves cross-component references)
-        2. Wraps with installation_command if provided
+        1. Extracts command from Script object (if using script interface)
+        2. Evaluates callables (resolves cross-component references)
+        3. Wraps with installation_command if provided
+        4. Builds execution config from Script fields or metadata
 
         Returns:
             Tuple of (final_command, execution_config)
         """
-        # 1. Evaluate if callable (for cross-component references like hostname_ref)
-        if callable(self.command):
-            result = self.command()
+        runtime_metadata = {}
 
-            if isinstance(result, tuple):
-                final_command, runtime_metadata = result
-                # Deep merge metadata, especially environment dict
-                for key, value in runtime_metadata.items():
-                    if key == "environment" and key in self.metadata:
-                        # Merge environment dicts instead of replacing
-                        self.metadata[key].update(value)
-                    else:
-                        self.metadata[key] = value
+        # Handle Script-based interface (recommended)
+        if self.script is not None:
+            # If script.inline is callable (lazy command building), evaluate it now
+            if callable(self.script.inline):
+                result = self.script.inline()
+
+                if isinstance(result, tuple):
+                    final_command, runtime_metadata = result
+                else:
+                    final_command = result
             else:
-                final_command = result
-        else:
-            final_command = self.command
+                # Script.inline is a string, use directly
+                final_command = self.script.inline
 
-        # 2. Wrap with installation_command if provided
+            # Build execution config from Script fields
+            execution_config = {
+                "num_tasks": getattr(self.script, "num_tasks", 1),
+                "num_gpus": self.gpus if self.gpus is not None else getattr(self.script, "num_gpus", 0),
+                "num_nodes": self.nodes if self.nodes != 1 else getattr(self.script, "num_nodes", 1),
+                "log_prefix": getattr(self.script, "log_prefix", "main"),
+                "environment": runtime_metadata.get("environment", {}),
+                "mounts": None,  # Mounts not currently exposed by Scripts
+                "container": self.container,
+            }
+
+        # Handle legacy command interface (deprecated)
+        else:
+            # Evaluate if callable (for cross-component references like hostname_ref)
+            if callable(self.command):
+                result = self.command()
+
+                if isinstance(result, tuple):
+                    final_command, runtime_metadata = result
+                    # Deep merge metadata, especially environment dict
+                    for key, value in runtime_metadata.items():
+                        if key == "environment" and key in self.metadata:
+                            # Merge environment dicts instead of replacing
+                            self.metadata[key].update(value)
+                        else:
+                            self.metadata[key] = value
+                else:
+                    final_command = result
+            else:
+                final_command = self.command
+
+            # Build execution config from metadata (legacy)
+            execution_config = {
+                "num_tasks": self.metadata.get("num_tasks", 1),
+                "num_gpus": self.metadata.get("gpus", self.gpus or 0),
+                "num_nodes": self.metadata.get("nodes", self.nodes),
+                "environment": self.metadata.get("environment", {}),
+                "log_prefix": self.metadata.get("log_prefix", "main"),
+                "mounts": self.metadata.get("mounts"),
+                "container": self.metadata.get("container", self.container),
+            }
+
+        # Wrap with installation_command if provided
         if self.installation_command:
             final_command = install_packages_wrap(final_command, self.installation_command)
-
-        # 3. Build execution config from metadata
-        execution_config = {
-            "num_tasks": self.metadata.get("num_tasks", 1),
-            "num_gpus": self.metadata.get("gpus", self.gpus or 0),
-            "num_nodes": self.metadata.get("nodes", self.nodes),
-            "environment": self.metadata.get("environment", {}),
-            "log_prefix": self.metadata.get("log_prefix", "main"),
-            "mounts": self.metadata.get("mounts"),
-            "container": self.metadata.get("container", self.container),  # Use container from metadata if available
-        }
 
         return final_command, execution_config
 
@@ -599,8 +644,14 @@ class Pipeline:
                 # Non-heterogeneous jobs use localhost, so het_group_index should remain None
                 if heterogeneous:
                     command.het_group_index = het_idx
+                    # Also assign to Script if using Script interface
+                    if command.script is not None:
+                        command.script.het_group_index = het_idx
                 else:
                     command.het_group_index = None
+                    # Also assign to Script if using Script interface
+                    if command.script is not None:
+                        command.script.het_group_index = None
 
                 final_cmd, exec_config = self._prepare_command(command, cluster_config)
                 commands.append(final_cmd)

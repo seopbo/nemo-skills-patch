@@ -14,7 +14,7 @@
 import importlib
 import logging
 import os
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 import typer
 
@@ -23,14 +23,17 @@ from nemo_skills.dataset.utils import import_from_path
 from nemo_skills.inference import GENERATION_MODULE_MAP, GenerationType
 from nemo_skills.pipeline.app import app, typer_unpacker
 from nemo_skills.pipeline.utils.cluster import parse_kwargs
-from nemo_skills.pipeline.utils.commands import sandbox_command
 from nemo_skills.pipeline.utils.declarative import (
     Command,
     CommandGroup,
     HardwareConfig,
     Pipeline,
 )
-from nemo_skills.pipeline.utils.server import get_free_port
+from nemo_skills.pipeline.utils.scripts import (
+    GenerationClientScript,
+    SandboxScript,
+    ServerScript,
+)
 from nemo_skills.utils import (
     compute_chunk_ids,
     get_logger_name,
@@ -45,91 +48,115 @@ LOG = logging.getLogger(get_logger_name(__file__))
 
 
 def _create_commandgroup_from_config(
-    generation_cmd: str,
+    generation_params: Dict,
     server_config: Optional[Dict],
     with_sandbox: bool,
-    sandbox_port: Optional[int],
     cluster_config: Dict,
     installation_command: Optional[str],
-    get_server_command_fn: Callable,
     partition: Optional[str],
     keep_mounts_for_sandbox: bool,
     task_name: str,
     log_dir: str,
     sbatch_kwargs: Optional[Dict] = None,
 ) -> CommandGroup:
-    """Create a CommandGroup from server_config.
+    """Create a CommandGroup from configuration using Script objects.
 
     Component ordering:
     1. Server (if server_config provided)
-    2. Client command
-    3. Sandbox (if with_sandbox=True)
-    """
+    2. Sandbox (if with_sandbox=True)
+    3. Client command (with cross-references to server/sandbox)
 
+    Args:
+        generation_params: Dict with all generation parameters (output_dir, input_file, etc.)
+        server_config: Server configuration (if hosting model)
+        with_sandbox: Whether to include sandbox
+        cluster_config: Cluster configuration
+        installation_command: Optional installation command for client
+        partition: Slurm partition
+        keep_mounts_for_sandbox: Whether sandbox should keep mounts (risky)
+        task_name: Name for the task
+        log_dir: Directory for logs
+        sbatch_kwargs: Additional sbatch arguments
+
+    Returns:
+        CommandGroup with Script-based Commands
+    """
     components = []
 
-    # 1. Add server if server_config is provided
+    # 1. Create server script (if server_config provided)
+    server_script = None
     if server_config is not None and int(server_config["num_gpus"]) > 0:
-        server_type = server_config["server_type"]
         # Get container from server_config if provided, otherwise fall back to cluster config
+        server_type = server_config["server_type"]
         if "container" in server_config:
             server_container = server_config.pop("container")
         else:
             server_container = cluster_config["containers"][server_type]
 
-        # Call server command builder directly with cluster_config
-        cmd, num_tasks = get_server_command_fn(**server_config, cluster_config=cluster_config)
-
-        # Create metadata dict
-        metadata = {
-            "num_tasks": num_tasks,
-            "gpus": server_config["num_gpus"],
-            "nodes": server_config["num_nodes"],
-            "log_prefix": "server",
-        }
+        # Create ServerScript
+        server_script = ServerScript(
+            server_type=server_type,
+            model_path=server_config["model_path"],
+            cluster_config=cluster_config,
+            num_gpus=server_config["num_gpus"],
+            num_nodes=server_config["num_nodes"],
+            server_args=server_config.get("server_args", ""),
+            server_entrypoint=server_config.get("server_entrypoint"),
+            port=server_config.get("server_port"),  # May be None, will be allocated
+            allocate_port=(server_config.get("server_port") is None),
+        )
 
         server_cmd = Command(
-            command=cmd,
+            script=server_script,
             container=server_container,
-            gpus=server_config["num_gpus"],
-            nodes=server_config["num_nodes"],
+            gpus=server_script.num_gpus,
+            nodes=server_script.num_nodes,
             name=task_name,
-            metadata=metadata,
         )
         components.append(server_cmd)
 
-    # 2. Add main generation command
-    # Note: General cluster config env vars are automatically added by get_env_variables() in get_executor()
-    client_env = {}
-    if with_sandbox and sandbox_port is not None:
-        client_env["NEMO_SKILLS_SANDBOX_PORT"] = str(sandbox_port)
+    # 2. Create sandbox script (if with_sandbox)
+    sandbox_script = None
+    if with_sandbox:
+        sandbox_script = SandboxScript(
+            cluster_config=cluster_config,
+            keep_mounts=keep_mounts_for_sandbox,
+            allocate_port=True,  # Always allocate port for sandbox
+        )
+
+        sandbox_cmd = Command(
+            script=sandbox_script,
+            container=cluster_config["containers"]["sandbox"],
+            name=task_name,
+        )
+        components.append(sandbox_cmd)
+
+    # 3. Create client script WITH REFERENCES to server/sandbox
+    client_script = GenerationClientScript(
+        output_dir=generation_params["output_dir"],
+        input_file=generation_params.get("input_file"),
+        input_dir=generation_params.get("input_dir"),
+        extra_arguments=generation_params.get("extra_arguments", ""),
+        random_seed=generation_params.get("random_seed"),
+        chunk_id=generation_params.get("chunk_id"),
+        num_chunks=generation_params.get("num_chunks"),
+        preprocess_cmd=generation_params.get("preprocess_cmd"),
+        postprocess_cmd=generation_params.get("postprocess_cmd"),
+        wandb_parameters=generation_params.get("wandb_parameters"),
+        with_sandbox=with_sandbox,
+        script=generation_params.get("script", "nemo_skills.inference.generate"),
+        # Cross-component references
+        server=server_script,
+        sandbox=sandbox_script,
+    )
 
     client_cmd = Command(
-        command=generation_cmd,
+        script=client_script,
         container=cluster_config["containers"]["nemo-skills"],
         name=task_name,
         installation_command=installation_command,
-        metadata={
-            "log_prefix": "main",
-            "environment": client_env,
-        },
     )
     components.append(client_cmd)
-
-    # 3. Add sandbox if requested
-    if with_sandbox:
-        # Call sandbox command builder directly with cluster_config
-        cmd, metadata = sandbox_command(cluster_config=cluster_config, port=sandbox_port)
-        metadata["log_prefix"] = "sandbox"
-
-        sandbox_cmd = Command(
-            command=cmd,
-            container=cluster_config["containers"]["sandbox"],
-            name=task_name,
-            metadata=metadata,
-        )
-
-        components.append(sandbox_cmd)
 
     # Find maximum GPUs/nodes needed by any component for the HardwareConfig
     # The job-level resource request must be the maximum across all components
@@ -407,23 +434,6 @@ def generate(
                 get_random_port=get_random_port,
             )
 
-            # Build generation command (same as before)
-            cmd = pipeline_utils.get_generation_cmd(
-                input_file=input_file,
-                input_dir=input_dir,
-                random_seed=seed,
-                output_dir=output_dir,
-                extra_arguments=extra_arguments,
-                chunk_id=chunk_id,
-                num_chunks=num_chunks,
-                preprocess_cmd=preprocess_cmd,
-                postprocess_cmd=postprocess_cmd,
-                wandb_parameters=wandb_parameters if seed_idx == 0 else None,
-                script=generation_module,
-                with_sandbox=with_sandbox,
-            )
-            cmd = pipeline_utils.wrap_python_path(cmd=cmd)
-
             # Base task name (shared across all dependent jobs in the chain)
             task_name = f"{expname}-rs{seed}" if seed is not None else expname
             if chunk_id is not None:
@@ -434,22 +444,29 @@ def generate(
             prev_job = None
 
             for dep_idx in range(dependent_jobs + 1):
-                # Allocate sandbox port if needed
-                # This must be done BEFORE creating CommandGroup so client knows the port
-                if with_sandbox:
-                    current_sandbox_port = get_free_port(strategy="random") if get_random_port else 6000
-                else:
-                    current_sandbox_port = None
+                # Build generation parameters dict for Script
+                generation_params = {
+                    "output_dir": output_dir,
+                    "input_file": input_file,
+                    "input_dir": input_dir,
+                    "extra_arguments": extra_arguments,
+                    "random_seed": seed,
+                    "chunk_id": chunk_id,
+                    "num_chunks": num_chunks,
+                    "preprocess_cmd": preprocess_cmd,
+                    "postprocess_cmd": postprocess_cmd,
+                    "wandb_parameters": wandb_parameters if seed_idx == 0 else None,
+                    "script": generation_module,
+                }
 
-                # Create CommandGroup for this task
+                # Create CommandGroup using Script objects
+                # Port allocation is now handled within Scripts themselves
                 cmd_group = _create_commandgroup_from_config(
-                    generation_cmd=cmd,
+                    generation_params=generation_params,
                     server_config=server_config.copy() if server_config else None,
                     with_sandbox=with_sandbox,
-                    sandbox_port=current_sandbox_port,
                     cluster_config=cluster_config,
                     installation_command=installation_command,
-                    get_server_command_fn=generation_task.get_server_command_fn(),
                     partition=partition,
                     keep_mounts_for_sandbox=keep_mounts_for_sandbox,
                     task_name=task_name,
