@@ -399,6 +399,10 @@ class GenerationTask:
     def setup_llm(self):
         self.sandbox = get_sandbox(**self.cfg.sandbox) if self.cfg.sandbox is not None else None
 
+        self.data_dir = None
+        if "data_dir" in self.cfg.eval_config and not isinstance(self.cfg.eval_config.get("data_dir"), type(None)):
+            self.data_dir = self.cfg.eval_config["data_dir"]
+
         if self.cfg.code_execution:
             llm = get_code_execution_model(**self.cfg.server, tokenizer=self.tokenizer, sandbox=self.sandbox)
         elif self.cfg.tool_modules is not None:
@@ -545,6 +549,16 @@ class GenerationTask:
         for output in outputs:
             fout.write(json.dumps(output) + "\n")
 
+    def drop_binary_data(self, output):
+        """Remove binary data (like base64 audio) from messages to keep output files smaller."""
+        for message in output["messages"]:
+            # Skip if content is not a list (e.g., string content in system messages)
+            if not isinstance(message.get("content"), list):
+                continue
+
+            # Filter out audio_url items from list-style content
+            message["content"] = [content for content in message["content"] if content.get("type") != "audio_url"]
+
     async def postprocess_single_output(self, output, original_data_point):
         # to make it easier to follow up with other generations and limit accidental errors, we are adding
         # all of the original data to the output file alongside the new generations
@@ -560,6 +574,9 @@ class GenerationTask:
         for key in output:
             original_data_point.pop(key, None)
         output.update(original_data_point)
+
+        self.drop_binary_data(output)
+
         if self.cfg.parse_reasoning:
             parse_reasoning(
                 output,

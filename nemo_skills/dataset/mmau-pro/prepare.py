@@ -75,8 +75,8 @@ def format_entry(entry, with_audio=False):
     if category == "open":
         content = entry["question"]
     elif choices and len(choices) > 1:
-        options_text = "\n".join(f"{chr(65 + i)}. {choice}" for i, choice in enumerate(choices))
-        content = f"{entry['question']}\n\n{options_text}"
+        options_text = "\n".join(f"{chr(65 + i)}) {choice}" for i, choice in enumerate(choices))
+        content = f"{entry['question']}\n\n{options_text}\n\nRespond with the complete text of the correct option, not just the letter."
     else:
         content = entry["question"]
 
@@ -84,13 +84,18 @@ def format_entry(entry, with_audio=False):
 
     if entry.get("audio_path"):
         audio_path = entry["audio_path"]
+        # Prepend /dataset/mmau-pro/ to make paths absolute for cluster
+        if len(audio_path) == 1:
+            user_message["audio"] = {"path": f"/dataset/mmau-pro/{audio_path[0]}"}
+        else:
+            user_message["audios"] = [{"path": f"/dataset/mmau-pro/{path}"} for path in audio_path]
 
-        if isinstance(audio_path, list) and audio_path:
-            user_message["audios"] = [{"path": path, "duration": 10.0} for path in audio_path]
-        elif isinstance(audio_path, str):
-            user_message["audio"] = {"path": audio_path, "duration": 10.0}
+    # Don't use /no_think for open-ended questions to allow reasoning
+    system_content = "You are a helpful assistant."
+    if category != "open":
+        system_content += " /no_think"
 
-    formatted_entry["messages"] = [user_message]
+    formatted_entry["messages"] = [{"role": "system", "content": system_content}, user_message]
     return formatted_entry
 
 
