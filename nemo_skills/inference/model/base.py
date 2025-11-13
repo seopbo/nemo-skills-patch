@@ -255,7 +255,6 @@ class BaseModel:
             "reasoning_effort": reasoning_effort,
             "tools": tools,
             "extra_body": extra_body,
-            # "logprobs": top_logprobs is not None,
         }
 
         # TODO: remove this after we no longer use gpt-oss or it's fixed in vllm
@@ -268,7 +267,8 @@ class BaseModel:
                     if endpoint_type == EndpointType.chat:
                         assert isinstance(prompt, list), "Chat completion requests must be a list of messages."
                         request_params = self._build_chat_request_params(messages=prompt, stream=stream, **kwargs)
-                        request_params["extra_body"] = kwargs["extra_body"]
+                        # request_params["extra_body"] = kwargs["extra_body"]
+                        print(f"request_params are {request_params}")
                         response = await litellm.acompletion(**request_params, **self.litellm_kwargs)
                         if stream:
                             result = self._stream_chat_chunks_async(response)

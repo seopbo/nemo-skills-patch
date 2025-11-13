@@ -116,6 +116,7 @@ class OpenAIModel(BaseModel):
             "timeout": timeout,
             "stream": stream,
             "tools": tools,
+            "extra_body": extra_body,
         }
 
         if self._is_reasoning_model(self.model):

@@ -78,6 +78,7 @@ class InferenceConfig:
     repetition_penalty: float = 1.0
     top_logprobs: int | None = None
     timeout: int | None = 14400  # Timeout for each individual LLM call in seconds
+    include_response: bool = False
 
     extra_body: dict = field(default_factory=dict)  # Any other extra params passed with extra_body argument
 
@@ -566,7 +567,6 @@ class GenerationTask:
             **self.extra_generate_params,
             "prompt": self.fill_prompt(data_point, all_data),
             "stop_phrases": [self.cfg.stop_phrase] if self.cfg.stop_phrase else None,
-            "include_response": True, # temp used in nemo gym
         }
 
         if self.cfg.code_execution:
