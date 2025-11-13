@@ -215,17 +215,16 @@ class Command:
             )
         return str(self.metadata[key])
 
-    def prepare_for_execution(self, cluster_config: Dict) -> Tuple[str, Dict]:
+    def prepare_for_execution(self, cluster_config: Dict) -> Tuple[Union[run.Script, str], Dict]:
         """Prepare command for execution.
 
         This method:
-        1. Extracts command from Script object (if using script interface)
-        2. Evaluates callables (resolves cross-component references)
-        3. Wraps with installation_command if provided
-        4. Builds execution config from Script fields or metadata
+        1. For Script interface: evaluates lazy commands, applies installation_command, returns Script
+        2. For legacy interface: evaluates callables, wraps with installation_command, returns string
+        3. Builds execution config from Script fields or metadata
 
         Returns:
-            Tuple of (final_command, execution_config)
+            Tuple of (Script_object_or_string, execution_config)
         """
         runtime_metadata = {}
 
@@ -236,12 +235,17 @@ class Command:
                 result = self.script.inline()
 
                 if isinstance(result, tuple):
-                    final_command, runtime_metadata = result
+                    evaluated_command, runtime_metadata = result
                 else:
-                    final_command = result
-            else:
-                # Script.inline is a string, use directly
-                final_command = self.script.inline
+                    evaluated_command = result
+
+                # Update script.inline with evaluated command
+                object.__setattr__(self.script, "inline", evaluated_command)
+
+            # Wrap with installation_command if provided
+            if self.installation_command:
+                wrapped_command = install_packages_wrap(self.script.inline, self.installation_command)
+                object.__setattr__(self.script, "inline", wrapped_command)
 
             # Build execution config from Script fields
             execution_config = {
@@ -253,6 +257,9 @@ class Command:
                 "mounts": None,  # Mounts not currently exposed by Scripts
                 "container": self.container,
             }
+
+            # Return the Script object itself, not a string
+            return self.script, execution_config
 
         # Handle legacy command interface (deprecated)
         else:
@@ -285,11 +292,11 @@ class Command:
                 "container": self.metadata.get("container", self.container),
             }
 
-        # Wrap with installation_command if provided
-        if self.installation_command:
-            final_command = install_packages_wrap(final_command, self.installation_command)
+            # Wrap with installation_command if provided
+            if self.installation_command:
+                final_command = install_packages_wrap(final_command, self.installation_command)
 
-        return final_command, execution_config
+            return final_command, execution_config
 
     def get_name(self) -> str:
         return self.name
@@ -527,16 +534,23 @@ class Pipeline:
 
             return exp
 
-    def _prepare_command(self, command, cluster_config: Dict) -> Tuple[str, Dict]:
-        """Prepare command and handle mpirun wrapping."""
-        final_cmd, exec_config = command.prepare_for_execution(cluster_config)
+    def _prepare_command(self, command, cluster_config: Dict) -> Tuple[Union[run.Script, str], Dict]:
+        """Prepare command and handle mpirun wrapping.
 
-        # Handle mpirun wrapping for non-SLURM executors
+        Returns:
+            Tuple of (Script_or_string, exec_config)
+        """
+        script_or_cmd, exec_config = command.prepare_for_execution(cluster_config)
+
+        # Handle mpirun wrapping for non-SLURM executors (only for legacy string commands)
         num_tasks = exec_config["num_tasks"]
         if cluster_config["executor"] != "slurm" and num_tasks > 1:
-            final_cmd = f"mpirun --allow-run-as-root -np {num_tasks} bash -c {shlex.quote(final_cmd)}"
+            if isinstance(script_or_cmd, str):
+                # Legacy string command - wrap with mpirun
+                script_or_cmd = f"mpirun --allow-run-as-root -np {num_tasks} bash -c {shlex.quote(script_or_cmd)}"
+            # For Script objects, mpirun wrapping should be handled by the executor
 
-        return final_cmd, exec_config
+        return script_or_cmd, exec_config
 
     def _resolve_container(self, exec_config: Dict, command, cluster_config: Dict) -> str:
         """Resolve container name to image path."""
@@ -728,12 +742,14 @@ class Pipeline:
                 REUSE_CODE_EXP.pop(tunnel_hash(tunnel), None)
 
         # Handle executor="none" path replacements (single-group only)
+        # Only apply to legacy string commands, not Script objects
         if (not heterogeneous) and cluster_config["executor"] == "none":
             for idx in range(len(commands)):
-                commands[idx] = commands[idx].replace(
-                    "/nemo_run/code/nemo_skills", str(get_registered_external_repo("nemo_skills").path)
-                )
-                commands[idx] = commands[idx].replace("/nemo_run/code", "./")
+                if isinstance(commands[idx], str):
+                    commands[idx] = commands[idx].replace(
+                        "/nemo_run/code/nemo_skills", str(get_registered_external_repo("nemo_skills").path)
+                    )
+                    commands[idx] = commands[idx].replace("/nemo_run/code", "./")
 
         # Ray metadata handling
         if self.with_ray and cluster_config["executor"] == "slurm":
@@ -745,18 +761,40 @@ class Pipeline:
         # Note: Internal dependencies (task handles from same experiment) go to exp.add()
         #       External dependencies (SLURM job IDs from other experiments) go to executor
         if (not heterogeneous) and len(commands) == 1:
-            task_id = exp.add(
-                run.Script(inline=commands[0], metadata=metadata),
-                executor=executors[0],
-                name="nemo-run",
-                dependencies=internal_deps,
-            )
+            # Pass Script or string directly to exp.add()
+            if isinstance(commands[0], run.Script):
+                # Script object - pass directly with metadata
+                if metadata:
+                    commands[0].metadata = metadata
+                task_id = exp.add(
+                    commands[0],
+                    executor=executors[0],
+                    name="nemo-run",
+                    dependencies=internal_deps,
+                )
+            else:
+                # Legacy string command - wrap in run.Script
+                task_id = exp.add(
+                    run.Script(inline=commands[0], metadata=metadata),
+                    executor=executors[0],
+                    name="nemo-run",
+                    dependencies=internal_deps,
+                )
         else:
+            # Multiple commands or heterogeneous job
+            scripts = []
+            for idx, cmd in enumerate(commands):
+                if isinstance(cmd, run.Script):
+                    # Script object - pass directly with metadata
+                    if metadata and idx == 0:
+                        cmd.metadata = metadata
+                    scripts.append(cmd)
+                else:
+                    # Legacy string command - wrap in run.Script
+                    scripts.append(run.Script(inline=cmd, metadata=(metadata if idx == 0 else None)))
+
             task_id = exp.add(
-                [
-                    run.Script(inline=cmd, metadata=(metadata if idx == 0 else None))
-                    for idx, cmd in enumerate(commands)
-                ],
+                scripts,
                 executor=executors,
                 name="nemo-run",
                 dependencies=internal_deps,
