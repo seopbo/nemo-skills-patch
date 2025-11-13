@@ -42,7 +42,7 @@ Example:
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, Optional, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import nemo_run as run
 
@@ -313,6 +313,12 @@ class GenerationClientScript(BaseJobScript):
     server: Optional["ServerScript"] = None
     sandbox: Optional["SandboxScript"] = None
 
+    # Multi-model support (internal fields, set by _create_job_unified)
+    _all_servers: Optional[List[Optional["ServerScript"]]] = None
+    _server_addresses_prehosted: Optional[List[str]] = None
+    _model_names: Optional[List[str]] = None
+    _server_types: Optional[List[str]] = None
+
     log_prefix: str = field(default="main", init=False)
 
     def __post_init__(self):
@@ -322,10 +328,12 @@ class GenerationClientScript(BaseJobScript):
         command lazily via a callable. The callable is evaluated later when
         het_group_index is assigned, allowing hostname_ref() to work correctly.
 
+        For multi-model generation, uses _all_servers to build runtime addresses.
+
         Otherwise, builds command immediately.
         """
-        # Check if we need lazy command building (has cross-component refs)
-        has_cross_refs = self.sandbox is not None
+        # Check if we need lazy command building (has cross-component refs or multi-model)
+        has_cross_refs = self.sandbox is not None or self._all_servers is not None
 
         if has_cross_refs:
             # Lazy command building - will be evaluated when het_group_index is set
@@ -336,6 +344,26 @@ class GenerationClientScript(BaseJobScript):
                 # Add sandbox port to environment if sandbox is referenced
                 if self.sandbox:
                     env_vars["NEMO_SKILLS_SANDBOX_PORT"] = str(self.sandbox.port)
+
+                # Build server addresses for multi-model
+                server_addresses = None
+                model_names = None
+                server_types = None
+
+                if self._all_servers is not None:
+                    # Multi-model: build runtime addresses
+                    server_addresses = []
+                    for server_idx, server_script in enumerate(self._all_servers):
+                        if server_script is not None:
+                            # Self-hosted: construct address from hostname and port refs
+                            addr = f"{server_script.hostname_ref()}:{server_script.port}"
+                        else:
+                            # Pre-hosted: use the original address from config
+                            addr = self._server_addresses_prehosted[server_idx]
+                        server_addresses.append(addr)
+
+                    model_names = self._model_names
+                    server_types = self._server_types
 
                 # Build generation command
                 cmd = get_generation_cmd(
@@ -351,6 +379,10 @@ class GenerationClientScript(BaseJobScript):
                     wandb_parameters=self.wandb_parameters,
                     with_sandbox=self.with_sandbox,
                     script=self.script,
+                    # Multi-model parameters
+                    server_addresses=server_addresses,
+                    model_names=model_names,
+                    server_types=server_types,
                 )
 
                 # Return command and runtime metadata (environment vars)
