@@ -85,6 +85,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     min_random_k_solutions: int = 1
     model_choose_steps: bool = False
     average_model_choose_steps: int = 1
+    sample_tests_attempts: int = 0
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -292,6 +293,15 @@ class IOIExecutionGenerationTask(GenerationTask):
                     return 0.0
 
             sample_avg = _avg(sample_outputs)
+            # Store sample score only for ICPC-style evaluators (flat dict with outputs list)
+            is_icpc = (
+                isinstance(test_case_results, dict)
+                and "outputs" in test_case_results
+                and "score" in test_case_results
+                and isinstance(test_case_results.get("outputs"), list)
+            )
+            if is_icpc and chat_history:
+                chat_history[-1]["sample_score"] = sample_avg
 
             # Update memory with current code solution and score (use sample_avg)
             if int(selected_k) > 0:
@@ -305,6 +315,14 @@ class IOIExecutionGenerationTask(GenerationTask):
                     problem_id=data_point["id"],
                     k_override=selected_k,
                 )
+
+            # Early termination: if configured attempts reached and samples are not perfect (ICPC only)
+            attempts_limit = int(getattr(self.cfg, "sample_tests_attempts", 0) or 0)
+            if is_icpc and attempts_limit > 0 and step_num >= attempts_limit and float(sample_avg) < 1.0:
+                print(
+                    f"[Terminate] Problem {data_point['id']}: Sample tests not perfect after {attempts_limit} steps; stopping."
+                )
+                break
 
             # Check if all subtasks passed fully (score == 1 for every output)
             if all(all(float(o["score"]) == 1.0 for o in v["outputs"]) for v in normalized_results.values()):
