@@ -45,4 +45,7 @@ nemo_skills/dataset/aalcr/lcr/
 .idea/*
 CLAUDE.md
 
-.idea
+# AudioBench repository (auto-cloned during data preparation)
+AudioBench/
+nemo_skills/dataset/audiobench/AudioBench/
+
