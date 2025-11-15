@@ -392,6 +392,7 @@ class GenerationTask:
                 additional_config={"sandbox": self.cfg.sandbox},
             )
         else:
+            print("self.cfg.eval_config", self.cfg)
             if isinstance(self.cfg.eval_config["data_dir"], type(None)) or isinstance(self.cfg.eval_type, type(None)):
                 data_dir = ""
             else:
