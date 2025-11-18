@@ -11,15 +11,25 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import json
+import os
+import re
 from collections import defaultdict
 
-from nemo_skills.evaluation.metrics.base import BaseMetrics
+from nemo_skills.evaluation.metrics.base import BaseMetrics, as_float, as_int
+
+
+def extract_final_cpp_block(text):
+    pattern = r"```(?:cpp|Cpp)\s*\n(.*?)```"
+    matches = re.findall(pattern, text, re.DOTALL)
+    return matches[-1] if matches else ""
 
 
 class IOIMetrics(BaseMetrics):
-    def __init__(self):
+    def __init__(self, **kwargs):
         super().__init__()
         self.reset()
+        self.cluster_folder = kwargs.get("cluster_folder", None)
 
     def update(self, predictions):
         super().update(predictions)
@@ -45,48 +55,82 @@ class IOIMetrics(BaseMetrics):
                 subtask_scores[subtask] = max(subtask_scores.get(subtask, 0), result["score"])
         return sum(subtask_scores.values()), subtask_scores
 
-    def simulate_round_robin_score(self, submissions) -> float:
-        """
-        Computes a round robin score for a problem.
-        The procedure is as follows:
-         1. For each submission, compute an aggregate score (sum of subtask scores).
-         2. Sort submissions in descending order by the aggregate score.
-         3. Select up to 50 submissions.
-         4. For each subtask, take the maximum score among the selected submissions.
-         5. Return the sum of these maximum subtask scores.
-        """
-        if not submissions:
-            return 0.0
+    def extract_info(self, submission) -> dict:
+        subtask = submission["subtask"]
+        achieved = submission["test_case_results"].get(subtask, {}).get("score", 0.0)
+        return {
+            "score": achieved,
+            "subtask_score": submission.get("subtask_score", 0.0),
+            "tokens": submission.get("num_generated_tokens", 0),
+            "code": extract_final_cpp_block(submission.get("generation", "")),
+        }
 
-        # compute an aggregate score per submission
+    def get_clusters(self, submissions) -> dict:
+        clusters = defaultdict(list)
+
         for submission in submissions:
-            aggregate_score = sum(result["score"] for result in submission["test_case_results"].values())
-            submission["_aggregate_score"] = aggregate_score
+            subtask = submission["subtask"]
+            # Build an IOI-specific output signature: vector of per-test scores for this subtask
+            outputs = submission["test_case_results"].get(subtask, {}).get("outputs", [])
+            run_outputs = tuple(float(o.get("score", 0.0)) for o in outputs)
+            output_key = run_outputs
 
-        # sort submissions in descending order by aggregate score
-        sorted_submissions = sorted(submissions, key=lambda s: s["_aggregate_score"], reverse=True)
-        # Select up to 50 submissions.
-        selected = sorted_submissions[:50]
+            extract_info = self.extract_info(submission)
+            if output_key not in clusters:
+                clusters[output_key] = {
+                    "status": {
+                        "Test passed": 0,
+                        "Test failed": 0,
+                    },
+                    "codes": [],
+                }
+            clusters[output_key]["codes"].append(extract_info)
 
-        # for each subtask, take the maximum score among the selected submissions
-        subtask_scores = {}
-        for submission in selected:
-            for subtask, result in submission["test_case_results"].items():
-                subtask_scores[subtask] = max(subtask_scores.get(subtask, 0), result["score"])
-        return sum(subtask_scores.values())
+            achieved = extract_info["score"]
+            full = extract_info["subtask_score"]
+            if achieved == full:
+                clusters[output_key]["status"]["Test passed"] += 1
+            else:
+                clusters[output_key]["status"]["Test failed"] += 1
+
+        return clusters
 
     def get_metrics(self):
-        total_score = total_round_robin = 0.0
+        total_score = 0.0
         self.problem_scores = {}
         for name, submissions in self.predictions_by_problem.items():
             score, subtasks = self.get_problem_score(submissions)
             self.problem_scores[name] = (score, subtasks)
             total_score += score
-            total_round_robin += self.simulate_round_robin_score(submissions)
         self.print_problem_scores()
         metrics_dict = super().get_metrics()
-        for m in metrics_dict.values():
-            m["total_score"], m["round_robin_score"] = str(total_score), str(total_round_robin)
+        # Optionally produce clusters to disk, similar to ICPC behaviour
+        if self.cluster_folder:
+            os.makedirs(self.cluster_folder, exist_ok=True)
+            for name, submissions in self.predictions_by_problem.items():
+                clusters = self.get_clusters(submissions)
+                final_clusters = {}
+                for i, (output_key, cluster) in enumerate(clusters.items()):
+                    final_clusters[f"cluster_{i + 1}"] = {
+                        "output": output_key,
+                        "status": cluster["status"],
+                        "codes": cluster["codes"],
+                    }
+                output_file = os.path.join(self.cluster_folder, f"{name}_cluster.jsonl")
+                with open(output_file, "w") as f:
+                    json.dump(final_clusters, f, indent=4)
+
+        # Summaries per-problem and global totals
+        total_submissions = {name: len(subs) for name, subs in self.predictions_by_problem.items()}
+        for name, _ in self.predictions_by_problem.items():
+            metrics_dict.setdefault(name, {})
+            metrics_dict[name]["total_submissions"] = total_submissions[name]
+        # Global roll-up
+        avg_runs = (sum(total_submissions.values()) / len(total_submissions)) if total_submissions else 0.0
+        metrics_dict["total"] = {
+            "total_score": int(round(total_score)),
+            "average_number_of_runs": avg_runs,
+        }
         return metrics_dict
 
     def reset(self):
@@ -105,3 +149,16 @@ class IOIMetrics(BaseMetrics):
             print(f"# {name}: {achieved_total}/{max_total}")
             for subtask, achieved in achieved_subtasks.items():
                 print(f"  {subtask}: {achieved}/{max_subtasks[subtask]}")
+
+    def evaluations_to_print(self):
+        """Returns all problem names, prefixed with total aggregate."""
+        return ["total"] + list(self.problem_scores.keys())
+
+    def metrics_to_print(self):
+        """Defines which metrics to display and how to format them."""
+        metrics_to_print = {
+            "total_submissions": as_int,  # per-problem number of submissions
+            "total_score": as_int,  # global sum of problem scores
+            "average_number_of_runs": as_float,  # global average runs
+        }
+        return metrics_to_print

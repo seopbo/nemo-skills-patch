@@ -16,6 +16,7 @@ import json
 import multiprocessing
 import os
 import re
+import shutil
 import threading
 import time
 from typing import Dict
@@ -88,29 +89,31 @@ def _precompile_grader(
         wait_for_sandbox(sandbox)
         sandbox._owner_tid = threading.get_ident()
 
-    pre_dir = f"/tmp/ioi_pre_{problem_name}_{os.getpid()}"
-    # Build shell script to create files and invoke compile.sh.
-    creation_cmds = [
-        f"mkdir -p {pre_dir}/graders",
-    ]
-    # Dump grader related files
+    pre_dir = f"/nemo_run/ioi_pre_{problem_name}_{os.getpid()}"
+    # Create directories and files locally; sandbox shares the same filesystem
+    os.makedirs(os.path.join(pre_dir, "graders"), exist_ok=True)
+
+    # Dump grader related files locally
     for filepath, content in grader_files:
-        dir_name = os.path.dirname(filepath)
-        if dir_name:
-            creation_cmds.append(f"mkdir -p {pre_dir}/{dir_name}")
-        creation_cmds.append(f"cat <<'_EOT_' > {pre_dir}/{filepath}\n{content}\n_EOT_\n")
+        target_path = os.path.join(pre_dir, filepath)
+        target_dir = os.path.dirname(target_path)
+        if target_dir:
+            os.makedirs(target_dir, exist_ok=True)
+        with open(target_path, "w", encoding="utf-8") as f:
+            f.write(content)
 
-    # Write compile.sh and run.sh as provided (needed later in workers)
-    creation_cmds.append(
-        f"cat <<'_EOT_' > {pre_dir}/compile.sh\n{compile_code}\n_EOT_\nchmod +x {pre_dir}/compile.sh\n"
-    )
-    creation_cmds.append(f"cat <<'_EOT_' > {pre_dir}/run.sh\n{run_code}\n_EOT_\nchmod +x {pre_dir}/run.sh\n")
+    # Write compile.sh and run.sh locally and make them executable
+    compile_path = os.path.join(pre_dir, "compile.sh")
+    with open(compile_path, "w", encoding="utf-8") as f:
+        f.write(compile_code)
+    os.chmod(compile_path, 0o755)
 
-    setup_script = "\n".join(creation_cmds)
-    # 1. create files
-    _sandbox_exec_sync(sandbox, setup_script, language="shell", timeout=120)
+    run_path = os.path.join(pre_dir, "run.sh")
+    with open(run_path, "w", encoding="utf-8") as f:
+        f.write(run_code)
+    os.chmod(run_path, 0o755)
 
-    # 2. run compile.sh but ignore final failure when problem cpp missing
+    # Run compile.sh inside the sandbox (same filesystem)
     _sandbox_exec_sync(sandbox, f"cd {pre_dir} && ./compile.sh || true", language="shell", timeout=120)
 
     return pre_dir
@@ -118,46 +121,28 @@ def _precompile_grader(
 
 def run_test_case(task_args: dict, worker_id: int) -> dict:
     # Use high-resolution timestamp to guarantee uniqueness across parallel calls.
-    unique_dir = f"/tmp/ioi_run_{worker_id}_{os.getpid()}_{time.time_ns()}"
+    unique_dir = f"/nemo_run/ioi_run_{worker_id}_{os.getpid()}_{time.time_ns()}"
 
     try:
-        # 1. Create all necessary files in one batch command
+        # 1. Create all necessary files locally (sandbox shares filesystem)
         precompiled_dir = task_args.get("precompiled_dir")
-        # Step 1: prepare the working directory and copy shared pre-compiled artifacts first
-        file_creation_commands = [
-            # Create the unique run directory itself
-            f"mkdir -p {unique_dir}",
-            # Ensure `graders/` directory exists
-            f"mkdir -p {unique_dir}/graders",
-            f"cp -r {precompiled_dir}/* {unique_dir}/",
-            # Next write the contestant's generated solution into the graders folder so it is not overwritten
-            f"cat <<'_EOT_' > {unique_dir}/graders/{task_args['problem_id']}.cpp\n{task_args['generated_code']}\n_EOT_\n",
-        ]
-
+        os.makedirs(unique_dir, exist_ok=True)
+        os.makedirs(os.path.join(unique_dir, "graders"), exist_ok=True)
+        # Copy precompiled assets into unique run directory
+        if precompiled_dir and os.path.isdir(precompiled_dir):
+            shutil.copytree(precompiled_dir, unique_dir, dirs_exist_ok=True)
+        # Write contestant solution
+        with open(os.path.join(unique_dir, "graders", f"{task_args['problem_id']}.cpp"), "w", encoding="utf-8") as f:
+            f.write(task_args["generated_code"])
         # Prepare input and expected output files
-        file_creation_commands.append(f"cat <<'_EOT_' > {unique_dir}/input.txt\n{task_args['test_input']}\n_EOT_\n")
-        file_creation_commands.append(
-            f"cat <<'_EOT_' > {unique_dir}/correct_output.txt\n{task_args['test_output']}\n_EOT_\n"
-        )
-
-        setup_script = "\n".join(file_creation_commands)
-        sandbox = LocalSandbox()
-        setup_result, _ = worker_loop.run_until_complete(
-            sandbox.execute_code(setup_script, language="shell", timeout=120)
-        )
-        if setup_result.get("stderr"):
-            raise Exception(f"File setup failed: {setup_result['stderr']}")
+        with open(os.path.join(unique_dir, "input.txt"), "w", encoding="utf-8") as f:
+            f.write(task_args["test_input"])
+        with open(os.path.join(unique_dir, "correct_output.txt"), "w", encoding="utf-8") as f:
+            f.write(task_args["test_output"])
 
         # 2. Compile only the problem solution (skip checker/grader recompilation)
-        # Compile the solution together with optional grader/stub sources without
-        # recompiling the checker/manager again.
-        compile_command = (
-            f"cd {unique_dir} && "
-            f'SRC="graders/{task_args["problem_id"]}.cpp"; '
-            f'[ -e graders/grader.cpp ] && SRC="$SRC graders/grader.cpp"; '
-            f'[ -e graders/stub.cpp ] && SRC="$SRC graders/stub.cpp"; '
-            f"g++ -DEVAL -std=gnu++17 -O2 -pipe -s -o graders/{task_args['problem_id']} $SRC"
-        )
+        compile_command = f"cd {unique_dir} && ./compile.sh"
+        sandbox = LocalSandbox()
         compile_result, _ = worker_loop.run_until_complete(
             sandbox.execute_code(compile_command, language="shell", timeout=120)
         )
@@ -202,11 +187,9 @@ def run_test_case(task_args: dict, worker_id: int) -> dict:
         return {"score": 0.0, "output": "", "error": str(e)}
 
     finally:
-        # 4. Clean up the directory
-        # Fire and forget; ignore return values
+        # 4. Clean up the directory locally
         try:
-            sandbox = LocalSandbox()
-            worker_loop.run_until_complete(sandbox.execute_code(f"rm -rf {unique_dir}", language="shell", timeout=120))
+            shutil.rmtree(unique_dir, ignore_errors=True)
         except Exception:
             pass
 
