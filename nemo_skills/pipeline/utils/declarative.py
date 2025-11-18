@@ -40,38 +40,42 @@ from nemo_skills.pipeline.utils.mounts import is_mounted_filepath
 from nemo_skills.utils import get_logger_name
 
 """
-Simplified declarative pipeline system using only Command for all task types.
+Simplified declarative pipeline system using Command with run.Script objects.
 
 Basic Example (Single job with multiple commands):
-    from nemo_skills.pipeline.utils.commands import vllm_server_command, sandbox_command
+    from nemo_skills.pipeline.utils.scripts import ServerScript, SandboxScript, GenerationClientScript
     from nemo_skills.pipeline.utils.declarative import Command, CommandGroup, HardwareConfig, Pipeline
-    from nemo_skills.pipeline.utils.server import get_free_port
 
-    # Allocate ports for server and sandbox
-    server_port = get_free_port(strategy="random")
-    sandbox_port = get_free_port(strategy="random")
+    # Create Script objects for server and sandbox
+    # Scripts handle port allocation, cross-component references, and command building
+    server_script = ServerScript(
+        server_type="vllm",
+        model_path="Qwen/Qwen2.5-Math-7B-Instruct",
+        server_args="--tensor-parallel-size 1"
+    )
+    sandbox_script = SandboxScript()
 
-    # Commands that run together in one SLURM job
-    # Note: Lambdas are needed for cross-component references (hostname_ref, meta_ref)
-    # which aren't resolved until het_group_index is assigned at pipeline execution time.
-    server_cmd, server_meta = vllm_server_command(cluster_cfg, model="Qwen/Qwen3-8B", port=server_port)
-    server = Command(command=server_cmd, gpus=8, name="server", metadata=server_meta)
-
-    sandbox_cmd, sandbox_meta = sandbox_command(cluster_cfg, port=sandbox_port)
-    sandbox = Command(command=sandbox_cmd, name="sandbox", metadata=sandbox_meta)
-
-    # This lambda is ESSENTIAL - server.hostname_ref() and meta_ref() aren't available until runtime
-    # Client needs NEMO_SKILLS_SANDBOX_PORT to connect to sandbox
-    client = Command(
-        command=lambda: f"curl {server.hostname_ref()}:{server.meta_ref('port')}/health",
-        name="client",
-        metadata={"environment": {"NEMO_SKILLS_SANDBOX_PORT": str(sandbox_port)}}
+    # Create generation client that references server and sandbox
+    # Cross-component references (hostname_ref, port) are resolved at runtime
+    client_script = GenerationClientScript(
+        output_dir="/results/inference",
+        extra_arguments="++prompt_config=math ++split=test",
+        servers=[server_script],  # References server for hostname/port
+        model_names=["Qwen/Qwen2.5-Math-7B-Instruct"],
+        server_types=["vllm"],
+        sandbox=sandbox_script,  # References sandbox for port
+        with_sandbox=True,
     )
 
-    # Group them together
+    # Wrap Scripts in Commands with container and resource info
+    server = Command(script=server_script, container="vllm", gpus=1, name="server")
+    sandbox = Command(script=sandbox_script, container="nemo-skills", name="sandbox")
+    client = Command(script=client_script, container="nemo-skills", name="client")
+
+    # Group them together (they run in one SLURM job)
     inference_group = CommandGroup(
         commands=[server, sandbox, client],
-        hardware=HardwareConfig(partition="batch"),
+        hardware=HardwareConfig(partition="batch", num_gpus=1),
         name="inference"
     )
 
@@ -84,13 +88,27 @@ Basic Example (Single job with multiple commands):
     pipeline.run()
 
 Advanced Example (Multiple jobs with dependencies and heterogeneous components):
+    from nemo_skills.pipeline.utils.scripts import ServerScript, SandboxScript, GenerationClientScript
+    from nemo_run import Script
+
     log_dir = "/experiments/full_pipeline/logs"
-    # Job 1: Preprocessing
-    preprocess = Command(
-        command="python preprocess.py --input data.jsonl --output processed.jsonl",
-        gpus=0,
-        name="preprocess"
+
+    # Job 1: Preprocessing with custom Script
+    @dataclass(kw_only=True)
+    class PreprocessScript(Script):
+        input_file: str
+        output_file: str
+
+        def __post_init__(self):
+            cmd = f"python preprocess.py --input {self.input_file} --output {self.output_file}"
+            self.inline = cmd
+            object.__setattr__(self, 'entrypoint', 'bash')
+
+    preprocess_script = PreprocessScript(
+        input_file="data.jsonl",
+        output_file="processed.jsonl"
     )
+    preprocess = Command(script=preprocess_script, gpus=0, name="preprocess")
     prep_group = CommandGroup(
         commands=[preprocess],
         hardware=HardwareConfig(partition="cpu"),
@@ -99,39 +117,76 @@ Advanced Example (Multiple jobs with dependencies and heterogeneous components):
     )
     prep_job = {"name": "prep", "group": prep_group}
 
-    # Job 2: Two different model servers (HETEROGENEOUS SLURM job with 2 het components)
-    # Allocate ports for each server/sandbox pair
-    from nemo_skills.pipeline.utils.server import get_free_port
-    server_8b_port = get_free_port(strategy="random")
-    sandbox_8b_port = get_free_port(strategy="random")
-    server_32b_port = get_free_port(strategy="random")
-    sandbox_32b_port = get_free_port(strategy="random")
+    # Job 2: Two different model servers (HETEROGENEOUS SLURM job with 2 het groups)
+    # 8B model group
+    server_8b = ServerScript(
+        server_type="vllm",
+        model_path="Qwen/Qwen2.5-Math-7B-Instruct",
+        server_args="--tensor-parallel-size 1"
+    )
+    sandbox_8b = SandboxScript()
+    client_8b = GenerationClientScript(
+        output_dir="/results/eval_8b",
+        extra_arguments="++prompt_config=math",
+        servers=[server_8b],
+        model_names=["Qwen/Qwen2.5-Math-7B-Instruct"],
+        server_types=["vllm"],
+        sandbox=sandbox_8b,
+        with_sandbox=True,
+    )
 
-    # Build commands with cluster_config
-    server_8b_cmd, server_8b_meta = vllm_server_command(cluster_config, model="Qwen/Qwen3-8B", port=server_8b_port)
-    sandbox_8b_cmd, sandbox_8b_meta = sandbox_command(cluster_config, port=sandbox_8b_port)
-    server_32b_cmd, server_32b_meta = vllm_server_command(cluster_config, model="Qwen/Qwen3-32B", port=server_32b_port)
-    sandbox_32b_cmd, sandbox_32b_meta = sandbox_command(cluster_config, port=sandbox_32b_port)
+    group_8b = CommandGroup(
+        commands=[
+            Command(script=server_8b, container="vllm", gpus=1, name="server_8b"),
+            Command(script=sandbox_8b, container="nemo-skills", name="sandbox_8b"),
+            Command(script=client_8b, container="nemo-skills", name="eval_8b"),
+        ],
+        hardware=HardwareConfig(partition="batch", num_gpus=1),
+        name="eval_8b",
+        log_dir=log_dir
+    )
 
-    server_8b = Command(command=server_8b_cmd, gpus=8, name="server_8b", metadata=server_8b_meta)
-    sandbox_8b = Command(command=sandbox_8b_cmd, name="sandbox_8b", metadata=sandbox_8b_meta)
-    eval_8b = Command(command="python eval.py --model 8b", gpus=1, name="eval_8b")
+    # 32B model group
+    server_32b = ServerScript(
+        server_type="vllm",
+        model_path="Qwen/Qwen2.5-Math-32B-Instruct",
+        server_args="--tensor-parallel-size 4"
+    )
+    sandbox_32b = SandboxScript()
+    client_32b = GenerationClientScript(
+        output_dir="/results/eval_32b",
+        extra_arguments="++prompt_config=math",
+        servers=[server_32b],
+        model_names=["Qwen/Qwen2.5-Math-32B-Instruct"],
+        server_types=["vllm"],
+        sandbox=sandbox_32b,
+        with_sandbox=True,
+    )
 
-    server_32b = Command(command=server_32b_cmd, gpus=8, name="server_32b", metadata=server_32b_meta)
-    sandbox_32b = Command(command=sandbox_32b_cmd, name="sandbox_32b", metadata=sandbox_32b_meta)
-    eval_32b = Command(command="python eval.py --model 32b", gpus=1, name="eval_32b")
-
-    group_8b = CommandGroup(commands=[server_8b, sandbox_8b, eval_8b], name="eval_8b", log_dir=log_dir)
-    group_32b = CommandGroup(commands=[server_32b, sandbox_32b, eval_32b], name="eval_32b", log_dir=log_dir)
+    group_32b = CommandGroup(
+        commands=[
+            Command(script=server_32b, container="vllm", gpus=4, name="server_32b"),
+            Command(script=sandbox_32b, container="nemo-skills", name="sandbox_32b"),
+            Command(script=client_32b, container="nemo-skills", name="eval_32b"),
+        ],
+        hardware=HardwareConfig(partition="batch", num_gpus=4),
+        name="eval_32b",
+        log_dir=log_dir
+    )
 
     evals_job = {"name": "evals", "groups": [group_8b, group_32b], "dependencies": [prep_job]}
 
     # Job 3: Report generation (depends on both evaluations)
-    report = Command(
-        command="python generate_report.py --output report.txt",
-        gpus=0,
-        name="report"
-    )
+    @dataclass(kw_only=True)
+    class ReportScript(Script):
+        output_file: str
+
+        def __post_init__(self):
+            self.inline = f"python generate_report.py --output {self.output_file}"
+            object.__setattr__(self, 'entrypoint', 'bash')
+
+    report_script = ReportScript(output_file="report.txt")
+    report = Command(script=report_script, gpus=0, name="report")
     report_group = CommandGroup(commands=[report], name="report", log_dir=log_dir)
 
     # Create pipeline with dependency graph
