@@ -399,6 +399,7 @@ class IOIExecutionGenerationTask(GenerationTask):
             "steps": chat_history,
             "num_steps_completed": num_steps_completed,
             "memory_solutions": memory_solutions_results,
+            "num_generated_tokens": sum(step.get("num_generated_tokens", 0) for step in chat_history),
         }
 
     def _normalize_test_case_results(self, test_case_results: dict) -> dict:
