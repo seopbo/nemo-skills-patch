@@ -125,7 +125,7 @@ def _create_job_unified(
                 container=server_container,
                 gpus=group_gpus,
                 nodes=group_nodes,
-                name=f"model_{model_idx}_server" if num_models > 1 else "server",
+                name=f"{task_name}_model_{model_idx}_server" if num_models > 1 else f"{task_name}_server",
             )
             components.append(server_cmd)
             server_scripts.append(server_script)
@@ -147,7 +147,7 @@ def _create_job_unified(
                 sandbox_cmd = Command(
                     script=sandbox_script,
                     container=cluster_config["containers"]["sandbox"],
-                    name="sandbox" if num_models == 1 else "sandbox_0",
+                    name=f"{task_name}_sandbox" if num_models == 1 else f"{task_name}_sandbox_0",
                 )
                 components.append(sandbox_cmd)
 
@@ -176,7 +176,7 @@ def _create_job_unified(
             client_cmd = Command(
                 script=client_script,
                 container=cluster_config["containers"]["nemo-skills"],
-                name="generation_client" if num_models > 1 else task_name,
+                name=f"{task_name}_client" if num_models > 1 else task_name,
                 installation_command=installation_command,
             )
             components.append(client_cmd)

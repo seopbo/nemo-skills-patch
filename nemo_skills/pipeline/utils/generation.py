@@ -401,7 +401,8 @@ def get_generation_cmd(
         output_dir=output_dir,
         random_seed=random_seed,
     )
-    cmd = "export HYDRA_FULL_ERROR=1 && "
+    # Add preamble for nemo-run environment
+    cmd = "export PYTHONPATH=$PYTHONPATH:/nemo_run/code && cd /nemo_run/code && export HYDRA_FULL_ERROR=1 && "
 
     # Separate Hydra config args (--config-*) from override args (++)
     hydra_config_args, override_args = separate_hydra_args(extra_arguments)
