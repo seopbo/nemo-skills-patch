@@ -46,7 +46,6 @@ class IOIMetrics(BaseMetrics):
         return sum(subtask_scores.values()), subtask_scores
 
     def get_metrics(self):
-        # Compute total_score across problems (keep as string to avoid percentage formatting).
         total_score = 0.0
         self.problem_scores = {}
         for name, submissions in self.predictions_by_problem.items():
@@ -54,7 +53,6 @@ class IOIMetrics(BaseMetrics):
             self.problem_scores[name] = (score, subtasks)
             total_score += score
 
-        # Build per-problem, per-subtask score details for saving into metrics.json
         per_problem_subtask_scores = {}
         for name, (achieved_total, achieved_subtasks) in self.problem_scores.items():
             submissions = self.predictions_by_problem[name]
@@ -73,7 +71,6 @@ class IOIMetrics(BaseMetrics):
         metrics_dict = super().get_metrics()
         for m in metrics_dict.values():
             m["total_score"] = int(total_score)
-            # Dict metrics are not printed (default formatting returns None), but will be saved to metrics.json
             m["per_problem_subtask_scores"] = per_problem_subtask_scores
         self.per_problem_subtask_scores = per_problem_subtask_scores
         self.print_problem_scores()
@@ -86,7 +83,6 @@ class IOIMetrics(BaseMetrics):
         self.per_problem_subtask_scores = {}
 
     def evaluations_to_print(self):
-        # Only report pass@max_k (e.g., pass@50)
         return [f"pass@{self.max_k}"]
 
     def print_problem_scores(self):
