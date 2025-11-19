@@ -58,8 +58,14 @@ class ServerTokenizer:
         self.tokenizer_url = url
         self.detokenizer_url = url.replace("/tokenize", "/detokenize")
 
-    def encode(self, prompt: str | list[dict], tools=None) -> list[int]:
-        """Encode the prompt using the tokenizer endpoint."""
+    def encode(self, prompt: str | list[dict], tools=None, add_special_tokens=True) -> list[int]:
+        """Encode the prompt using the tokenizer endpoint.
+        
+        Args:
+            prompt: String or list of messages to encode
+            tools: Optional tools for chat templates
+            add_special_tokens: Ignored for ServerTokenizer (handled by server)
+        """
         if isinstance(prompt, str):
             payload = {"prompt": prompt}
         elif isinstance(prompt, list):
@@ -90,10 +96,10 @@ class WrapperAutoTokenizer:
         LOG.info(f"Initializing tokenizer from string: {model_name}")
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    def encode(self, prompt: str | list[dict], tools=None) -> list[int]:
+    def encode(self, prompt: str | list[dict], tools=None, add_special_tokens=True) -> list[int]:
         """Encode the prompt using the tokenizer."""
         if isinstance(prompt, str):
-            return self.tokenizer.encode(prompt)
+            return self.tokenizer.encode(prompt, add_special_tokens=add_special_tokens)
         elif isinstance(prompt, list):
             return self.tokenizer.apply_chat_template(prompt, add_generation_prompt=True, tools=tools)
 

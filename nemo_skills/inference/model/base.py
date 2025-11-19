@@ -331,6 +331,45 @@ class BaseModel:
                 output += choice.matched_stop
 
         result = {"generation": output, "num_generated_tokens": response.usage.completion_tokens}
+        
+        # Manually split and count tokens if output contains </think> tag
+        if output and "</think>" in output:
+            # Split by </think> tag
+            parts = output.split("</think>", 1)
+            reasoning_part = parts[0]
+            answer_part = parts[1] if len(parts) > 1 else ""
+            
+            if reasoning_part:
+                try:
+                    # Initialize tokenizer if not already done
+                    if not hasattr(self, 'tokenizer') or self.tokenizer is None:
+                        LOG.info(f"Initializing tokenizer for model: {self.model_name_or_path}")
+                        self.tokenizer = self._get_tokenizer(None)
+                        if self.tokenizer is None:
+                            LOG.warning(
+                                f"Could not initialize tokenizer for {self.model_name_or_path}. "
+                                "Reasoning/answer token counts will not be available."
+                            )
+                    
+                    if self.tokenizer is not None:
+                        from nemo_skills.prompt.utils import get_token_count
+                        
+                        reasoning_tokens = get_token_count(self.tokenizer, reasoning_part.strip())
+                        answer_tokens = get_token_count(self.tokenizer, answer_part.strip())
+                        
+                        if reasoning_tokens is not None and answer_tokens is not None:
+                            result["num_reasoning_tokens"] = reasoning_tokens
+                            result["num_answer_tokens"] = answer_tokens
+                            
+                            LOG.debug(
+                                f"Token counts - reasoning: {reasoning_tokens}, "
+                                f"answer: {answer_tokens}, total: {reasoning_tokens + answer_tokens}"
+                            )
+                        else:
+                            LOG.warning("get_token_count returned None")
+                except Exception as e:
+                    LOG.warning(f"Failed to count reasoning/answer tokens: {e}", exc_info=True)
+        
         if getattr(choice, "logprobs", None):
             result["logprobs"] = choice.logprobs.token_logprobs
             result["tokens"] = choice.logprobs.tokens
@@ -360,6 +399,54 @@ class BaseModel:
             if hasattr(details, "reasoning_tokens") and details.reasoning_tokens is not None:
                 result["num_reasoning_tokens"] = details.reasoning_tokens
                 result["num_answer_tokens"] = response.usage.completion_tokens - details.reasoning_tokens
+        
+        # Manually split and count tokens if API didn't provide breakdown
+        # Check both reasoning_content field and </think> tags in output
+        if "num_reasoning_tokens" not in result:
+            reasoning_part = ""
+            answer_part = output or ""
+            
+            # Case 1: reasoning_content field is available
+            if result.get("reasoning_content"):
+                reasoning_part = result["reasoning_content"]
+                answer_part = output or ""
+            # Case 2: output contains </think> tag
+            elif output and "</think>" in output:
+                parts = output.split("</think>", 1)
+                reasoning_part = parts[0]
+                answer_part = parts[1] if len(parts) > 1 else ""
+            
+            # Count tokens only if we have reasoning content
+            if reasoning_part:
+                try:
+                    # Initialize tokenizer if not already done
+                    if not hasattr(self, 'tokenizer') or self.tokenizer is None:
+                        LOG.info(f"Initializing tokenizer for model: {self.model_name_or_path}")
+                        self.tokenizer = self._get_tokenizer(None)
+                        if self.tokenizer is None:
+                            LOG.warning(
+                                f"Could not initialize tokenizer for {self.model_name_or_path}. "
+                                "Reasoning/answer token counts will not be available."
+                            )
+                    
+                    if self.tokenizer is not None:
+                        from nemo_skills.prompt.utils import get_token_count
+                        
+                        reasoning_tokens = get_token_count(self.tokenizer, reasoning_part.strip())
+                        answer_tokens = get_token_count(self.tokenizer, answer_part.strip())
+                        
+                        if reasoning_tokens is not None and answer_tokens is not None:
+                            result["num_reasoning_tokens"] = reasoning_tokens
+                            result["num_answer_tokens"] = answer_tokens
+                            
+                            LOG.debug(
+                                f"Token counts - reasoning: {reasoning_tokens}, "
+                                f"answer: {answer_tokens}, total: {reasoning_tokens + answer_tokens}"
+                            )
+                        else:
+                            LOG.warning("get_token_count returned None")
+                except Exception as e:
+                    LOG.warning(f"Failed to count reasoning/answer tokens: {e}", exc_info=True)
 
         if getattr(choice, "logprobs", None) and choice.logprobs.content:
             result["logprobs"] = [tok.logprob for tok in choice.logprobs.content]

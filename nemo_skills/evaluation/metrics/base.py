@@ -31,6 +31,8 @@ class BaseMetrics(abc.ABC):
             agg_dict["avg_tokens"] = int(self.avg_tokens / self.total)
         if self.max_end_time > float("-inf") and self.min_start_time < float("inf"):
             agg_dict["gen_seconds"] = int(self.max_end_time - self.min_start_time)
+        if self.total_failed_token_breakdown > 0:
+            agg_dict["failed_token_breakdown_count"] = self.total_failed_token_breakdown
 
     def get_metrics(self):
         metrics_dict = {}
@@ -163,17 +165,23 @@ class BaseMetrics(abc.ABC):
             reasoning_count = pred.get("num_reasoning_tokens", 0)
             answer_count = pred.get("num_answer_tokens", 0)
 
-            # Fallback: if no separate breakdown available, count all as answer tokens
-            if reasoning_count == 0 and answer_count == 0 and "num_generated_tokens" in pred:
-                answer_count = pred["num_generated_tokens"]
+            # Track samples without proper token breakdown
+            # (e.g., samples that hit max token limit and don't have reasoning/answer split)
+            if reasoning_count == 0 and answer_count == 0:
+                self.total_failed_token_breakdown += 1
+                # Don't include these in statistics - they would skew averages
+                # But we need to append something to maintain list length consistency
+                continue
 
             reasoning_tokens.append(reasoning_count)
             answer_tokens.append(answer_count)
 
-        if reasoning_tokens:
+        # Only add to statistics if we have complete data for all predictions
+        # This prevents assertion errors when list lengths don't match max_k
+        if len(reasoning_tokens) == len(predictions) and reasoning_tokens:
             self.all_scores["reasoning_tokens"].append(reasoning_tokens)
 
-        if answer_tokens:
+        if len(answer_tokens) == len(predictions) and answer_tokens:
             self.all_scores["answer_tokens"].append(answer_tokens)
 
         try:
@@ -196,6 +204,7 @@ class BaseMetrics(abc.ABC):
         self.max_end_time = float("-inf")
         self.eval_dict = defaultdict(lambda: defaultdict(float))
         self.all_scores: dict[str, list[list[bool | int | float]]] = defaultdict(list)
+        self.total_failed_token_breakdown = 0
 
     def get_incorrect_sample(self, predictions: list[dict]) -> list[dict]:
         """Needs to replace predictions with something that evaluates as incorrect.
