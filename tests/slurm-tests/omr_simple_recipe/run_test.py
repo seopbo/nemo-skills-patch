@@ -13,6 +13,12 @@
 
 import argparse
 import subprocess
+import sys
+from pathlib import Path
+
+# Add parent directory to path to import utils
+sys.path.insert(0, str(Path(__file__).parents[1]))
+from utils import prepare_cluster_config_for_test
 
 from nemo_skills.pipeline.cli import run_cmd, wrap_arguments
 
@@ -32,6 +38,9 @@ def main():
         default=["megatron"],
     )
     args = ap.parse_args()
+
+    # Prepare cluster config with job_dir set to workspace
+    cluster = prepare_cluster_config_for_test(args.cluster, args.workspace)
 
     cmd = (
         f"python -m recipes.openmathreasoning.scripts.simplified_recipe "
@@ -54,7 +63,7 @@ def main():
 
     run_cmd(
         ctx=wrap_arguments(checker_cmd),
-        cluster=args.cluster,
+        cluster=cluster,
         expname=args.expname_prefix + "-check-results",
         log_dir=f"{args.workspace}/check-results-logs",
         # these are launched in simplified recipe

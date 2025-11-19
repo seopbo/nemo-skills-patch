@@ -13,6 +13,12 @@
 # limitations under the License.
 
 import argparse
+import sys
+from pathlib import Path
+
+# Add parent directory to path to import utils
+sys.path.insert(0, str(Path(__file__).parents[1]))
+from utils import prepare_cluster_config_for_test
 
 from nemo_skills.pipeline.cli import eval, prepare_data, run_cmd, wrap_arguments
 
@@ -319,22 +325,25 @@ def main():
 
     args = parser.parse_args()
 
+    # Prepare cluster config with job_dir set to workspace and get normalized expname prefix
+    cluster = prepare_cluster_config_for_test(args.cluster, args.workspace)
+
     prepare_data(
         ctx=wrap_arguments("gpqa mmlu-pro hle livecodebench scicode bfcl_v3 math-500 aime24 aime25"),
     )
 
-    setup(workspace=args.workspace, cluster=args.cluster, expname_prefix=args.expname_prefix)
+    setup(workspace=args.workspace, cluster=cluster, expname_prefix=args.expname_prefix)
 
     reasoning_on_expnames = eval_reasoning_on(
         workspace=args.workspace,
-        cluster=args.cluster,
+        cluster=cluster,
         expname_prefix=args.expname_prefix,
         wandb_project=args.wandb_project,
     )
 
     reasoning_off_expnames = eval_reasoning_off(
         workspace=args.workspace,
-        cluster=args.cluster,
+        cluster=cluster,
         expname_prefix=args.expname_prefix,
         wandb_project=args.wandb_project,
     )
@@ -344,7 +353,7 @@ def main():
 
     run_cmd(
         ctx=wrap_arguments(checker_cmd),
-        cluster=args.cluster,
+        cluster=cluster,
         expname=args.expname_prefix + "-check-results",
         log_dir=f"{args.workspace}/check-results-logs",
         run_after=reasoning_on_expnames + reasoning_off_expnames,

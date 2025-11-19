@@ -13,6 +13,12 @@
 # limitations under the License.
 
 import argparse
+import sys
+from pathlib import Path
+
+# Add parent directory to path to import utils
+sys.path.insert(0, str(Path(__file__).parents[1]))
+from utils import prepare_cluster_config_for_test
 
 from nemo_skills.pipeline.cli import eval, prepare_data, run_cmd, wrap_arguments
 
@@ -52,6 +58,9 @@ def main():
 
     args = parser.parse_args()
 
+    # Prepare cluster config with job_dir set to workspace
+    cluster = prepare_cluster_config_for_test(args.cluster, args.workspace)
+
     if args.container_formatter is None:
         prepare_data_args = "swe-bench"
     else:
@@ -64,7 +73,7 @@ def main():
 
         eval_qwen3coder(
             workspace=workspace,
-            cluster=args.cluster,
+            cluster=cluster,
             expname_prefix=expname_prefix,
             wandb_project=args.wandb_project,
             agent_framework=agent_framework,
@@ -79,7 +88,7 @@ def main():
 
         run_cmd(
             ctx=wrap_arguments(checker_cmd),
-            cluster=args.cluster,
+            cluster=cluster,
             expname=f"{expname_prefix}-check-results",
             log_dir=f"{workspace}/check-results-logs",
             run_after=expname_prefix,

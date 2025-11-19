@@ -13,6 +13,12 @@
 # limitations under the License.
 
 import argparse
+import sys
+from pathlib import Path
+
+# Add parent directory to path to import utils
+sys.path.insert(0, str(Path(__file__).parents[1]))
+from utils import prepare_cluster_config_for_test
 
 from nemo_skills.pipeline.cli import eval, prepare_data, run_cmd, wrap_arguments
 
@@ -57,11 +63,14 @@ def main():
 
     args = parser.parse_args()
 
+    # Prepare cluster config with job_dir set to workspace
+    cluster = prepare_cluster_config_for_test(args.cluster, args.workspace)
+
     prepare_data(ctx=wrap_arguments("aime25"))
 
     eval_expname = eval_gpt_oss_python(
         workspace=args.workspace,
-        cluster=args.cluster,
+        cluster=cluster,
         expname_prefix=args.expname_prefix,
         wandb_project=args.wandb_project,
     )
@@ -71,7 +80,7 @@ def main():
 
     run_cmd(
         ctx=wrap_arguments(checker_cmd),
-        cluster=args.cluster,
+        cluster=cluster,
         expname=args.expname_prefix + "-check-results",
         log_dir=f"{args.workspace}/check-results-logs",
         run_after=eval_expname,
