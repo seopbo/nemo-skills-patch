@@ -14,9 +14,27 @@
 
 import copy
 import json
+import os
+import subprocess
+import tempfile
+from datetime import datetime
+from pathlib import Path
 
-from nemo_skills.pipeline.utils.cluster import get_cluster_config
+import yaml
+
+from nemo_skills.pipeline.utils import (
+    cluster_download_file,
+    cluster_path_exists,
+    cluster_upload,
+    create_remote_directory,
+    get_cluster_config,
+)
 from nemo_skills.pipeline.utils.mounts import get_mounts_from_config
+
+_SUPPORTED_CLUSTER_CONFIG_MODES = {"assert", "overwrite", "reuse"}
+_DEFAULT_CLUSTER_CONFIG_FILENAME = "cluster_config.yaml"
+_DEFAULT_COMMIT_FILENAME = "nemo_skills_commit.json"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 
 def load_json(path):
@@ -62,7 +80,15 @@ def assert_all():
     raise SystemExit(1)
 
 
-def prepare_cluster_config_for_test(cluster, workspace, config_dir=None):
+def prepare_cluster_config_for_test(
+    cluster,
+    workspace,
+    config_dir=None,
+    *,
+    cluster_config_mode: str = "assert",
+    cluster_config_filename: str = _DEFAULT_CLUSTER_CONFIG_FILENAME,
+    commit_metadata_filename: str = _DEFAULT_COMMIT_FILENAME,
+):
     """Prepare a cluster config for testing by overriding job_dir to be within the test workspace.
 
     This ensures that nemo-run experiment artifacts are stored in {workspace}/nemo-run-experiments
@@ -77,10 +103,23 @@ def prepare_cluster_config_for_test(cluster, workspace, config_dir=None):
         cluster: Cluster name or config dict
         workspace: Test workspace directory path (may be a mount path like /workspace/...)
         config_dir: Optional directory to search for cluster configs
+        cluster_config_mode: How to handle existing snapshots inside job_dir.
+            - "assert": require the saved config (and commit metadata) to match the newly generated one.
+            - "overwrite": replace the saved files with the newly generated versions.
+            - "reuse": load the previously saved config and use it for this run without modifying the files.
+        cluster_config_filename: Name of the snapshot file saved under job_dir.
+        commit_metadata_filename: Name of the commit metadata file saved under job_dir.
 
     Returns:
         dict: Modified cluster config with job_dir set to {workspace_source}/nemo-run-experiments
     """
+    cluster_config_mode = cluster_config_mode.lower()
+    if cluster_config_mode not in _SUPPORTED_CLUSTER_CONFIG_MODES:
+        raise ValueError(
+            f"Unsupported cluster_config_mode '{cluster_config_mode}'. "
+            f"Supported values: {sorted(_SUPPORTED_CLUSTER_CONFIG_MODES)}"
+        )
+
     # Load the cluster config
     cluster_config = get_cluster_config(cluster, config_dir)
 
@@ -107,7 +146,218 @@ def prepare_cluster_config_for_test(cluster, workspace, config_dir=None):
 
     if "ssh_tunnel" in cluster_config:
         cluster_config["ssh_tunnel"]["job_dir"] = test_job_dir
+        job_dir = cluster_config["ssh_tunnel"]["job_dir"]
     else:
         cluster_config["job_dir"] = test_job_dir
+        job_dir = cluster_config["job_dir"]
 
+    cluster_config["job_dir"] = cluster_config.get("job_dir", test_job_dir)
+    _resolve_container_image_paths(cluster_config)
+
+    return _sync_cluster_config_snapshot(
+        cluster_config,
+        job_dir=job_dir,
+        mode=cluster_config_mode,
+        cluster_config_filename=cluster_config_filename,
+        commit_metadata_filename=commit_metadata_filename,
+    )
+
+
+def _resolve_container_image_paths(cluster_config: dict):
+    """Resolve local symlinks for container image paths so snapshots capture canonical targets."""
+    containers = cluster_config.get("containers")
+    if not isinstance(containers, dict):
+        return
+
+    resolved = {}
+    for name, path in containers.items():
+        if isinstance(path, str):
+            resolved[name] = os.path.realpath(path)
+        else:
+            resolved[name] = path
+    cluster_config["containers"] = resolved
+
+
+def _sync_cluster_config_snapshot(
+    cluster_config: dict,
+    *,
+    job_dir: str,
+    mode: str,
+    cluster_config_filename: str,
+    commit_metadata_filename: str,
+):
+    """Persist the cluster config / commit metadata according to the selected mode."""
+    job_dir = str(Path(job_dir))
+    config_remote_path = str(Path(job_dir) / cluster_config_filename)
+    commit_remote_path = str(Path(job_dir) / commit_metadata_filename)
+
+    if mode == "reuse":
+        if not cluster_path_exists(cluster_config, config_remote_path):
+            raise FileNotFoundError(
+                f"cluster_config_mode 'reuse' requires an existing snapshot at {config_remote_path}"
+            )
+        persisted = _download_remote_yaml(cluster_config, config_remote_path)
+        if not isinstance(persisted, dict):
+            raise ValueError(f"Existing cluster config at {config_remote_path} is not a valid mapping.")
+        _ensure_job_dir(persisted, job_dir)
+        _resolve_container_image_paths(persisted)
+        _sync_commit_metadata(cluster_config, commit_remote_path, mode)
+        return persisted
+
+    create_remote_directory(job_dir, cluster_config)
+    existing_remote = cluster_path_exists(cluster_config, config_remote_path)
+    if existing_remote:
+        persisted = _download_remote_yaml(cluster_config, config_remote_path)
+        if mode == "assert":
+            if not _cluster_configs_equal(persisted, cluster_config):
+                raise AssertionError(
+                    "Existing cluster config snapshot does not match the newly generated config. "
+                    "Use --cluster_config_mode overwrite to update the snapshot or reuse to keep the existing one."
+                )
+            _sync_commit_metadata(cluster_config, commit_remote_path, mode)
+            return cluster_config
+
+    _upload_yaml(cluster_config, cluster_config, config_remote_path)
+    _sync_commit_metadata(cluster_config, commit_remote_path, mode)
     return cluster_config
+
+
+def add_common_args(parser, *, include_wandb: bool = True, wandb_default: str = "nemo-skills-slurm-ci"):
+    """Register the shared CLI arguments used by slurm test entrypoints."""
+
+    parser.add_argument(
+        "--workspace",
+        required=True,
+        help="Workspace directory containing all experiment data",
+    )
+    parser.add_argument(
+        "--cluster",
+        required=True,
+        help="Cluster config name or path (same semantics as --cluster on nemo-skills CLI).",
+    )
+    parser.add_argument(
+        "--expname_prefix",
+        required=True,
+        help="Experiment name prefix used to group nemo-run jobs for this test.",
+    )
+    if include_wandb:
+        parser.add_argument(
+            "--wandb_project",
+            default=wandb_default,
+            help="W&B project name used for logging (set to empty string to disable).",
+        )
+
+    parser.add_argument(
+        "--cluster_config_mode",
+        choices=sorted(_SUPPORTED_CLUSTER_CONFIG_MODES),
+        default="assert",
+        help="Controls how existing cluster config snapshots under the workspace job_dir are handled.",
+    )
+
+    return parser
+
+
+def _cluster_configs_equal(config_a: dict, config_b: dict) -> bool:
+    """Compare two configs after normalizing container image paths."""
+
+    def _normalize(config: dict):
+        config_copy = copy.deepcopy(config)
+        _resolve_container_image_paths(config_copy)
+        return config_copy
+
+    return _normalize(config_a) == _normalize(config_b)
+
+
+def _ensure_job_dir(cluster_config: dict, job_dir: str):
+    """Ensure the provided cluster config uses the expected workspace job_dir."""
+    if "ssh_tunnel" in cluster_config:
+        cluster_config["ssh_tunnel"]["job_dir"] = job_dir
+    else:
+        cluster_config["job_dir"] = job_dir
+
+
+def _sync_commit_metadata(cluster_config: dict, remote_path: str, mode: str):
+    """Persist commit metadata using the same mode semantics as the config snapshot."""
+    metadata = _collect_repo_metadata()
+    remote_exists = cluster_path_exists(cluster_config, remote_path)
+
+    if mode == "reuse":
+        if not remote_exists:
+            raise FileNotFoundError(f"cluster_config_mode 'reuse' requires existing commit metadata at {remote_path}")
+        return
+
+    if remote_exists and mode == "assert":
+        existing = _download_remote_json(cluster_config, remote_path)
+        if existing != metadata:
+            raise AssertionError(
+                "Existing commit metadata does not match the current repository state. "
+                "Use --cluster_config_mode overwrite to refresh the snapshot."
+            )
+        return
+
+    _upload_json(cluster_config, metadata, remote_path)
+
+
+def _collect_repo_metadata() -> dict:
+    """Gather information about the current NeMo-Skills checkout."""
+    metadata = {
+        "repo_root": str(_REPO_ROOT),
+        "timestamp_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
+    }
+
+    def _run_git(*args):
+        result = subprocess.run(
+            ["git", *args],
+            cwd=_REPO_ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return result.stdout.strip() if result.returncode == 0 else None
+
+    metadata["commit"] = _run_git("rev-parse", "HEAD")
+    metadata["describe"] = _run_git("describe", "--always", "--dirty")
+    metadata["is_dirty"] = bool(_run_git("status", "--short"))
+    return metadata
+
+
+def _download_remote_yaml(cluster_config: dict, remote_path: str) -> dict:
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        cluster_download_file(cluster_config, remote_path, tmp_path)
+        with open(tmp_path, "rt", encoding="utf-8") as fin:
+            return yaml.safe_load(fin) or {}
+    finally:
+        os.remove(tmp_path)
+
+
+def _download_remote_json(cluster_config: dict, remote_path: str) -> dict:
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp_path = tmp.name
+    try:
+        cluster_download_file(cluster_config, remote_path, tmp_path)
+        return load_json(tmp_path)
+    finally:
+        os.remove(tmp_path)
+
+
+def _upload_yaml(cluster_config: dict, data: dict, remote_path: str):
+    with tempfile.NamedTemporaryFile(mode="wt", encoding="utf-8", delete=False) as tmp:
+        yaml.safe_dump(data, tmp, sort_keys=True)
+        tmp_path = tmp.name
+    try:
+        cluster_upload(cluster_config, tmp_path, remote_path)
+    finally:
+        os.remove(tmp_path)
+
+
+def _upload_json(cluster_config: dict, data: dict, remote_path: str):
+    with tempfile.NamedTemporaryFile(mode="wt", encoding="utf-8", delete=False) as tmp:
+        json.dump(data, tmp, indent=2, sort_keys=True)
+        tmp.write("\n")
+        tmp_path = tmp.name
+    try:
+        cluster_upload(cluster_config, tmp_path, remote_path)
+    finally:
+        os.remove(tmp_path)

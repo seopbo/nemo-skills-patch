@@ -18,7 +18,7 @@ from pathlib import Path
 
 # Add parent directory to path to import utils
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from utils import prepare_cluster_config_for_test
+from utils import add_common_args, prepare_cluster_config_for_test
 
 from nemo_skills.pipeline.cli import eval, prepare_data, run_cmd, wrap_arguments
 
@@ -56,15 +56,16 @@ def eval_gpt_oss_python(workspace, cluster, expname_prefix, wandb_project):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workspace", required=True, help="Workspace directory containing all experiment data")
-    parser.add_argument("--cluster", required=True, help="Cluster name")
-    parser.add_argument("--expname_prefix", required=True, help="Experiment name prefix")
-    parser.add_argument("--wandb_project", default="nemo-skills-slurm-ci", help="W&B project name")
+    add_common_args(parser)
 
     args = parser.parse_args()
 
     # Prepare cluster config with job_dir set to workspace
-    cluster = prepare_cluster_config_for_test(args.cluster, args.workspace)
+    cluster = prepare_cluster_config_for_test(
+        args.cluster,
+        args.workspace,
+        cluster_config_mode=args.cluster_config_mode,
+    )
 
     prepare_data(ctx=wrap_arguments("aime25"))
 

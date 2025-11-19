@@ -18,17 +18,14 @@ from pathlib import Path
 
 # Add parent directory to path to import utils
 sys.path.insert(0, str(Path(__file__).parents[1]))
-from utils import prepare_cluster_config_for_test
+from utils import add_common_args, prepare_cluster_config_for_test
 
 from nemo_skills.pipeline.cli import run_cmd, wrap_arguments
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--cluster", required=True)
-    ap.add_argument("--workspace", required=True, help="Workspace path")
-    ap.add_argument("--wandb_project", default="nemo-skills-slurm-ci", help="W&B project name")
-    ap.add_argument("--expname_prefix", required=True, help="Experiment name prefix used inside the recipe")
+    add_common_args(ap)
     ap.add_argument("--disable_wandb", action="store_true", help="Disable W&B logging in the recipe")
     ap.add_argument(
         "--backend",
@@ -40,7 +37,11 @@ def main():
     args = ap.parse_args()
 
     # Prepare cluster config with job_dir set to workspace
-    cluster = prepare_cluster_config_for_test(args.cluster, args.workspace)
+    cluster = prepare_cluster_config_for_test(
+        args.cluster,
+        args.workspace,
+        cluster_config_mode=args.cluster_config_mode,
+    )
 
     cmd = (
         f"python -m recipes.openmathreasoning.scripts.simplified_recipe "
