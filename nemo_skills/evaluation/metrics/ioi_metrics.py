@@ -125,12 +125,17 @@ class IOIMetrics(BaseMetrics):
         for name, _ in self.predictions_by_problem.items():
             metrics_dict.setdefault(name, {})
             metrics_dict[name]["total_submissions"] = total_submissions[name]
+            per_problem_score, _ = self.problem_scores[name]
+            metrics_dict[name]["total_score"] = int(round(per_problem_score))
+            metrics_dict[name]["average_number_of_runs"] = float(total_submissions[name])
+
         # Global roll-up
         avg_runs = (sum(total_submissions.values()) / len(total_submissions)) if total_submissions else 0.0
         metrics_dict["total"] = {
             "total_score": int(round(total_score)),
             "average_number_of_runs": avg_runs,
         }
+        metrics_dict["total"]["total_submissions"] = int(sum(total_submissions.values()))
         return metrics_dict
 
     def reset(self):
