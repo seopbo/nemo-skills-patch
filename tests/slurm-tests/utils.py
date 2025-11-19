@@ -15,9 +15,11 @@
 import copy
 import json
 import os
+import shlex
 import subprocess
 import tempfile
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 
 import yaml
@@ -28,13 +30,32 @@ from nemo_skills.pipeline.utils import (
     cluster_upload,
     create_remote_directory,
     get_cluster_config,
+    get_tunnel,
 )
 from nemo_skills.pipeline.utils.mounts import get_mounts_from_config
 
 _SUPPORTED_CLUSTER_CONFIG_MODES = {"assert", "overwrite", "reuse"}
 _DEFAULT_CLUSTER_CONFIG_FILENAME = "cluster_config.yaml"
 _DEFAULT_COMMIT_FILENAME = "nemo_skills_commit.json"
-_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+@lru_cache(maxsize=1)
+def _get_repo_root():
+    """Return the git repository root if available, otherwise fallback to project root."""
+    current_dir = Path(__file__).resolve().parent
+    result = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=current_dir,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        root = result.stdout.strip()
+        if root:
+            return Path(root)
+    # Fallback to the NeMo-Skills directory relative to this file
+    return Path(__file__).resolve().parents[3]
 
 
 def load_json(path):
@@ -144,6 +165,8 @@ def prepare_cluster_config_for_test(
     # Override job_dir to be within workspace (using the resolved source path)
     test_job_dir = f"{workspace_source}/nemo-run-experiments"
 
+    snapshot_dir = workspace_source
+
     if "ssh_tunnel" in cluster_config:
         cluster_config["ssh_tunnel"]["job_dir"] = test_job_dir
         job_dir = cluster_config["ssh_tunnel"]["job_dir"]
@@ -157,6 +180,7 @@ def prepare_cluster_config_for_test(
     return _sync_cluster_config_snapshot(
         cluster_config,
         job_dir=job_dir,
+        snapshot_dir=snapshot_dir,
         mode=cluster_config_mode,
         cluster_config_filename=cluster_config_filename,
         commit_metadata_filename=commit_metadata_filename,
@@ -164,32 +188,56 @@ def prepare_cluster_config_for_test(
 
 
 def _resolve_container_image_paths(cluster_config: dict):
-    """Resolve local symlinks for container image paths so snapshots capture canonical targets."""
+    """Resolve local/remote symlinks for container image paths so snapshots capture canonical targets."""
     containers = cluster_config.get("containers")
     if not isinstance(containers, dict):
         return
 
     resolved = {}
     for name, path in containers.items():
-        if isinstance(path, str):
-            resolved[name] = os.path.realpath(path)
-        else:
-            resolved[name] = path
+        resolved[name] = _resolve_path_with_remote(cluster_config, path)
     cluster_config["containers"] = resolved
+
+
+def _resolve_path_with_remote(cluster_config: dict, path: str):
+    """Resolve the provided path locally, and fallback to remote resolution if needed."""
+    if not isinstance(path, str) or not path:
+        return path
+
+    local_resolved = os.path.realpath(path)
+    if os.path.exists(local_resolved):
+        return local_resolved
+
+    if cluster_config.get("executor") != "slurm":
+        return local_resolved
+
+    tunnel = None
+    try:
+        tunnel = get_tunnel(cluster_config)
+        result = tunnel.run(f"readlink -f {shlex.quote(path)}", hide=True, warn=True)
+        resolved_remote = result.stdout.strip() if result.exited == 0 else ""
+        return resolved_remote or local_resolved
+    except Exception:
+        return local_resolved
+    finally:
+        if tunnel is not None:
+            tunnel.cleanup()
 
 
 def _sync_cluster_config_snapshot(
     cluster_config: dict,
     *,
     job_dir: str,
+    snapshot_dir: str,
     mode: str,
     cluster_config_filename: str,
     commit_metadata_filename: str,
 ):
     """Persist the cluster config / commit metadata according to the selected mode."""
     job_dir = str(Path(job_dir))
-    config_remote_path = str(Path(job_dir) / cluster_config_filename)
-    commit_remote_path = str(Path(job_dir) / commit_metadata_filename)
+    snapshot_dir = str(Path(snapshot_dir))
+    config_remote_path = str(Path(snapshot_dir) / cluster_config_filename)
+    commit_remote_path = str(Path(snapshot_dir) / commit_metadata_filename)
 
     if mode == "reuse":
         if not cluster_path_exists(cluster_config, config_remote_path):
@@ -204,7 +252,7 @@ def _sync_cluster_config_snapshot(
         _sync_commit_metadata(cluster_config, commit_remote_path, mode)
         return persisted
 
-    create_remote_directory(job_dir, cluster_config)
+    create_remote_directory([job_dir, snapshot_dir], cluster_config)
     existing_remote = cluster_path_exists(cluster_config, config_remote_path)
     if existing_remote:
         persisted = _download_remote_yaml(cluster_config, config_remote_path)
@@ -300,15 +348,16 @@ def _sync_commit_metadata(cluster_config: dict, remote_path: str, mode: str):
 
 def _collect_repo_metadata() -> dict:
     """Gather information about the current NeMo-Skills checkout."""
+    repo_root = _get_repo_root()
     metadata = {
-        "repo_root": str(_REPO_ROOT),
+        "repo_root": str(repo_root),
         "timestamp_utc": datetime.utcnow().isoformat(timespec="seconds") + "Z",
     }
 
     def _run_git(*args):
         result = subprocess.run(
             ["git", *args],
-            cwd=_REPO_ROOT,
+            cwd=repo_root,
             check=False,
             capture_output=True,
             text=True,
@@ -317,7 +366,8 @@ def _collect_repo_metadata() -> dict:
 
     metadata["commit"] = _run_git("rev-parse", "HEAD")
     metadata["describe"] = _run_git("describe", "--always", "--dirty")
-    metadata["is_dirty"] = bool(_run_git("status", "--short"))
+    status_output = _run_git("status", "--short")
+    metadata["is_dirty"] = bool(status_output) if status_output is not None else None
     return metadata
 
 
