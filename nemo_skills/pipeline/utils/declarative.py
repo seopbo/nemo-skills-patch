@@ -37,6 +37,7 @@ from nemo_skills.pipeline.utils.exp import (
     tunnel_hash,
 )
 from nemo_skills.pipeline.utils.mounts import is_mounted_filepath
+from nemo_skills.pipeline.utils.server import wrap_python_path
 from nemo_skills.utils import get_logger_name
 
 """
@@ -532,6 +533,7 @@ class Pipeline:
         total_het_groups: int,
         overlap: bool,
         dependencies: Optional[List] = None,
+        job_name_override: Optional[str] = None,
     ):
         """Create executor with optional environment update."""
         env_context = (
@@ -547,7 +549,7 @@ class Pipeline:
                 num_nodes=exec_config["num_nodes"],
                 tasks_per_node=exec_config["num_tasks"],
                 gpus_per_node=exec_config["num_gpus"],
-                job_name=command.name,
+                job_name=job_name_override if job_name_override else command.name,
                 log_dir=log_dir,
                 log_prefix=exec_config["log_prefix"],
                 partition=hardware.partition if hardware else None,
@@ -622,6 +624,13 @@ class Pipeline:
                     command.script.het_group_index = None
 
                 script, exec_config = self._prepare_command(command, cluster_config)
+
+                # Apply PYTHONPATH/cd wrapper if not present (e.g. for generation scripts)
+                # Server scripts typically already have it
+                if isinstance(script.inline, str):
+                    if "export PYTHONPATH=$PYTHONPATH:/nemo_run/code" not in script.inline:
+                        script.inline = wrap_python_path(script.inline)
+
                 scripts.append(script)
 
                 # Adjust GPU allocation (first component gets job-level GPUs for sbatch) for single-group jobs
@@ -637,6 +646,12 @@ class Pipeline:
                 container_image = self._resolve_container(exec_config, command, cluster_config)
                 # Pass external dependencies only to the first executor (SLURM doesn't support per-component dependencies in hetjobs)
                 exec_dependencies = external_deps if (het_idx == 0 and comp_idx == 0) else None
+
+                # Always use group.name for SLURM job name (consistent across all components)
+                # The group name is set to task_name in generate.py, without component suffixes
+                # Component names (like {task_name}_server, {task_name}_sandbox) are only used for log_prefix
+                job_name_for_slurm = group.name
+
                 executor = self._create_executor(
                     command,
                     exec_config,
@@ -649,6 +664,7 @@ class Pipeline:
                     total_het_groups,
                     (len(group.commands) > 1),
                     dependencies=exec_dependencies,
+                    job_name_override=job_name_for_slurm,
                 )
 
                 # Share packager across executors for single-group jobs
