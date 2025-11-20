@@ -52,7 +52,7 @@ ns nemo_rl sft \
     --hf_model=meta-llama/Llama-3.1-8B \
     --num_nodes=8 \
     --num_gpus=8 \
-    --num_training_jobs=4 \
+    --dependent_jobs=3 \
     --backend=megatron \
     --training_data=/data/sft-data.jsonl
 ```
@@ -119,7 +119,7 @@ sft_nemo_rl(
     hf_model="meta-llama/Llama-3.1-8B",
     num_nodes=8,
     num_gpus=8,
-    num_training_jobs=4,
+    dependent_jobs=3,
     training_data="/data/sft-data.jsonl",
 )
 
@@ -129,7 +129,7 @@ eval(
     model=f"{output_dir}/final_hf_model",
     server_type="trtllm",
     output_dir=f"{output_dir}/results/",
-    benchmarks="gsm8k,math",
+    benchmarks="gsm8k,hendrycks_math",
     server_gpus=8,
     run_after=expname,
 )

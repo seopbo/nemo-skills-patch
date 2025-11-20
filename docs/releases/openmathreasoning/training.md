@@ -20,9 +20,9 @@ def apply_format(elem, prompt, is_tir):
             total_code_executions = 1
         else:
             total_code_executions = int(elem['output'].split('Remaining code executions: ')[1].split()[0][0]) + 1
-        elem['input'] = prompt.fill({'problem': elem['input'], 'total_code_executions': total_code_executions})
+        elem['input'] = prompt.fill({'problem': elem['input'], 'total_code_executions': total_code_executions}, format_as_string=True)
     else:
-        elem['input'] = prompt.fill({'problem': elem['input']})
+        elem['input'] = prompt.fill({'problem': elem['input']}, format_as_string=True)
     elem['output'] = prompt.format_assistant_response(elem['output'])
     return elem
 
@@ -85,7 +85,7 @@ sed -i 's/"rope_theta": 10000,/"rope_theta": 500000.0,/g' Qwen2.5-Math-1.5B/conf
 ## Run training
 
 Run the training (assuming slurm configuration here with the same folder structure). If your cluster has strict
-timeout policy, you can run multiple dependent jobs with `--num_training_jobs=N`.
+timeout policy, you can run multiple dependent jobs with `--dependent_jobs=N`.
 
 
 ```bash
@@ -170,9 +170,9 @@ def apply_format(elem, prompt, is_tir):
             total_code_executions = 1
         else:
             total_code_executions = int(elem['output'].split('Remaining code executions: ')[1].split()[0][0]) + 1
-        elem['input'] = prompt.fill({'problem': elem['input'], 'total_code_executions': total_code_executions})
+        elem['input'] = prompt.fill({'problem': elem['input'], 'total_code_executions': total_code_executions}, format_as_string=True)
     else:
-        elem['input'] = prompt.fill({'problem': elem['input']})
+        elem['input'] = prompt.fill({'problem': elem['input']}, format_as_string=True)
     elem['output'] = prompt.format_assistant_response(elem['output'])
     return elem
 
