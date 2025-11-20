@@ -47,6 +47,7 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 import nemo_run as run
 
 from nemo_skills.pipeline.utils.commands import sandbox_command
+from nemo_skills.pipeline.utils.exp import install_packages_wrap
 from nemo_skills.pipeline.utils.generation import get_generation_cmd
 from nemo_skills.pipeline.utils.server import get_free_port, get_server_command
 from nemo_skills.utils import get_logger_name
@@ -69,9 +70,16 @@ class BaseJobScript(run.Script):
 
     Attributes:
         het_group_index: Index in heterogeneous job group (set by Pipeline at runtime)
+        installation_command: Optional[str] = None
     """
 
     het_group_index: Optional[int] = field(default=None, init=False, repr=False)
+    installation_command: Optional[str] = None
+
+    def __post_init__(self):
+        """Wrap inline command with installation_command if provided."""
+        if self.installation_command:
+            self.inline = install_packages_wrap(self.inline, self.installation_command)
 
     def hostname_ref(self) -> str:
         """Get hostname reference for hetjob cross-component communication.

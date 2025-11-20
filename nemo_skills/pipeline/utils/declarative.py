@@ -33,7 +33,6 @@ from nemo_skills.pipeline.utils import (
 from nemo_skills.pipeline.utils.exp import (
     REUSE_CODE_EXP,
     get_packaging_job_key,
-    install_packages_wrap,
     tunnel_hash,
 )
 from nemo_skills.pipeline.utils.mounts import is_mounted_filepath
@@ -69,7 +68,7 @@ Basic Example (Single job with multiple commands):
     )
 
     # Wrap Scripts in Commands with container and resource info
-    server = Command(script=server_script, container="vllm", gpus=1, name="server")
+    server = Command(script=server_script, container="vllm", name="server")
     sandbox = Command(script=sandbox_script, container="nemo-skills", name="sandbox")
     client = Command(script=client_script, container="nemo-skills", name="client")
 
@@ -109,7 +108,7 @@ Advanced Example (Multiple jobs with dependencies and heterogeneous components):
         input_file="data.jsonl",
         output_file="processed.jsonl"
     )
-    preprocess = Command(script=preprocess_script, gpus=0, name="preprocess")
+    preprocess = Command(script=preprocess_script, name="preprocess")
     prep_group = CommandGroup(
         commands=[preprocess],
         hardware=HardwareConfig(partition="cpu"),
@@ -138,7 +137,7 @@ Advanced Example (Multiple jobs with dependencies and heterogeneous components):
 
     group_8b = CommandGroup(
         commands=[
-            Command(script=server_8b, container="vllm", gpus=1, name="server_8b"),
+            Command(script=server_8b, container="vllm", name="server_8b"),
             Command(script=sandbox_8b, container="nemo-skills", name="sandbox_8b"),
             Command(script=client_8b, container="nemo-skills", name="eval_8b"),
         ],
@@ -166,7 +165,7 @@ Advanced Example (Multiple jobs with dependencies and heterogeneous components):
 
     group_32b = CommandGroup(
         commands=[
-            Command(script=server_32b, container="vllm", gpus=4, name="server_32b"),
+            Command(script=server_32b, container="vllm", name="server_32b"),
             Command(script=sandbox_32b, container="nemo-skills", name="sandbox_32b"),
             Command(script=client_32b, container="nemo-skills", name="eval_32b"),
         ],
@@ -187,7 +186,7 @@ Advanced Example (Multiple jobs with dependencies and heterogeneous components):
             object.__setattr__(self, 'entrypoint', 'bash')
 
     report_script = ReportScript(output_file="report.txt")
-    report = Command(script=report_script, gpus=0, name="report")
+    report = Command(script=report_script, name="report")
     report_group = CommandGroup(commands=[report], name="report", log_dir=log_dir)
 
     # Create pipeline with dependency graph
@@ -218,18 +217,14 @@ class Command:
 
     script: run.Script
     container: str = "nemo-skills"
-    gpus: Optional[int] = None
-    nodes: int = 1
     name: str = "command"
-    installation_command: Optional[str] = None
 
     def prepare_for_execution(self, cluster_config: Dict) -> Tuple[run.Script, Dict]:
         """Prepare script for execution.
 
         This method:
         1. Evaluates lazy commands (if script.inline is callable)
-        2. Applies installation_command wrapper
-        3. Builds execution config from Script fields
+        2. Builds execution config from Script fields
 
         Returns:
             Tuple of (Script_object, execution_config)
@@ -248,16 +243,8 @@ class Command:
             # Update script.inline with evaluated command
             object.__setattr__(self.script, "inline", evaluated_command)
 
-        # Wrap with installation_command if provided
-        if self.installation_command:
-            wrapped_command = install_packages_wrap(self.script.inline, self.installation_command)
-            object.__setattr__(self.script, "inline", wrapped_command)
-
         # Build execution config from Script fields
         execution_config = {
-            "num_tasks": getattr(self.script, "num_tasks", 1),
-            "num_gpus": self.gpus if self.gpus is not None else getattr(self.script, "num_gpus", 0),
-            "num_nodes": self.nodes if self.nodes != 1 else getattr(self.script, "num_nodes", 1),
             "log_prefix": getattr(self.script, "log_prefix", "main"),
             "environment": runtime_metadata.get("environment", {}),
             "mounts": None,  # Mounts not currently exposed by Scripts
@@ -278,6 +265,7 @@ class HardwareConfig:
     partition: Optional[str] = None
     num_gpus: Optional[int] = None
     num_nodes: Optional[int] = None
+    num_tasks: Optional[int] = 1
     sbatch_kwargs: Optional[dict] = None
 
 
@@ -546,9 +534,9 @@ class Pipeline:
             return get_executor(
                 cluster_config=cluster_config,
                 container=container_image,
-                num_nodes=exec_config["num_nodes"],
-                tasks_per_node=exec_config["num_tasks"],
-                gpus_per_node=exec_config["num_gpus"],
+                num_nodes=hardware.num_nodes if hardware and hardware.num_nodes is not None else 1,
+                tasks_per_node=hardware.num_tasks if hardware and hardware.num_tasks is not None else 1,
+                gpus_per_node=hardware.num_gpus if hardware and hardware.num_gpus is not None else 0,
                 job_name=job_name_override if job_name_override else command.name,
                 log_dir=log_dir,
                 log_prefix=exec_config["log_prefix"],
@@ -610,11 +598,6 @@ class Pipeline:
                 len(groups) if heterogeneous else (len(group.commands) if has_multiple_components else 1)
             )
 
-            # For single-group jobs with multiple components, allow job-level GPU override for sbatch allocation
-            job_level_gpus = (
-                group.hardware.num_gpus if (not heterogeneous and has_multiple_components and group.hardware) else None
-            )
-
             for comp_idx, command in enumerate(group.commands):
                 # Assign het_group_index ONLY for heterogeneous jobs (per-job, not global)
                 # Non-heterogeneous jobs use localhost, so het_group_index should remain None
@@ -632,11 +615,6 @@ class Pipeline:
                         script.inline = wrap_python_path(script.inline)
 
                 scripts.append(script)
-
-                # Adjust GPU allocation (first component gets job-level GPUs for sbatch) for single-group jobs
-                exec_config["num_gpus"] = exec_config["num_gpus"] or 0
-                if (not heterogeneous) and (comp_idx == 0) and (job_level_gpus is not None):
-                    exec_config["num_gpus"] = job_level_gpus
 
                 # Merge shared environment for heterogeneous jobs
                 if heterogeneous and shared_env_vars:

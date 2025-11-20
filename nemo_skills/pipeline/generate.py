@@ -93,6 +93,7 @@ def _create_job_unified(
 
     for model_idx, (model_path, server_config) in enumerate(zip(models, server_configs)):
         components = []
+        server_script = None
 
         # Track GPU/node requirements for this group (from server config)
         group_gpus = 0
@@ -123,8 +124,6 @@ def _create_job_unified(
             server_cmd = Command(
                 script=server_script,
                 container=server_container,
-                gpus=group_gpus,
-                nodes=group_nodes,
                 name=f"{task_name}_model_{model_idx}_server" if num_models > 1 else f"{task_name}_server",
             )
             components.append(server_cmd)
@@ -171,32 +170,27 @@ def _create_job_unified(
                 model_names=generation_params.get("model_names"),
                 server_types=generation_params.get("server_types"),
                 sandbox=sandbox_script,
+                installation_command=installation_command,
             )
 
             client_cmd = Command(
                 script=client_script,
                 container=cluster_config["containers"]["nemo-skills"],
                 name=f"{task_name}_client" if num_models > 1 else task_name,
-                installation_command=installation_command,
             )
             components.append(client_cmd)
 
         # Only create group if it has components (skip empty groups for pre-hosted models)
         if components:
-            # For group 0 with client, compute max GPUs across all components
-            if model_idx == 0:
-                max_gpus = max((comp.gpus or 0) for comp in components)
-                max_nodes = max((comp.nodes or 1) for comp in components)
-            else:
-                max_gpus = group_gpus
-                max_nodes = group_nodes
+            group_tasks = server_script.num_tasks if (server_config and server_script) else 1
 
             group = CommandGroup(
                 commands=components,
                 hardware=HardwareConfig(
                     partition=partition,
-                    num_gpus=max_gpus,
-                    num_nodes=max_nodes,
+                    num_gpus=group_gpus,
+                    num_nodes=group_nodes,
+                    num_tasks=group_tasks,
                     sbatch_kwargs=sbatch_kwargs,
                 ),
                 name=f"model_{model_idx}_group" if num_models > 1 else task_name,
