@@ -146,7 +146,7 @@ def _create_job_unified(
                 sandbox_cmd = Command(
                     script=sandbox_script,
                     container=cluster_config["containers"]["sandbox"],
-                    name=f"{task_name}_sandbox" if num_models == 1 else f"{task_name}_sandbox_0",
+                    name=f"{task_name}_sandbox",
                 )
                 components.append(sandbox_cmd)
 
@@ -176,7 +176,7 @@ def _create_job_unified(
             client_cmd = Command(
                 script=client_script,
                 container=cluster_config["containers"]["nemo-skills"],
-                name=f"{task_name}_client" if num_models > 1 else task_name,
+                name=f"{task_name}",
             )
             components.append(client_cmd)
 
