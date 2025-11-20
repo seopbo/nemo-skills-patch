@@ -28,7 +28,6 @@ from nemo_skills.pipeline.utils import (
     get_timeout_str,
     run_exp,
 )
-from nemo_skills.pipeline.utils.packager import RepoMetadata, register_external_repo
 from nemo_skills.pipeline.verl import verl_app
 from nemo_skills.utils import get_logger_name, setup_logging, validate_wandb_project_name
 
@@ -219,8 +218,6 @@ def sft_verl(
         check_if_mounted(cluster_config, log_dir)
     else:
         log_dir = output_dir
-
-    register_external_repo(RepoMetadata(name="verl", path="/home/imoshkov/prog/verl"))
 
     if os.path.isabs(training_data):
         check_if_mounted(cluster_config, training_data)

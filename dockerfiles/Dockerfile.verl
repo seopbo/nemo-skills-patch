@@ -3,11 +3,14 @@ FROM verlai/verl:app-verl0.6-transformers4.56.1-sglang0.5.2-mcore0.13.0-te2.2
 WORKDIR /opt
 
 # Install verl
-ENV VERL_COMMIT=ddd86f527a4af75095e4677b02b5aa272913a088
-RUN git clone https://github.com/volcengine/verl.git && \
-    cd verl && \
-    git checkout ${VERL_COMMIT} && \
-    pip3 install -e .
+# ENV VERL_COMMIT=ddd86f527a4af75095e4677b02b5aa272913a088
+# RUN git clone https://github.com/volcengine/verl.git && \
+#     cd verl && \
+#     git checkout ${VERL_COMMIT} && \
+
+COPY --from=verl-src / /opt/verl
+
+RUN pip3 install -e /opt/verl
 
 RUN pip install fire
 RUN pip3 install -U pynvml
