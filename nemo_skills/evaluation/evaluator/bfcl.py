@@ -50,7 +50,7 @@ def eval_bfcl(cfg):
     output_dir = Path("/opt/gorilla/berkeley-function-call-leaderboard") / f"result/{model_name}"
     score_file = (
         Path("/opt/gorilla/berkeley-function-call-leaderboard")
-        / f"score/{model_name}"
+        / f"score/{model_name}" / get_directory_structure_by_category(test_category)
         / f"BFCL_v4_{test_category}_score.json"
     )
 
