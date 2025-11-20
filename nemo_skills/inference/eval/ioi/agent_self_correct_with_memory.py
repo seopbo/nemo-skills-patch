@@ -86,6 +86,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     model_choose_steps: bool = False
     average_model_choose_steps: int = 1
     sample_tests_attempts: int = 0
+    per_step_evaluate: bool = True
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -263,45 +264,43 @@ class IOIExecutionGenerationTask(GenerationTask):
             )
 
         for step_num in range(num_steps_completed, decided_total_steps):
-            # Evaluate the current solution using the external evaluator.
-            # Time the external evaluator to capture evaluation latency.
-            eval_start_t = time.time()
-            eval_results = await self.evaluator.eval_single({**data_point, "generation": cur_generation_response})
-            eval_time = time.time() - eval_start_t
+            is_icpc = False
+            sample_avg = 0.0
+            if self.cfg.per_step_evaluate:
+                eval_start_t = time.time()
+                eval_results = await self.evaluator.eval_single({**data_point, "generation": cur_generation_response})
+                eval_time = time.time() - eval_start_t
+                print(
+                    f"Async Pos : {async_pos} Step : {step_num} Problem {data_point['id']}: Evaluation time = {eval_time:.3f}s"
+                )
+                if chat_history:
+                    chat_history[-1]["evaluation_time"] = eval_time
+                test_case_results = eval_results["test_case_results"]
+                normalized_results = self._normalize_test_case_results(test_case_results)
+                if chat_history:
+                    chat_history[-1]["subtask_scores"] = {k: v["score"] for k, v in normalized_results.items()}
+                outputs_all = test_case_results.get("outputs", [])
+                sample_outputs = [o for o in outputs_all if o.get("test_type") == "sample"]
 
-            # Record evaluation time for the solution that was just evaluated (last entry in chat_history).
-            if chat_history:
-                chat_history[-1]["evaluation_time"] = eval_time
-            test_case_results = eval_results["test_case_results"]
-            normalized_results = self._normalize_test_case_results(test_case_results)
-            if chat_history:
-                chat_history[-1]["subtask_scores"] = {k: v["score"] for k, v in normalized_results.items()}
+                def _avg(outputs_list):
+                    if not outputs_list:
+                        return 0.0
+                    try:
+                        total = len(outputs_list)
+                        passed = sum(1.0 if float(o.get("score", 0.0)) == 1.0 else 0.0 for o in outputs_list)
+                        return float(passed / total)
+                    except Exception:
+                        return 0.0
 
-            # Compute sample/overall averages for candidate selection
-            # (Ported from agent_private logic)
-            outputs_all = test_case_results.get("outputs", [])
-            sample_outputs = [o for o in outputs_all if o.get("test_type") == "sample"]
-
-            def _avg(outputs_list):
-                if not outputs_list:
-                    return 0.0
-                try:
-                    total = len(outputs_list)
-                    passed = sum(1.0 if float(o.get("score", 0.0)) == 1.0 else 0.0 for o in outputs_list)
-                    return float(passed / total)
-                except Exception:
-                    return 0.0
-
-            sample_avg = _avg(sample_outputs)
-            # Store sample score only for ICPC-style evaluators (flat dict with outputs list)
-            is_icpc = (
-                isinstance(test_case_results, dict)
-                and "outputs" in test_case_results
-                and "score" in test_case_results
-                and isinstance(test_case_results.get("outputs"), list)
-            )
-            if is_icpc and chat_history:
-                chat_history[-1]["sample_score"] = sample_avg
+                sample_avg = _avg(sample_outputs)
+                is_icpc = (
+                    isinstance(test_case_results, dict)
+                    and "outputs" in test_case_results
+                    and "score" in test_case_results
+                    and isinstance(test_case_results.get("outputs"), list)
+                )
+                if is_icpc and chat_history:
+                    chat_history[-1]["sample_score"] = sample_avg
 
             # Update memory with current code solution and score (use sample_avg)
             if int(selected_k) > 0:
@@ -318,14 +317,22 @@ class IOIExecutionGenerationTask(GenerationTask):
 
             # Early termination: if configured attempts reached and samples are not perfect (ICPC only)
             attempts_limit = int(getattr(self.cfg, "sample_tests_attempts", 0) or 0)
-            if is_icpc and attempts_limit > 0 and step_num >= attempts_limit and float(sample_avg) < 1.0:
+            if (
+                self.cfg.per_step_evaluate
+                and is_icpc
+                and attempts_limit > 0
+                and step_num >= attempts_limit
+                and float(sample_avg) < 1.0
+            ):
                 print(
                     f"[Terminate] Problem {data_point['id']}: Sample tests not perfect after {attempts_limit} steps; stopping."
                 )
                 break
 
             # Check if all subtasks passed fully (score == 1 for every output)
-            if all(all(float(o["score"]) == 1.0 for o in v["outputs"]) for v in normalized_results.values()):
+            if self.cfg.per_step_evaluate and all(
+                all(float(o["score"]) == 1.0 for o in v["outputs"]) for v in normalized_results.values()
+            ):
                 print(f"[Success] Problem {data_point['id']}: All test cases passed at step {step_num}.")
 
             print(f"[Step {step_num + 1}/{self.cfg.total_steps}] Self-improving solution.")
@@ -380,7 +387,7 @@ class IOIExecutionGenerationTask(GenerationTask):
 
         # Final evaluation of memory solutions (if any) using the helper
         memory_solutions_results = []
-        if int(selected_k) > 0 and self.saved_solutions:
+        if self.cfg.per_step_evaluate and int(selected_k) > 0 and self.saved_solutions:
             details_by_idx = await self._evaluate_memory_solutions(data_point, return_details=True)
             for idx, info in details_by_idx.items():
                 entry = self.saved_solutions[idx]
