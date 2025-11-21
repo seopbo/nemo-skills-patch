@@ -193,7 +193,7 @@ def _create_job_unified(
                     num_tasks=group_tasks,
                     sbatch_kwargs=sbatch_kwargs,
                 ),
-                name=f"model_{model_idx}_group" if num_models > 1 else task_name,
+                name=f"{task_name}_model_{model_idx}_group" if num_models > 1 else task_name,
                 log_dir=log_dir,
             )
             groups.append(group)
