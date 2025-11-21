@@ -37,11 +37,25 @@ from nemo_skills.pipeline.utils.mounts import get_mounts_from_config
 _SUPPORTED_CLUSTER_CONFIG_MODES = {"assert", "overwrite", "reuse"}
 _DEFAULT_CLUSTER_CONFIG_FILENAME = "cluster_config.yaml"
 _DEFAULT_COMMIT_FILENAME = "nemo_skills_commit.json"
+_UNCOMMITTED_ENV = "NEMO_SKILLS_DISABLE_UNCOMMITTED_CHANGES_CHECK"
+_UNCOMMITTED_SKIP_VALUES = {"1", "true", "yes"}
+_UNCOMMITTED_ERROR_MSG = (
+    "The NeMo-Skills checkout you're using to launch this Slurm test has uncommitted changes.\n"
+    "We snapshot the repo state into each test workspace for reproducibility, but we cannot do so "
+    "while the working tree is dirty.\n"
+    "Please commit or stash your changes, or set NEMO_SKILLS_DISABLE_UNCOMMITTED_CHANGES_CHECK=1 "
+    "if you intentionally want to snapshot an in-progress state (note: this also disables the "
+    "global nemo-skills submission check)."
+)
+
+
+def _is_uncommitted_check_disabled() -> bool:
+    return os.environ.get(_UNCOMMITTED_ENV, "0").lower() in _UNCOMMITTED_SKIP_VALUES
 
 
 @lru_cache(maxsize=1)
-def _get_repo_root():
-    """Return the git repository root if available, otherwise fallback to project root."""
+def _get_repo_root() -> Path:
+    """Return the git repository root for the current checkout."""
     current_dir = Path(__file__).resolve().parent
     result = subprocess.run(
         ["git", "rev-parse", "--show-toplevel"],
@@ -335,6 +349,8 @@ def _sync_commit_metadata(cluster_config: dict, remote_path: str, mode: str):
         return
 
     if remote_exists and mode == "assert":
+        if _is_uncommitted_check_disabled():
+            return
         existing = _download_remote_json(cluster_config, remote_path)
         if existing != metadata:
             raise AssertionError(
@@ -364,9 +380,12 @@ def _collect_repo_metadata() -> dict:
         )
         return result.stdout.strip() if result.returncode == 0 else None
 
+    status_output = _run_git("status", "--short")
+    if status_output and not _is_uncommitted_check_disabled():
+        raise RuntimeError(_UNCOMMITTED_ERROR_MSG)
+
     metadata["commit"] = _run_git("rev-parse", "HEAD")
     metadata["describe"] = _run_git("describe", "--always", "--dirty")
-    status_output = _run_git("status", "--short")
     metadata["is_dirty"] = bool(status_output) if status_output is not None else None
     return metadata
 
