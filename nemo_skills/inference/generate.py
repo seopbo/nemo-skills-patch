@@ -392,10 +392,10 @@ class GenerationTask:
                 additional_config={"sandbox": self.cfg.sandbox},
             )
         else:
-            data_dir = ""
             if "data_dir" in self.cfg.eval_config and not (isinstance(self.cfg.eval_config["data_dir"], type(None)) or isinstance(self.cfg.eval_type, type(None))):
                 data_dir =os.path.join(self.cfg.eval_config["data_dir"], self.cfg.eval_type)
-            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, data_dir = data_dir)
+                llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, data_dir = data_dir)
+            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
 
         if self.cfg.parallel_thinking.mode is not None:
             # We don't want to override these key variables which overlap with self.cfg
