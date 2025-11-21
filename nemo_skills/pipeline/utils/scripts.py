@@ -75,6 +75,7 @@ class BaseJobScript(run.Script):
 
     het_group_index: Optional[int] = field(default=None, init=False, repr=False)
     installation_command: Optional[str] = None
+    entrypoint: str = field(default="bash", init=False)
 
     def __post_init__(self):
         """Wrap inline command with installation_command if provided."""
@@ -184,9 +185,6 @@ class ServerScript(BaseJobScript):
         )
 
         self.set_inline(cmd)
-        # Set entrypoint for run.Script (required by parent class)
-        # Note: This is different from server_entrypoint which is for custom server scripts
-        object.__setattr__(self, "entrypoint", "bash")
         super().__post_init__()
 
     def get_address(self) -> str:
@@ -261,8 +259,6 @@ class SandboxScript(BaseJobScript):
         )
 
         self.set_inline(cmd)
-        # Set entrypoint for run.Script (required by parent class)
-        object.__setattr__(self, "entrypoint", "bash")
         super().__post_init__()
 
 
@@ -398,7 +394,4 @@ class GenerationClientScript(BaseJobScript):
 
         # Always use lazy command building
         self.set_inline(build_cmd)
-
-        # Set entrypoint for run.Script (required by parent class)
-        object.__setattr__(self, "entrypoint", "bash")
         super().__post_init__()
