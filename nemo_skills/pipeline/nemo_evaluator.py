@@ -89,7 +89,7 @@ NeMo-Skills                                                NeMo Evaluator
 
 import copy
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -101,8 +101,8 @@ from omegaconf import DictConfig, OmegaConf
 
 import nemo_skills.pipeline.utils as pipeline_utils
 from nemo_skills.pipeline.app import app, typer_unpacker
-from nemo_skills.pipeline.utils.commands import vllm_server_command
 from nemo_skills.pipeline.utils.declarative import Command, CommandGroup, HardwareConfig, Pipeline
+from nemo_skills.pipeline.utils.scripts import BaseJobScript, ServerScript
 from nemo_skills.utils import get_logger_name, setup_logging
 
 LOG = logging.getLogger(get_logger_name(__file__))
@@ -443,10 +443,8 @@ def _create_serving_command_obj(
     idx: int,
     task_name: str,
 ) -> Command:
-    """Create a Command object for a hosted serving component (main or judge server).
+    """Create a `Command` backed by a `ServerScript` for a hosted serving component.
 
-    This function wraps vllm_server_command and standardizes container selection,
-    logging prefixes, and metadata for both main and judge servers.
 
     Args:
         cluster_config: Cluster configuration dictionary
@@ -464,42 +462,37 @@ def _create_serving_command_obj(
         task_name: Task name for naming
 
     Returns:
-        Command object configured for the serving component
+        Command: A Command object whose `script` is a configured `ServerScript`.
     """
     stype = (server_type or "vllm").lower()
-    sargs = args or ""
     if stype != "vllm":
         LOG.warning("Only vllm server_type is supported currently; got %s", stype)
 
-    cmd_str, meta = vllm_server_command(
-        cluster_config=cluster_config,
-        model=model,  # type: ignore[arg-type]
-        port=port,
+    server_script = ServerScript(
         server_type=stype,
-        gpus=gpus,
-        nodes=nodes,
-        args=sargs,
-        entrypoint=entrypoint,
+        model_path=model or "",
+        cluster_config=cluster_config,
+        num_gpus=gpus,
+        num_nodes=nodes or 1,
+        server_args=args or "",
+        server_entrypoint=entrypoint,
+        port=port,
+        allocate_port=port is None,
     )
 
-    # Resolve container fallback when not explicitly provided
+    # Judge servers get a distinct log prefix for clarity
+    if is_judge:
+        server_script.log_prefix = "judge-server"
+
     if not container:
         container = cluster_config["containers"][stype]
 
-    log_prefix = "judge-server" if is_judge else "server"
     name_role = "judge-server" if is_judge else "server"
 
     return Command(
-        command=cmd_str,
+        script=server_script,
         container=container,
-        gpus=gpus,
-        nodes=nodes or 1,
         name=f"{expname}-{name_role}-{idx}-{task_name}",
-        metadata={
-            **meta,
-            "gpus": gpus,
-            "log_prefix": log_prefix,
-        },
     )
 
 
@@ -630,12 +623,7 @@ def _build_judge_server_if_needed(ctx: _TaskCreationContext) -> Optional[Command
 def _build_client_command(
     ctx: _TaskCreationContext, main_server_cmd: Optional[Command], judge_server_cmd: Optional[Command]
 ) -> Command:
-    """Build Command for evaluator client.
-
-    The client command behavior depends on server hosting:
-    - If servers are co-hosted: Uses lambda factory to resolve runtime URLs via hostname_ref/meta_ref
-    - If using external servers: Uses static URLs from server_base_url/judge_server_base_url
-    - If no servers: Uses URLs from evaluator config or defaults
+    """Create the evaluator client `Command` using `EvaluatorClientScript`.
 
     Args:
         ctx: Task creation context with all configuration
@@ -643,93 +631,19 @@ def _build_client_command(
         judge_server_cmd: Judge server Command if self-hosted, None otherwise
 
     Returns:
-        Command object for evaluator client
+        Command: A Command whose script builds the evaluator CLI at runtime
     """
-    if ctx.hosting_server or ctx.hosting_judge:
-        # Co-hosted servers: Use lambda factory to resolve runtime URLs
-        # The lambda is evaluated at execution time when het_group_index is assigned
-        def _client_cmd_factory():
-            waits: List[str] = []
-            target_url: Optional[str] = None
-            judge_url: Optional[str] = None
 
-            # Build main server URL from runtime references
-            if ctx.hosting_server and main_server_cmd is not None:
-                server_host = main_server_cmd.hostname_ref()
-                server_port_val = main_server_cmd.meta_ref("port")
-                base_url = f"http://{server_host}:{server_port_val}"
-                waits.append(pipeline_utils.get_server_wait_cmd(f"{base_url}{ctx.server_health_path}"))
-                target_url = f"{base_url}{ctx.server_api_path}"
-
-            # Build judge server URL from runtime references
-            if ctx.hosting_judge and judge_server_cmd is not None:
-                jhost = judge_server_cmd.hostname_ref()
-                jport = judge_server_cmd.meta_ref("port")
-                jbase = f"http://{jhost}:{jport}"
-                waits.append(pipeline_utils.get_server_wait_cmd(f"{jbase}{ctx.judge_server_health_path}"))
-                judge_url = f"{jbase}{ctx.judge_server_api_path}"
-
-            # Wait for servers to be ready, then run evaluator
-            wait_cmd = " && ".join(waits) if waits else "true"
-            cmd = _build_task_cmd(
-                task_name=ctx.task_name,
-                launcher_run_cfg=ctx.launcher_run_cfg,
-                task_cfg=ctx.task_cfg,
-                task_definition=ctx.task_definition,
-                expname=ctx.expname,
-                base_output_root=ctx.base_output_root,
-                url_override=target_url,
-                model_id=ctx.server_model,
-                judge_url_override=judge_url,
-                judge_model_id=ctx.judge_server_model,
-            )
-            return f"{wait_cmd} && {cmd}"
-
-        return Command(
-            command=_client_cmd_factory,
-            container=ctx.eval_image,
-            gpus=ctx.job_gpus or None,
-            nodes=ctx.job_nodes or 1,
-            name=f"{ctx.expname}-client-{ctx.idx}-{ctx.task_name}",
-            metadata={
-                "log_prefix": "main",
-                "environment": ctx.env_vars,
-                "gpus": ctx.job_gpus or None,
-            },
-        )
-
-    # No hosted servers: Use external URLs or config defaults
-    server_url = None
-    if ctx.with_external_server and ctx.server_base_url:
-        server_url = ctx.server_base_url.rstrip("/") + ctx.server_api_path
-    judge_url = None
-    if ctx.with_external_judge and ctx.judge_server_base_url:
-        judge_url = ctx.judge_server_base_url.rstrip("/") + ctx.judge_server_api_path
-
-    eval_cmd = _build_task_cmd(
-        task_name=ctx.task_name,
-        launcher_run_cfg=ctx.launcher_run_cfg,
-        task_cfg=ctx.task_cfg,
-        task_definition=ctx.task_definition,
-        expname=ctx.expname,
-        base_output_root=ctx.base_output_root,
-        url_override=server_url,
-        model_id=ctx.server_model,
-        judge_url_override=judge_url,
-        judge_model_id=ctx.judge_server_model,
+    client_script = EvaluatorClientScript(
+        ctx=ctx,
+        main_server_script=main_server_cmd.script if main_server_cmd else None,
+        judge_server_script=judge_server_cmd.script if judge_server_cmd else None,
     )
 
     return Command(
-        command=eval_cmd,
+        script=client_script,
         container=ctx.eval_image,
-        gpus=None,
-        nodes=ctx.job_nodes or 1,
-        name=f"{ctx.expname}-{ctx.idx}-{ctx.task_name}",
-        metadata={
-            "log_prefix": "main",
-            "environment": ctx.env_vars,
-            "gpus": ctx.job_gpus or None,
-        },
+        name=f"{ctx.expname}-client-{ctx.idx}-{ctx.task_name}",
     )
 
 
@@ -806,3 +720,56 @@ def _build_task_cmd(
     cmd_struct = get_eval_factory_command(launcher_run_cfg, task_cfg_copy, task_definition)
 
     return cmd_struct.cmd
+
+
+@dataclass(kw_only=True)
+class EvaluatorClientScript(BaseJobScript):
+    """run.Script implementation for nemo-evaluator client with runtime server resolution."""
+
+    ctx: _TaskCreationContext
+    main_server_script: Optional[ServerScript] = None
+    judge_server_script: Optional[ServerScript] = None
+    log_prefix: str = field(default="main", init=False)
+
+    def __post_init__(self):
+        def build_command():
+            waits: List[str] = []
+            target_url: Optional[str] = None
+            judge_url: Optional[str] = None
+
+            if self.ctx.hosting_server and self.main_server_script is not None:
+                server_host = self.main_server_script.hostname_ref()
+                base_url = f"http://{server_host}:{self.main_server_script.port}"
+                waits.append(pipeline_utils.get_server_wait_cmd(f"{base_url}{self.ctx.server_health_path}"))
+                target_url = f"{base_url}{self.ctx.server_api_path}"
+            elif self.ctx.with_external_server and self.ctx.server_base_url:
+                target_url = self.ctx.server_base_url.rstrip("/") + self.ctx.server_api_path
+
+            if self.ctx.hosting_judge and self.judge_server_script is not None:
+                judge_host = self.judge_server_script.hostname_ref()
+                judge_base = f"http://{judge_host}:{self.judge_server_script.port}"
+                waits.append(pipeline_utils.get_server_wait_cmd(f"{judge_base}{self.ctx.judge_server_health_path}"))
+                judge_url = f"{judge_base}{self.ctx.judge_server_api_path}"
+            elif self.ctx.with_external_judge and self.ctx.judge_server_base_url:
+                judge_url = self.ctx.judge_server_base_url.rstrip("/") + self.ctx.judge_server_api_path
+
+            cmd = _build_task_cmd(
+                task_name=self.ctx.task_name,
+                launcher_run_cfg=self.ctx.launcher_run_cfg,
+                task_cfg=self.ctx.task_cfg,
+                task_definition=self.ctx.task_definition,
+                expname=self.ctx.expname,
+                base_output_root=self.ctx.base_output_root,
+                url_override=target_url,
+                model_id=self.ctx.server_model,
+                judge_url_override=judge_url,
+                judge_model_id=self.ctx.judge_server_model,
+            )
+
+            wait_cmd = " && ".join(waits) if waits else None
+            final_cmd = f"{wait_cmd} && {cmd}" if wait_cmd else cmd
+            env_vars = copy.deepcopy(self.ctx.env_vars)
+            return final_cmd, {"environment": env_vars}
+
+        self.set_inline(build_command)
+        super().__post_init__()
