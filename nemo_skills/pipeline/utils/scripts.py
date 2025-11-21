@@ -42,7 +42,7 @@ Example:
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
 import nemo_run as run
 
@@ -70,7 +70,6 @@ class BaseJobScript(run.Script):
 
     Attributes:
         het_group_index: Index in heterogeneous job group (set by Pipeline at runtime)
-        installation_command: Optional[str] = None
     """
 
     het_group_index: Optional[int] = field(default=None, init=False, repr=False)
@@ -79,14 +78,25 @@ class BaseJobScript(run.Script):
 
     def __post_init__(self):
         """Wrap inline command with installation_command if provided."""
-        if self.installation_command:
+        if not self.installation_command:
+            return
+
+        if callable(self.inline):
+            original_inline = self.inline
+
+            def wrapped_inline():
+                result = original_inline()
+                if isinstance(result, tuple):
+                    command, metadata = result
+                    return install_packages_wrap(command, self.installation_command), metadata
+                return install_packages_wrap(result, self.installation_command)
+
+            self.set_inline(wrapped_inline)
+        elif isinstance(self.inline, str):
             self.set_inline(install_packages_wrap(self.inline, self.installation_command))
 
-    def set_inline(self, command: str) -> None:
-        """Set the inline command.
-
-        Helper method to properly update the inline attribute on frozen dataclass.
-        """
+    def set_inline(self, command: Union[str, Callable, run.Script]) -> None:
+        """Set the inline command safely on frozen dataclass."""
         object.__setattr__(self, "inline", command)
 
     def hostname_ref(self) -> str:

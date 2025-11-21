@@ -580,18 +580,17 @@ class Pipeline:
         executors: List = []
         het_group_indices: List[int] = []
 
-        # In heterogeneous jobs, collect environment from all commands for cross-component refs
+        # Assign het_group_index values before evaluating any commands so cross-references
+        # (e.g., hostname_ref) see the correct indices regardless of processing order.
+        for het_idx, group in enumerate(groups):
+            for command in group.commands:
+                command.script.het_group_index = het_idx if heterogeneous else None
+
+        # Prepare commands once and collect runtime data for a second pass where we
+        # construct executors. This ensures all scripts have resolved cross-references.
+        prepared_commands: List[Dict] = []
         shared_env_vars: Dict[str, str] = {}
-        if heterogeneous:
-            for het_idx, group in enumerate(groups):
-                for command in group.commands:
-                    _, exec_config_probe = command.prepare_for_execution(cluster_config)
-                    shared_env_vars.update(exec_config_probe.get("environment", {}))
 
-        # Share packager across executors for efficiency (single-group only)
-        shared_packager = None
-
-        # Build commands and executors
         for het_idx, group in enumerate(groups):
             has_multiple_components = len(group.commands) > 1
             total_het_groups = (
@@ -599,13 +598,6 @@ class Pipeline:
             )
 
             for comp_idx, command in enumerate(group.commands):
-                # Assign het_group_index ONLY for heterogeneous jobs (per-job, not global)
-                # Non-heterogeneous jobs use localhost, so het_group_index should remain None
-                if heterogeneous:
-                    command.script.het_group_index = het_idx
-                else:
-                    command.script.het_group_index = None
-
                 script, exec_config = self._prepare_command(command, cluster_config)
 
                 # Apply PYTHONPATH/cd wrapper if not present (e.g. for generation scripts)
@@ -614,47 +606,77 @@ class Pipeline:
                     if "export PYTHONPATH=$PYTHONPATH:/nemo_run/code" not in script.inline:
                         script.set_inline(wrap_python_path(script.inline))
 
-                scripts.append(script)
-
-                # Merge shared environment for heterogeneous jobs
-                if heterogeneous and shared_env_vars:
-                    exec_config["environment"].update(shared_env_vars)
-
-                # Resolve container and create executor
-                container_image = self._resolve_container(exec_config, command, cluster_config)
-                # Pass external dependencies only to the first executor (SLURM doesn't support per-component dependencies in hetjobs)
-                exec_dependencies = external_deps if (het_idx == 0 and comp_idx == 0) else None
-
-                # Always use group.name for SLURM job name (consistent across all components)
-                # The group name is set to task_name in generate.py, without component suffixes
-                # Component names (like {task_name}_server, {task_name}_sandbox) are only used for log_prefix
-                job_name_for_slurm = group.name
-
-                executor = self._create_executor(
-                    command,
-                    exec_config,
-                    container_image,
-                    cluster_config,
-                    log_dir,
-                    group.hardware,
-                    heterogeneous,
-                    het_idx if heterogeneous else comp_idx,
-                    total_het_groups,
-                    (len(group.commands) > 1),
-                    dependencies=exec_dependencies,
-                    job_name_override=job_name_for_slurm,
+                prepared_commands.append(
+                    {
+                        "het_idx": het_idx,
+                        "comp_idx": comp_idx,
+                        "group": group,
+                        "command": command,
+                        "script": script,
+                        "exec_config": exec_config,
+                        "total_het_groups": total_het_groups,
+                        "overlap": len(group.commands) > 1,
+                    }
                 )
 
-                # Share packager across executors for single-group jobs
-                if not heterogeneous:
-                    if comp_idx == 0 and het_idx == 0:
-                        shared_packager = executor.packager
-                    else:
-                        executor.packager = shared_packager
-
-                executors.append(executor)
                 if heterogeneous:
-                    het_group_indices.append(het_idx)
+                    shared_env_vars.update(exec_config.get("environment", {}))
+
+        # Share packager across executors for efficiency (single-group only)
+        shared_packager = None
+
+        # Build commands and executors using prepared data
+        for entry in prepared_commands:
+            het_idx = entry["het_idx"]
+            comp_idx = entry["comp_idx"]
+            group = entry["group"]
+            command = entry["command"]
+            script = entry["script"]
+            exec_config = entry["exec_config"]
+            total_het_groups = entry["total_het_groups"]
+            overlap = entry["overlap"]
+
+            scripts.append(script)
+
+            # Merge shared environment for heterogeneous jobs
+            if heterogeneous and shared_env_vars:
+                exec_config["environment"].update(shared_env_vars)
+
+            # Resolve container and create executor
+            container_image = self._resolve_container(exec_config, command, cluster_config)
+            # Pass external dependencies only to the first executor (SLURM doesn't support per-component dependencies in hetjobs)
+            exec_dependencies = external_deps if (het_idx == 0 and comp_idx == 0) else None
+
+            # Always use group.name for SLURM job name (consistent across all components)
+            # The group name is set to task_name in generate.py, without component suffixes
+            # Component names (like {task_name}_server, {task_name}_sandbox) are only used for log_prefix
+            job_name_for_slurm = group.name
+
+            executor = self._create_executor(
+                command,
+                exec_config,
+                container_image,
+                cluster_config,
+                log_dir,
+                group.hardware,
+                heterogeneous,
+                het_idx if heterogeneous else comp_idx,
+                total_het_groups,
+                overlap,
+                dependencies=exec_dependencies,
+                job_name_override=job_name_for_slurm,
+            )
+
+            # Share packager across executors for single-group jobs
+            if not heterogeneous:
+                if comp_idx == 0 and het_idx == 0:
+                    shared_packager = executor.packager
+                else:
+                    executor.packager = shared_packager
+
+            executors.append(executor)
+            if heterogeneous:
+                het_group_indices.append(het_idx)
 
         # For heterogeneous jobs, set het_group_indices on the first executor
         if heterogeneous and executors:
