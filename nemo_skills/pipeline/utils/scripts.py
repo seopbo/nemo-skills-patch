@@ -79,7 +79,14 @@ class BaseJobScript(run.Script):
     def __post_init__(self):
         """Wrap inline command with installation_command if provided."""
         if self.installation_command:
-            self.inline = install_packages_wrap(self.inline, self.installation_command)
+            self.set_inline(install_packages_wrap(self.inline, self.installation_command))
+
+    def set_inline(self, command: str) -> None:
+        """Set the inline command.
+
+        Helper method to properly update the inline attribute on frozen dataclass.
+        """
+        object.__setattr__(self, "inline", command)
 
     def hostname_ref(self) -> str:
         """Get hostname reference for hetjob cross-component communication.
@@ -176,7 +183,7 @@ class ServerScript(BaseJobScript):
             server_entrypoint=self.server_entrypoint,
         )
 
-        self.inline = cmd
+        self.set_inline(cmd)
         # Set entrypoint for run.Script (required by parent class)
         # Note: This is different from server_entrypoint which is for custom server scripts
         object.__setattr__(self, "entrypoint", "bash")
@@ -253,7 +260,7 @@ class SandboxScript(BaseJobScript):
             port=self.port,
         )
 
-        self.inline = cmd
+        self.set_inline(cmd)
         # Set entrypoint for run.Script (required by parent class)
         object.__setattr__(self, "entrypoint", "bash")
         super().__post_init__()
@@ -390,7 +397,7 @@ class GenerationClientScript(BaseJobScript):
             return cmd, {"environment": env_vars}
 
         # Always use lazy command building
-        self.inline = build_cmd
+        self.set_inline(build_cmd)
 
         # Set entrypoint for run.Script (required by parent class)
         object.__setattr__(self, "entrypoint", "bash")

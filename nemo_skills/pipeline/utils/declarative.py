@@ -241,7 +241,7 @@ class Command:
                 evaluated_command = result
 
             # Update script.inline with evaluated command
-            object.__setattr__(self.script, "inline", evaluated_command)
+            self.script.set_inline(evaluated_command)
 
         # Build execution config from Script fields
         execution_config = {
@@ -612,7 +612,7 @@ class Pipeline:
                 # Server scripts typically already have it
                 if isinstance(script.inline, str):
                     if "export PYTHONPATH=$PYTHONPATH:/nemo_run/code" not in script.inline:
-                        script.inline = wrap_python_path(script.inline)
+                        script.set_inline(wrap_python_path(script.inline))
 
                 scripts.append(script)
 
