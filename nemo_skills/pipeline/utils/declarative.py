@@ -26,6 +26,7 @@ from nemo_skills.pipeline.utils import (
     get_executor,
     get_exp,
     get_exp_handles,
+    get_registered_external_repo,
     get_tunnel,
     run_exp,
     temporary_env_update,
@@ -498,8 +499,39 @@ class Pipeline:
             Tuple of (Script_object, exec_config)
         """
         script, exec_config = command.prepare_for_execution(cluster_config)
+        if cluster_config.get("executor") in ("none", "local"):
+            script = self._rewrite_local_paths(script)
         # Note: mpirun wrapping for multi-task scripts is handled by the executor
         return script, exec_config
+
+    def _rewrite_local_paths(self, script: run.Script) -> run.Script:
+        """For executor='none', replace /nemo_run/code paths with local repo paths."""
+        nemo_repo = get_registered_external_repo("nemo_skills")
+        if nemo_repo is None:
+            return script
+
+        pkg_path = str(nemo_repo.path)
+        repo_root = str(nemo_repo.path.parent)
+
+        def _replace(cmd: str) -> str:
+            return cmd.replace("/nemo_run/code/nemo_skills", pkg_path).replace("/nemo_run/code", repo_root)
+
+        inline_cmd = script.inline
+        if isinstance(inline_cmd, str):
+            script.set_inline(_replace(inline_cmd))
+        elif callable(inline_cmd):
+            original_inline = inline_cmd
+
+            def wrapped_inline():
+                result = original_inline()
+                if isinstance(result, tuple):
+                    cmd, metadata = result
+                    return _replace(cmd), metadata
+                return _replace(result)
+
+            script.set_inline(wrapped_inline)
+
+        return script
 
     def _resolve_container(self, exec_config: Dict, command, cluster_config: Dict) -> str:
         """Resolve container name to image path."""
@@ -600,10 +632,8 @@ class Pipeline:
             for comp_idx, command in enumerate(group.commands):
                 script, exec_config = self._prepare_command(command, cluster_config)
 
-                # Apply PYTHONPATH/cd wrapper if not present (e.g. for generation scripts)
-                # Server scripts typically already have it
                 if isinstance(script.inline, str):
-                    if "export PYTHONPATH=$PYTHONPATH:/nemo_run/code" not in script.inline:
+                    if cluster_config.get("executor") not in ("none", "local"):
                         script.set_inline(wrap_python_path(script.inline))
 
                 prepared_commands.append(
