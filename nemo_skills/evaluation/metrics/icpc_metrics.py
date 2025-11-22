@@ -71,6 +71,8 @@ class ICPCMetrics(BaseMetrics):
             outputs = submission["input_case_results"]
             run_outputs = []
             for output in outputs:
+                if "run_stdout" not in output:
+                    continue
                 run_outputs.append(output["run_stdout"])
             output_key = tuple(run_outputs)
             extract_info = self.extract_info(submission)
