@@ -19,7 +19,6 @@ import re
 import shutil
 import threading
 import time
-from typing import Dict
 
 from nemo_skills.code_execution.sandbox import LocalSandbox
 from nemo_skills.evaluation.evaluator.base import BaseEvaluator, BaseEvaluatorConfig
@@ -30,6 +29,7 @@ from nemo_skills.utils import nested_dataclass
 @nested_dataclass(kw_only=True)
 class IOIEvaluatorConfig(BaseEvaluatorConfig):
     test_file: str = "test_metadata.json"
+    input_tests_file: str | None = None
     num_workers: int = 16  # number of test workers
     test_batch_size: int = 16  # number of tests to run concurrently
     overwrite: bool = False
@@ -194,6 +194,70 @@ def run_test_case(task_args: dict, worker_id: int) -> dict:
             pass
 
 
+def run_input_case(task_args: dict, worker_id: int) -> dict:
+    # Use high-resolution timestamp to guarantee uniqueness across parallel calls.
+    unique_dir = f"/nemo_run/ioi_run_{worker_id}_{os.getpid()}_{time.time_ns()}"
+
+    try:
+        # 1. Create all necessary files locally (sandbox shares filesystem)
+        precompiled_dir = task_args.get("precompiled_dir")
+        os.makedirs(unique_dir, exist_ok=True)
+        os.makedirs(os.path.join(unique_dir, "graders"), exist_ok=True)
+        # Copy precompiled assets into unique run directory
+        if precompiled_dir and os.path.isdir(precompiled_dir):
+            shutil.copytree(precompiled_dir, unique_dir, dirs_exist_ok=True)
+        # Write contestant solution
+        with open(os.path.join(unique_dir, "graders", f"{task_args['problem_id']}.cpp"), "w", encoding="utf-8") as f:
+            f.write(task_args["generated_code"])
+        # Prepare only input file (no ground-truth for input-only runs)
+        with open(os.path.join(unique_dir, "input.txt"), "w", encoding="utf-8") as f:
+            f.write(task_args["test_input"])
+
+        # 2. Compile only the problem solution (skip checker/grader recompilation)
+        compile_command = f"cd {unique_dir} && ./compile.sh"
+        sandbox = LocalSandbox()
+        compile_result, _ = worker_loop.run_until_complete(
+            sandbox.execute_code(compile_command, language="shell", timeout=120)
+        )
+
+        result = {
+            "compile_success": not compile_result.get("stderr"),
+            "compile_stdout": compile_result.get("stdout", ""),
+            "compile_stderr": compile_result.get("stderr", ""),
+            "stdout": "",
+            "stderr": "",
+            "error": "",
+        }
+
+        if not result["compile_success"]:
+            return result
+
+        # 3. Run the code. For input-only runs, reuse run.sh which should emit program stdout.
+        run_command = f"cd {unique_dir} && ./run.sh"
+        run_result, _ = worker_loop.run_until_complete(
+            sandbox.execute_code(run_command, language="shell", timeout=120)
+        )
+
+        result.update(
+            {
+                "stdout": run_result.get("stdout", ""),
+                "stderr": run_result.get("stderr", ""),
+            }
+        )
+
+        return result
+
+    except Exception as e:
+        return {"stdout": "", "stderr": "", "error": str(e)}
+
+    finally:
+        # 4. Clean up the directory locally
+        try:
+            shutil.rmtree(unique_dir, ignore_errors=True)
+        except Exception:
+            pass
+
+
 def extract_final_cpp_block(text):
     pattern = r"```(?:cpp|Cpp)\s*\n(.*?)```"
     matches = re.findall(pattern, text, re.DOTALL)
@@ -233,10 +297,11 @@ class IOIEvaluator(BaseEvaluator):
         self.eval_cfg = IOIEvaluatorConfig(_init_nested=True, **config)
 
         # Heavy runtime resources are lazily initialized within _evaluate_entry.
-        self.sandbox = None  # type: ignore
-        self.metadata = None  # type: ignore
-        self.precompiled_cache: Dict[str, str] = {}
-        self.pool = None  # type: ignore
+        self.sandbox = None
+        self.metadata = None
+        self.inputdata = None
+        self.precompiled_cache = {}
+        self.pool = None
 
     async def _initialize_runtime(self):
         """Asynchronously create sandbox and related runtime state on first use."""
@@ -258,14 +323,23 @@ class IOIEvaluator(BaseEvaluator):
                 )
             with open(self.eval_cfg.test_file, "r") as f:
                 metadata_local = json.load(f)
+            input_local = None
+            if getattr(self.eval_cfg, "input_tests_file", None):
+                if not os.path.exists(self.eval_cfg.input_tests_file):
+                    raise FileNotFoundError(
+                        f"Input tests file {self.eval_cfg.input_tests_file} does not exist."
+                        " Please provide a valid parameter for ++eval_config.input_tests_file=x when running IOI Evaluation."
+                    )
+                with open(self.eval_cfg.input_tests_file, "r") as f:
+                    input_local = json.load(f)
             pool_local = multiprocessing.Pool(
                 processes=self.eval_cfg.test_batch_size,
                 initializer=init_worker,
             )
 
-            return sbox, metadata_local, pool_local
+            return sbox, metadata_local, input_local, pool_local
 
-        self.sandbox, self.metadata, self.pool = await asyncio.to_thread(_setup)
+        self.sandbox, self.metadata, self.inputdata, self.pool = await asyncio.to_thread(_setup)
 
     # Internal helper
     async def _evaluate_entry(self, entry: dict) -> dict:
@@ -351,10 +425,40 @@ class IOIEvaluator(BaseEvaluator):
             score = round(min(data["scores"]) * data["score"], data["precision"]) if data["scores"] else 0.0
             test_case_results[st] = {"score": score, "outputs": data["outputs"]}
 
+        # Optionally run custom input cases
+        outputs = []
+        if self.inputdata is not None:
+            problem_inputs = self.inputdata[str(entry["id"])]
+            for i in range(0, len(problem_inputs), batch_size):
+                batch = problem_inputs[i : i + batch_size]
+                tasks = []
+                for test_data in batch:
+                    tasks.append(
+                        {
+                            "generated_code": completion,
+                            "problem_id": pid,
+                            "precompiled_dir": pre_dir,
+                            "test_input": test_data["content"],
+                        }
+                    )
+                # map with unique worker id argument
+                results = await asyncio.to_thread(
+                    self.pool.starmap, run_input_case, [(ta, idx) for idx, ta in enumerate(tasks)]
+                )
+                for test_data, result in zip(batch, results):
+                    # Ensure stdout/stderr keys exist for consumers
+                    if "stdout" not in result:
+                        result["stdout"] = result.get("run_stdout", "")
+                    if "stderr" not in result:
+                        result["stderr"] = result.get("run_stderr", "")
+                    result["test_name"] = test_data.get("file_name") or test_data.get("name") or ""
+                    outputs.append(result)
+
         return {
             "name": entry["name"],
             "subtask": entry["subtask"],
             "test_case_results": test_case_results,
+            "outputs": outputs,
         }
 
     async def eval_full(self):  # type: ignore[override]
