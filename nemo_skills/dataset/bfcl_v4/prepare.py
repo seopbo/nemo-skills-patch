@@ -15,7 +15,7 @@
 
 import logging
 import os
-from nemo_skills.dataset.bfcl_v4.constants import (
+from nemo_skills.dataset.bfcl_v3.constants import (
     DATA_FOLDER_PATH,
 )
 from nemo_skills.dataset.bfcl_v3.prepare import download_and_process_bfcl_data

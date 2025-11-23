@@ -111,18 +111,6 @@ TEST_COLLECTION_MAPPING = {
 
 ALL_SCORING_CATEGORIES = TEST_COLLECTION_MAPPING["all"]
 
-MULTI_TURN_FUNC_DOC_FILE_MAPPING = {
-    "GorillaFileSystem": "gorilla_file_system.json",
-    "MathAPI": "math_api.json",
-    "MessageAPI": "message_api.json",
-    "TwitterAPI": "posting_api.json",
-    "TicketAPI": "ticket_api.json",
-    "TradingBot": "trading_bot.json",
-    "TravelAPI": "travel_booking.json",
-    "VehicleControlAPI": "vehicle_control.json",
-}
-
 # Repo relative paths
 
-MULTI_TURN_FUNC_DOC_PATH = Path("berkeley-function-call-leaderboard/bfcl_eval/data/multi_turn_func_doc")
 DATA_FOLDER_PATH = Path("berkeley-function-call-leaderboard/bfcl_eval/data")

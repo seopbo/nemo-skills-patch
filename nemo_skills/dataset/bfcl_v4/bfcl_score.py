@@ -18,15 +18,53 @@ from nemo_skills.dataset.bfcl_v3.bfcl_score import (
     calculate_multi_turn_accuracy,
     get_accuracy_dict,
 )
-from nemo_skills.dataset.bfcl_v4.constants import (
-    SIMPLE_AST,
-    OTHER_SINGLE_TURN_AST,
-    LIVE_SINGLE_TURN_AST,
-    LIVE_SINGLE_TURN_RELEVANCE,
-    HALLUCINATION,
-    MEMORY,
-    WEB_SEARCH,
-)
+
+SIMPLE_AST = [
+    "simple_python",
+    "simple_java",
+    "simple_javascript",
+]
+
+OTHER_SINGLE_TURN_AST = [
+    "parallel",
+    "multiple",
+    "parallel_multiple",
+]
+
+LIVE_SINGLE_TURN_AST = [
+    "live_simple",
+    "live_multiple",
+    "live_parallel",
+    "live_parallel_multiple",
+]
+
+LIVE_SINGLE_TURN_RELEVANCE = "live_relevance"
+
+HALLUCINATION = [
+    "irrelevance",
+    "live_irrelevance",
+]
+
+MULTI_TURN_AST = [
+    "multi_turn_base",
+    "multi_turn_miss_func",
+    "multi_turn_miss_param",
+    "multi_turn_long_context",
+]
+
+MEMORY = [
+    "memory_kv",
+    "memory_vector",
+    "memory_rec_sum",
+]
+
+WEB_SEARCH = [
+    "web_search_base",
+    "web_search_no_snippet",
+]
+
+FORMAT_SENSITIVITY = "format_sensitivity"
+
 
 def calculate_non_live_single_turn_accuracy(metrics):
     # First calculate simple ast unweighted accuracy
