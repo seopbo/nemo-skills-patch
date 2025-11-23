@@ -366,7 +366,7 @@ def grpo_nemo_gym_rl(
                     cmd=train_cmd,
                     task_name=f"{expname}-grpo-gym-{job_id}",
                     log_dir=f"{log_dir}/training-logs",
-                    container=cluster_config["containers"]["nemo-rl"],
+                    container=cluster_config["containers"]["gym-nemo-rl"],
                     num_gpus=num_gpus,
                     num_nodes=num_nodes,
                     cluster_config=cluster_config,
