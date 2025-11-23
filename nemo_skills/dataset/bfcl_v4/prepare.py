@@ -30,14 +30,6 @@ LOG = logging.getLogger(get_logger_name(__file__))
 # Github paths for BFCL
 REPO_URL = "https://github.com/ShishirPatil/gorilla.git"
 
-# Define the configuration as a dictionary
-DEFAULT_SETTINGS = """
-DATASET_GROUP = "tool"
-METRICS_TYPE = "bfcl"
-GENERATION_ARGS = "++eval_type=bfcl"
-GENERATION_MODULE = "nemo_skills.inference.eval.bfcl"
-"""
-
 
 def main():
     LOG.warning(
