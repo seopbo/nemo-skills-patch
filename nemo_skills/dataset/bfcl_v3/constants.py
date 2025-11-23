@@ -14,6 +14,9 @@
 
 from pathlib import Path
 
+# As we use BFCLv4 dataset for data processing
+VERSION_PREFIX = "BFCL_v4"
+
 TEST_COLLECTION_MAPPING = {
     "all": [
         "simple_python",
@@ -105,6 +108,8 @@ TEST_COLLECTION_MAPPING = {
         "live_relevance",
     ],
 }
+
+ALL_SCORING_CATEGORIES = TEST_COLLECTION_MAPPING["all"]
 
 MULTI_TURN_FUNC_DOC_FILE_MAPPING = {
     "GorillaFileSystem": "gorilla_file_system.json",
