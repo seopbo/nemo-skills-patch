@@ -12,14 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import json
 import logging
 import sys
 from dataclasses import asdict, field
 from functools import partial
-import asyncio
 
 import hydra
+from bfcl_eval.eval_checker.multi_turn_eval.func_source_code.memory_api_metaclass import (
+    MemoryAPI,
+)
+from bfcl_eval.model_handler.utils import add_memory_instruction_system_prompt
+from bfcl_eval.utils import is_memory, is_memory_prereq
 from transformers import AutoTokenizer
 
 from nemo_skills.dataset.bfcl_v3.utils import (
@@ -48,13 +53,6 @@ from nemo_skills.utils import (
     nested_dataclass,
     setup_logging,
 )
-
-from bfcl_eval.utils import is_memory_prereq, is_memory
-from bfcl_eval.model_handler.utils import add_memory_instruction_system_prompt
-from bfcl_eval.eval_checker.multi_turn_eval.func_source_code.memory_api_metaclass import (
-    MemoryAPI,
-)
-
 
 LOG = logging.getLogger(get_logger_name(__file__))
 
@@ -285,7 +283,6 @@ class BFCLGenerationTask(GenerationTask):
         """BFCL is a multi-turn benchmark, so we can't print a single prompt."""
         return
 
-
     def setup_prompt(self):
         return None
 
@@ -296,7 +293,9 @@ class BFCLGenerationTask(GenerationTask):
         # First, fix the target paths to point to the actual target paths for memory stores
         for datapoint in data:
             if "initial_config" in datapoint and list(datapoint["initial_config"].keys())[0].startswith("MemoryAPI"):
-                datapoint["initial_config"][list(datapoint["initial_config"].keys())[0]]["model_result_dir"] = self.cfg.output_file.replace("/output.jsonl", "")
+                datapoint["initial_config"][list(datapoint["initial_config"].keys())[0]]["model_result_dir"] = (
+                    self.cfg.output_file.replace("/output.jsonl", "")
+                )
 
         # Now, process the datapoints which are the prereqs, one by one, and filter out the prereqs for the subsequent run
         prereqs = [datapoint for datapoint in data if is_memory_prereq(datapoint["id"])]
@@ -308,7 +307,6 @@ class BFCLGenerationTask(GenerationTask):
             _ = asyncio.run(self.process_single_datapoint(p, data))
 
         return non_prereqs
-
 
     async def _generate_single_assistant_turn(self, inference_state_dict):
         """Generate for a single assistant turn."""
@@ -397,9 +395,7 @@ class BFCLGenerationTask(GenerationTask):
                 long_context=("long_context" in test_category or "composite" in test_category),
             )
 
-            assert (
-                len(involved_instances) == 1
-            ), "Memory category should only involve one class."
+            assert len(involved_instances) == 1, "Memory category should only involve one class."
 
             memory_instance: "MemoryAPI" = list(involved_instances.values())[0]
             data_point["question"] = add_memory_instruction_system_prompt(
@@ -508,9 +504,7 @@ class BFCLGenerationTask(GenerationTask):
         # Special handling for the memory category
         # Need to flush the memory to local file at the end of the conversation
         if is_memory_prereq(test_entry_id):
-            assert (
-                len(involved_instances) == 1
-            ), "Memory category should only involve one class."
+            assert len(involved_instances) == 1, "Memory category should only involve one class."
             memory_instance: "MemoryAPI" = list(involved_instances.values())[0]
             memory_instance._flush_memory_to_local_file()
 

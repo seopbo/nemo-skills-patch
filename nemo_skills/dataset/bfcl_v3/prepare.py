@@ -20,31 +20,31 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from bfcl_eval.constants.category_mapping import MEMORY_SCENARIO_NAME
+from bfcl_eval.utils import (
+    is_agentic,
+    is_format_sensitivity,
+    is_memory,
+    is_multi_turn,
+    is_web_search,
+    load_file,
+    populate_initial_settings_for_memory_test_cases,
+    populate_initial_settings_for_web_search_test_cases,
+    populate_test_cases_with_predefined_functions,
+    process_agentic_test_case,
+    process_memory_test_case,
+    process_web_search_test_case,
+)
+
 from nemo_skills.dataset.bfcl_v3.constants import (
-    DATA_FOLDER_PATH,
     ALL_SCORING_CATEGORIES,
+    DATA_FOLDER_PATH,
     VERSION_PREFIX,
 )
 from nemo_skills.dataset.bfcl_v3.utils import (
     convert_to_tool,
     func_doc_language_specific_pre_processing,
 )
-from bfcl_eval.utils import (
-    is_format_sensitivity,
-    is_web_search,
-    is_memory,
-    is_multi_turn,
-    is_agentic,
-    load_file,
-    process_web_search_test_case,
-    process_memory_test_case,
-    process_agentic_test_case,
-    populate_test_cases_with_predefined_functions,
-    populate_initial_settings_for_memory_test_cases,
-    populate_initial_settings_for_web_search_test_cases,
-)
-from bfcl_eval.constants.category_mapping import MEMORY_SCENARIO_NAME
-
 from nemo_skills.utils import get_logger_name
 
 LOG = logging.getLogger(get_logger_name(__file__))
@@ -85,8 +85,7 @@ def load_dataset_entry(
     """
     This function retrieves the dataset entry for a given test category.
     The input should not be a test category goup, but a specific test category.
-    If `contain_prereq` is True, it will include the pre-requisite entries for the memory test categories.
-    If `include_language_specific_hint` is True, it will include the language-specific hint for the function description (for Java, JavaScript, and Python).
+    If `include_prereq` is True, it will include the pre-requisite entries for the memory test categories.
     """
     # Skip for now
     if is_format_sensitivity(test_category):
@@ -104,9 +103,7 @@ def load_dataset_entry(
         # Memory categories
         all_entries = load_file(target_folder / f"{VERSION_PREFIX}_memory.json")
         for scenario in MEMORY_SCENARIO_NAME:
-            all_entries = process_memory_test_case(
-                all_entries, test_category, scenario, include_prereq=include_prereq
-            )
+            all_entries = process_memory_test_case(all_entries, test_category, scenario, include_prereq=include_prereq)
     else:
         # All other categories, we don't need any special handling
         file_name = f"{VERSION_PREFIX}_{test_category}.json"
@@ -116,12 +113,8 @@ def load_dataset_entry(
     all_entries = populate_test_cases_with_predefined_functions(all_entries)
     all_entries = [process_multi_turn_test_case(entry) for entry in all_entries]
 
-    all_entries = populate_initial_settings_for_memory_test_cases(
-        all_entries, str(target_folder)
-    )
-    all_entries = populate_initial_settings_for_web_search_test_cases(
-        all_entries
-    )
+    all_entries = populate_initial_settings_for_memory_test_cases(all_entries, str(target_folder))
+    all_entries = populate_initial_settings_for_web_search_test_cases(all_entries)
 
     # Convert function calls to tools format and add them to the system prompt
     for instance in all_entries:
@@ -148,9 +141,7 @@ def download_and_process_bfcl_data(repo_url, subfolder_path, output_dir, scoring
         try:
             # Clone repository with minimal depth
             LOG.info(f"Cloning repository {repo_url} to {temp_dir}")
-            subprocess.run(
-                ["git", "clone", "--depth=1", repo_url, temp_dir], check=True, capture_output=True
-            )
+            subprocess.run(["git", "clone", "--depth=1", repo_url, temp_dir], check=True, capture_output=True)
 
             # Find the target folder
             target_folder = Path(temp_dir) / subfolder_path
@@ -183,8 +174,8 @@ def download_and_process_bfcl_data(repo_url, subfolder_path, output_dir, scoring
 
             LOG.info(f"Successfully processed {processed_categories} BFCLv4 categories to {output_dir}")
 
-        except subprocess.CalledProcessError as e:
-            LOG.exception(f"Git command failed")
+        except subprocess.CalledProcessError:
+            LOG.exception("Git command failed")
             LOG.error("Make sure git is installed and the repository URL is correct")
 
 

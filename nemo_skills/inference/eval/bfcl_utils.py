@@ -33,7 +33,6 @@ import inspect
 import json
 import logging
 import re
-
 from pathlib import Path
 
 from nemo_skills.utils import get_logger_name
@@ -115,7 +114,7 @@ def execute_multi_turn_func_call(
         module_name = CLASS_FILE_PATH_MAPPING[class_name]
         # TODO: Handler the model name issue from handler more elegantly
         instance_name = f"sample_model_{test_entry_id}_{class_name}_instance"
-        instance_name = re.sub(r'[-./]', '_', instance_name)
+        instance_name = re.sub(r"[-./]", "_", instance_name)
         if instance_name not in globals():
             module = importlib.import_module(module_name)
             class_ = getattr(module, class_name)
@@ -124,7 +123,9 @@ def execute_multi_turn_func_call(
                 class_initial_config = initial_config.get(class_name, {})
                 class_initial_config_to_load = copy.deepcopy(class_initial_config)
                 if "model_result_dir" in class_initial_config_to_load:
-                    class_initial_config_to_load["model_result_dir"] = Path(class_initial_config_to_load["model_result_dir"])
+                    class_initial_config_to_load["model_result_dir"] = Path(
+                        class_initial_config_to_load["model_result_dir"]
+                    )
                 # Deep copy the initial configuration to avoid mutation issues
                 class_instance._load_scenario(class_initial_config_to_load, long_context=long_context)
             globals()[instance_name] = class_instance

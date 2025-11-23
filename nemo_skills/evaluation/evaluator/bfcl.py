@@ -19,10 +19,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from bfcl_eval.utils import get_directory_structure_by_category, is_memory_prereq
+
 from nemo_skills.evaluation.evaluator.base import BaseEvaluatorConfig
 from nemo_skills.utils import get_logger_name, nested_dataclass
-
-from bfcl_eval.utils import get_directory_structure_by_category, is_memory_prereq
 
 LOG = logging.getLogger(get_logger_name(__file__))
 
@@ -50,7 +50,8 @@ def eval_bfcl(cfg):
     output_dir = Path("/opt/gorilla/berkeley-function-call-leaderboard") / f"result/{model_name}"
     score_file = (
         Path("/opt/gorilla/berkeley-function-call-leaderboard")
-        / f"score/{model_name}" / get_directory_structure_by_category(test_category)
+        / f"score/{model_name}"
+        / get_directory_structure_by_category(test_category)
         / f"BFCL_v4_{test_category}_score.json"
     )
 

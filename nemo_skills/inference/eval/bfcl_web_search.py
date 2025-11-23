@@ -146,10 +146,7 @@ class WebSearchAPI:
             try:
                 wait_time = backoff + random.uniform(0, backoff)
                 search_results = DDGS(timeout=60).text(
-                    query=keywords,
-                    region=region,
-                    max_results=max_results,
-                    backend="duckduckgo"
+                    query=keywords, region=region, max_results=max_results, backend="duckduckgo"
                 )
 
             except DDGSException as e:
@@ -176,9 +173,7 @@ class WebSearchAPI:
             break  # Success – no rate-limit error detected
 
         if not search_results:
-            return {
-                "error": "Failed to retrieve the search results from server. Please try again later."
-            }
+            return {"error": "Failed to retrieve the search results from server. Please try again later."}
 
         # Convert the search results to the desired format
         results = []

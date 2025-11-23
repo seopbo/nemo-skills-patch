@@ -35,6 +35,7 @@ import re
 
 from bfcl_eval.constants.type_mappings import GORILLA_TO_OPENAPI
 
+
 def _get_language_specific_hint(test_category):
     if test_category == "java":
         return " Note that the provided function is in Java 8 SDK syntax."

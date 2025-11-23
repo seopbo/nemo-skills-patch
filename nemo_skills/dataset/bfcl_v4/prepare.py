@@ -15,14 +15,14 @@
 
 import logging
 import os
+
+from bfcl_eval.constants.category_mapping import ALL_SCORING_CATEGORIES
+
 from nemo_skills.dataset.bfcl_v3.constants import (
     DATA_FOLDER_PATH,
 )
 from nemo_skills.dataset.bfcl_v3.prepare import download_and_process_bfcl_data
 from nemo_skills.utils import get_logger_name
-
-from bfcl_eval.constants.category_mapping import ALL_SCORING_CATEGORIES
-
 
 LOG = logging.getLogger(get_logger_name(__file__))
 

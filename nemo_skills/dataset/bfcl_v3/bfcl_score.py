@@ -185,8 +185,7 @@ def compute_score(metrics: dict):
     )
 
     return {
-        "bfcl_v3": 
-        {
+        "bfcl_v3": {
             "overall_accuracy": overall_accuracy,
             **non_live_single_turn_accuracy,
             **live_single_turn_accuracy,

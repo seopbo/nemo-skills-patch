@@ -13,10 +13,11 @@
 # limitations under the License.
 
 bs4
-ddgs # Needed for BFCLv4
 click < 8.2.0  # https://github.com/ai-dynamo/dynamo/issues/1039
 datasets<4  # lcb problem with datasets 4.0.0
+ddgs # Needed for BFCLv4
 evalplus @ git+https://github.com/evalplus/evalplus@c91370f
+faiss-cpu # Needed for BFCLv4
 fire
 
 # needed local code execution server for persistent sessions
@@ -37,11 +38,10 @@ numpy
 openai
 pyyaml
 rank_bm25 # Needed for BFCLv4
-sentence_transformers # Needed for BFCLv4
-faiss-cpu # Needed for BFCLv4
 requests
 sacrebleu
 scikit-learn
+sentence_transformers # Needed for BFCLv4
 sympy
 tqdm
 transformers

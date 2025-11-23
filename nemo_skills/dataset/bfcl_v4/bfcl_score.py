@@ -94,6 +94,7 @@ def calculate_live_single_turn_accuracy(metrics):
         "relevance": live_relevance_accuracy,
     }
 
+
 def calculate_agentic_accuracy(metrics):
     memory_accuracy_list = [get_accuracy_dict(metrics, category) for category in MEMORY]
     overall_accuracy_memory = calculate_combined_accuracy(memory_accuracy_list, weighted=False)
@@ -101,11 +102,12 @@ def calculate_agentic_accuracy(metrics):
     overall_accuracy_web_search = calculate_combined_accuracy(web_search_accuracy_list, weighted=False)
 
     result_dict = {
-        "overall_agentic": calculate_combined_accuracy([overall_accuracy_memory, overall_accuracy_web_search], weighted=False),
+        "overall_agentic": calculate_combined_accuracy(
+            [overall_accuracy_memory, overall_accuracy_web_search], weighted=False
+        ),
         "overall_memory": overall_accuracy_memory,
         "overall_web_search": overall_accuracy_web_search,
     }
-
 
     return result_dict
 
@@ -114,9 +116,7 @@ def calculate_hallucination_measurement(metrics):
     hallucination_accuracy_list = [get_accuracy_dict(metrics, category) for category in HALLUCINATION]
     overall_hallucination_accuracy = calculate_combined_accuracy(hallucination_accuracy_list, weighted=False)
 
-    result_dict = {
-        "overall_hallucination": overall_hallucination_accuracy
-    }
+    result_dict = {"overall_hallucination": overall_hallucination_accuracy}
 
     return result_dict
 
@@ -130,19 +130,21 @@ def compute_score(metrics: dict):
 
     # Following the calculation guide from https://gorilla.cs.berkeley.edu/blogs/15_bfcl_v4_web_search.html
     overall_accuracy = (
-        (agentic_accuracy["overall_agentic"]["accuracy"] * 0.4) +
-        (multi_turn_accuracy["overall_multi_turn"]["accuracy"] * 0.3) +
-        (live_single_turn_accuracy["overall_live"]["accuracy"] * 0.1) +
-        (non_live_single_turn_accuracy["overall_non_live"]["accuracy"] * 0.1) +
-        (hallucination_accuracy["overall_hallucination"]["accuracy"] * 0.1)
+        (agentic_accuracy["overall_agentic"]["accuracy"] * 0.4)
+        + (multi_turn_accuracy["overall_multi_turn"]["accuracy"] * 0.3)
+        + (live_single_turn_accuracy["overall_live"]["accuracy"] * 0.1)
+        + (non_live_single_turn_accuracy["overall_non_live"]["accuracy"] * 0.1)
+        + (hallucination_accuracy["overall_hallucination"]["accuracy"] * 0.1)
     )
-    overall_num_entries = sum([
-        agentic_accuracy["overall_agentic"]["num_entries"],
-        multi_turn_accuracy["overall_multi_turn"]["num_entries"],
-        live_single_turn_accuracy["overall_live"]["num_entries"],
-        non_live_single_turn_accuracy["overall_non_live"]["num_entries"],
-        hallucination_accuracy["overall_hallucination"]["num_entries"]
-    ])
+    overall_num_entries = sum(
+        [
+            agentic_accuracy["overall_agentic"]["num_entries"],
+            multi_turn_accuracy["overall_multi_turn"]["num_entries"],
+            live_single_turn_accuracy["overall_live"]["num_entries"],
+            non_live_single_turn_accuracy["overall_non_live"]["num_entries"],
+            hallucination_accuracy["overall_hallucination"]["num_entries"],
+        ]
+    )
 
     res = {
         "overall_accuracy": {
