@@ -13,124 +13,20 @@
 # limitations under the License.
 
 
-# TODO: refactor this to expose all metrics properly, currently for k>1 the reporting is partial
-
-
-SIMPLE_AST = [
-    "simple_python",
-    "simple_java",
-    "simple_javascript",
-]
-
-OTHER_SINGLE_TURN_AST = [
-    "parallel",
-    "multiple",
-    "parallel_multiple",
-]
-
-LIVE_SINGLE_TURN_AST = [
-    "live_simple",
-    "live_multiple",
-    "live_parallel",
-    "live_parallel_multiple",
-]
-
-LIVE_SINGLE_TURN_RELEVANCE = "live_relevance"
-
-HALLUCINATION = [
-    "irrelevance",
-    "live_irrelevance",
-]
-
-MULTI_TURN_AST = [
-    "multi_turn_base",
-    "multi_turn_miss_func",
-    "multi_turn_miss_param",
-    "multi_turn_long_context",
-]
-
-MEMORY = [
-    "memory_kv",
-    "memory_vector",
-    "memory_rec_sum",
-]
-
-WEB_SEARCH = [
-    "web_search_base",
-    "web_search_no_snippet",
-]
-
-FORMAT_SENSITIVITY = "format_sensitivity"
-
-
-# Global to track the expected max k across all subsets (None until set)
-GLOBAL_MAX_K = None
-
-
-def calculate_combined_accuracy(accuracy_dict_list: list[dict], weighted=False):
-    total_count = 0
-    total_div_count = 0  # Denominator for combined accuracy
-    total_accuracy = 0
-
-    for accuracy_dict in accuracy_dict_list:
-        accuracy = accuracy_dict["accuracy"]
-        count = accuracy_dict["num_entries"]
-
-        total_count += count
-
-        if weighted:
-            total_div_count += count
-            total_accuracy += accuracy * count
-        else:
-            # Unweighted accuracy
-            total_div_count += 1
-            total_accuracy += accuracy
-
-    if total_count == 0:
-        return {"accuracy": 0, "num_entries": 0}
-    else:
-        return {"accuracy": total_accuracy / total_div_count, "num_entries": total_count}
-
-
-def get_accuracy_dict(metrics, category, optional=False):
-    # reporting aggregation for pass@1[avg-of-k] (for highest k) if available
-    if optional and f"bfcl_v4.{category}" not in metrics:
-        category_dict = {}
-    category_dict = metrics[f"bfcl_v4.{category}"]
-
-    # Find all keys that match "pass@1[avg-of-{k}]"
-    avg_keys = [key for key in category_dict.keys() if key.startswith("pass@1[avg-of-") and key.endswith("]")]
-
-    # Determine k for this category: max k if avg keys present, else treat as k=1 (pass@1)
-    k_for_category = 1
-    selected_key = "pass@1"
-    if avg_keys:
-        ks = []
-        for key in avg_keys:
-            try:
-                k_str = key.split("pass@1[avg-of-")[1].rstrip("]")
-                k = int(k_str)
-                ks.append((k, key))
-            except ValueError:
-                continue
-        if ks:
-            max_k, max_key = max(ks)
-            k_for_category = max_k
-            selected_key = max_key
-
-    # Enforce global consistency of max k across subsets
-    global GLOBAL_MAX_K
-    if GLOBAL_MAX_K is None:
-        GLOBAL_MAX_K = k_for_category
-    elif GLOBAL_MAX_K != k_for_category:
-        raise ValueError(
-            f"Inconsistent max k across subsets: expected {GLOBAL_MAX_K}, "
-            f"got {k_for_category} for category '{category}'. "
-            "Check if all jobs have finished successfully. "
-        )
-
-    return category_dict[selected_key]
-
+from nemo_skills.dataset.bfcl_v3.bfcl_score import (
+    calculate_combined_accuracy,
+    calculate_multi_turn_accuracy,
+    get_accuracy_dict,
+)
+from nemo_skills.dataset.bfcl_v4.constants import (
+    SIMPLE_AST,
+    OTHER_SINGLE_TURN_AST,
+    LIVE_SINGLE_TURN_AST,
+    LIVE_SINGLE_TURN_RELEVANCE,
+    HALLUCINATION,
+    MEMORY,
+    WEB_SEARCH,
+)
 
 def calculate_non_live_single_turn_accuracy(metrics):
     # First calculate simple ast unweighted accuracy
@@ -158,15 +54,6 @@ def calculate_live_single_turn_accuracy(metrics):
     return {
         "overall_live": live_ast_accuracy,
         "relevance": live_relevance_accuracy,
-    }
-
-
-def calculate_multi_turn_accuracy(metrics):
-    multi_turn_accuracy_dict_list = [get_accuracy_dict(metrics, category) for category in MULTI_TURN_AST]
-    overall_accuracy_multi_turn = calculate_combined_accuracy(multi_turn_accuracy_dict_list, weighted=False)
-
-    return {
-        "overall_multi_turn": overall_accuracy_multi_turn,
     }
 
 def calculate_agentic_accuracy(metrics):
@@ -211,9 +98,19 @@ def compute_score(metrics: dict):
         (non_live_single_turn_accuracy["overall_non_live"]["accuracy"] * 0.1) +
         (hallucination_accuracy["overall_hallucination"]["accuracy"] * 0.1)
     )
+    overall_num_entries = sum([
+        agentic_accuracy["overall_agentic"]["num_entries"],
+        multi_turn_accuracy["overall_multi_turn"]["num_entries"],
+        live_single_turn_accuracy["overall_live"]["num_entries"],
+        non_live_single_turn_accuracy["overall_non_live"]["num_entries"],
+        hallucination_accuracy["overall_hallucination"]["num_entries"]
+    ])
 
     res = {
-        "overall_accuracy": overall_accuracy,
+        "overall_accuracy": {
+            "accuracy": overall_accuracy,
+            "num_entries": overall_num_entries,
+        },
         **non_live_single_turn_accuracy,
         **live_single_turn_accuracy,
         **multi_turn_accuracy,

@@ -76,7 +76,12 @@ def calculate_combined_accuracy(accuracy_dict_list: list[dict], weighted=False):
 
 def get_accuracy_dict(metrics, category):
     # reporting aggregation for pass@1[avg-of-k] (for highest k) if available
-    category_dict = metrics[f"bfcl_v3.{category}"]
+    if f"bfcl_v3.{category}" in metrics:
+        category_dict = metrics[f"bfcl_v3.{category}"]
+    elif f"bfcl_v4.{category}" in metrics:
+        category_dict = metrics[f"bfcl_v4.{category}"]
+    else:
+        raise ValueError(f"Metrics category {category} not found!")
 
     # Find all keys that match "pass@1[avg-of-{k}]"
     avg_keys = [key for key in category_dict.keys() if key.startswith("pass@1[avg-of-") and key.endswith("]")]

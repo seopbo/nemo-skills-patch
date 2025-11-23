@@ -40,7 +40,6 @@ from bfcl_eval.utils import (
     process_memory_test_case,
     process_agentic_test_case,
     populate_test_cases_with_predefined_functions,
-    add_language_specific_hint_to_function_doc,
     populate_initial_settings_for_memory_test_cases,
     populate_initial_settings_for_web_search_test_cases,
 )
@@ -56,8 +55,7 @@ REPO_URL = "https://github.com/ShishirPatil/gorilla.git"
 DEFAULT_SETTINGS = """
 DATASET_GROUP = "tool"
 METRICS_TYPE = "bfcl"
-EVAL_ARGS = "++eval_type=bfcl"
-GENERATION_ARGS = ""
+GENERATION_ARGS = "++eval_type=bfcl"
 GENERATION_MODULE = "nemo_skills.inference.eval.bfcl"
 """
 
@@ -74,6 +72,19 @@ def process_multi_turn_test_case(instance):
     else:
         instance["single_turn"] = False
 
+    # Handle Miss Func category; we need to remove the holdout function doc
+    if "missed_function" in instance:
+        for turn_index, missed_func_names in instance["missed_function"].items():
+            instance["missed_function"][turn_index] = []
+            for missed_func_name in missed_func_names:
+                for i, func_doc in enumerate(instance["function"]):
+                    if func_doc["name"] == missed_func_name:
+                        # Add the missed function doc to the missed_function list
+                        instance["missed_function"][turn_index].append(func_doc)
+                        # Remove it from the function list
+                        instance["function"].pop(i)
+                        break
+
     return instance
 
 
@@ -81,7 +92,6 @@ def load_dataset_entry(
     target_folder: Path,
     test_category: str,
     include_prereq: bool = True,
-    include_language_specific_hint: bool = True,
 ) -> list[dict]:
     """
     This function retrieves the dataset entry for a given test category.
@@ -116,9 +126,6 @@ def load_dataset_entry(
     all_entries = process_agentic_test_case(all_entries)
     all_entries = populate_test_cases_with_predefined_functions(all_entries)
     all_entries = [process_multi_turn_test_case(entry) for entry in all_entries]
-
-    if include_language_specific_hint:
-        all_entries = add_language_specific_hint_to_function_doc(all_entries)
 
     all_entries = populate_initial_settings_for_memory_test_cases(
         all_entries, str(target_folder)

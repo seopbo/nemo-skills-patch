@@ -16,7 +16,6 @@
 import random
 import time
 from typing import Optional
-from urllib.parse import urlparse
 
 import html2text
 import requests
@@ -46,12 +45,6 @@ class WebSearchAPI:
     def __init__(self):
         self._api_description = "This tool belongs to the Web Search API category. It provides functions to search the web and browse search results."
         self.show_snippet = True
-        # Note: The following two random generators are used to simulate random errors, but that feature is not currently used
-        # This one used to determine if we should simulate a random error
-        # Outcome (True means simulate error): [True, False, True, True, False, True, True, True, False, False, True, True, False, True, False, False, False, False, False, True]
-        self._random = random.Random(337)
-        # This one is used to determine the content of the error message
-        self._rng = random.Random(1053)
 
     def _load_scenario(self, initial_config: dict, long_context: bool = False):
         # We don't care about the long_context parameter here
@@ -249,11 +242,6 @@ class WebSearchAPI:
             response = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
             response.raise_for_status()
 
-            # Note: Un-comment this when we want to simulate a random error
-            # Flip a coin to simulate a random error
-            # if self._random.random() < 0.95:
-            #     return {"error": self._fake_requests_get_error_msg(url)}
-
             # Process the response based on the mode
             if mode == "raw":
                 return {"content": response.text}
@@ -278,21 +266,3 @@ class WebSearchAPI:
 
         except Exception as e:
             return {"error": f"An error occurred while fetching {url}: {str(e)}"}
-
-    def _fake_requests_get_error_msg(self, url: str) -> str:
-        """
-        Return a realistic‑looking requests/urllib3 error message.
-        """
-        parsed = urlparse(url)
-
-        context = {
-            "url": url,
-            "host": parsed.hostname or "unknown",
-            "path": parsed.path or "/",
-            "id1": self._rng.randrange(0x10000000, 0xFFFFFFFF),
-            "id2": self._rng.randrange(0x10000000, 0xFFFFFFFF),
-        }
-
-        template = self._rng.choice(ERROR_TEMPLATES)
-
-        return template.format(**context)

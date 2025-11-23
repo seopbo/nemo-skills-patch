@@ -454,7 +454,7 @@ class BFCLGenerationTask(GenerationTask):
                 state_dict["messages"].append(model_response["message"])
 
                 # Add the processed model response to the current turn responses
-                current_turn_response.extend(model_response["generation"])
+                current_turn_response.append(model_response["generation"])
 
                 # Try decoding the model response
                 try:
