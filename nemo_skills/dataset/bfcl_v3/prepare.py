@@ -30,9 +30,8 @@ from nemo_skills.dataset.bfcl_v3.constants import (
 from nemo_skills.dataset.bfcl_v3.utils import (
     convert_to_tool,
     func_doc_language_specific_pre_processing,
-    is_multi_turn,
-    load_file,
 )
+from bfcl_eval.utils import is_multi_turn, load_file
 from nemo_skills.utils import get_logger_name
 
 LOG = logging.getLogger(get_logger_name(__file__))

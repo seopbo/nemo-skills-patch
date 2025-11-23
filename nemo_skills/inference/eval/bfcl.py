@@ -126,7 +126,12 @@ class ClientMessageParser:
         # Initialize the response parser
         model_handler_class = local_inference_model_map[self.cfg.model_name].model_handler
         # Initialize the model handler - Temperature is not used but required by the model handler
-        model_handler = model_handler_class(self.cfg.model_name, temperature=self.cfg.inference.temperature)
+        model_handler = model_handler_class(
+            model_name=self.cfg.model_name.replace("-FC", ""),
+            temperature=self.cfg.inference.temperature,
+            registry_name=self.cfg.model_name.replace("-FC", ""),
+            is_fc_model=True,
+        )
         # We only need the response parser from the model handler
         self.response_parser = self.create_response_parser(
             native_response_parser=model_handler._parse_query_response_prompting
@@ -449,7 +454,6 @@ class BFCLGenerationTask(GenerationTask):
 
                     self.message_parser.set_response_text(model_response["message"], trimmed_response_text)
 
-
                 # Add the message to the state dict for chat history
                 state_dict["messages"].append(model_response["message"])
 
@@ -462,10 +466,10 @@ class BFCLGenerationTask(GenerationTask):
                     if is_empty_execute_response(decoded_model_responses):
                         LOG.info("No tools to execute in this turn. Proceed to next turn.")
                         break
+
                 except Exception:
                     LOG.info("No tools to execute in this turn. Proceed to next turn.")
                     break
-
 
                 # Obtain the execution results
                 # TODO: Move the execution to sandbox
@@ -516,7 +520,6 @@ class BFCLGenerationTask(GenerationTask):
         output_dict["num_generated_tokens"] = sum(output_dict["num_generated_tokens_list"])
         if self.cfg.count_prompt_tokens:
             output_dict["num_input_tokens"] = sum(output_dict["num_input_tokens_list"])
-
 
         return output_dict
 

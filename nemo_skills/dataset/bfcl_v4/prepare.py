@@ -25,7 +25,7 @@ from nemo_skills.dataset.bfcl_v4.constants import (
     DATA_FOLDER_PATH,
     VERSION_PREFIX,
 )
-from nemo_skills.dataset.bfcl_v4.utils import func_doc_language_specific_pre_processing, convert_to_tool
+from nemo_skills.dataset.bfcl_v3.utils import func_doc_language_specific_pre_processing, convert_to_tool
 from nemo_skills.utils import get_logger_name
 
 from bfcl_eval.constants.category_mapping import ALL_SCORING_CATEGORIES, MEMORY_SCENARIO_NAME

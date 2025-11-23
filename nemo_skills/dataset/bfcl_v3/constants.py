@@ -117,37 +117,6 @@ MULTI_TURN_FUNC_DOC_FILE_MAPPING = {
     "VehicleControlAPI": "vehicle_control.json",
 }
 
-
-GORILLA_TO_OPENAPI = {
-    "integer": "integer",
-    "number": "number",
-    "float": "number",
-    "string": "string",
-    "boolean": "boolean",
-    "bool": "boolean",
-    "array": "array",
-    "list": "array",
-    "dict": "object",
-    "object": "object",
-    "tuple": "array",
-    "any": "string",
-    "byte": "integer",
-    "short": "integer",
-    "long": "integer",
-    "double": "number",
-    "char": "string",
-    "ArrayList": "array",
-    "Array": "array",
-    "HashMap": "object",
-    "Hashtable": "object",
-    "Queue": "array",
-    "Stack": "array",
-    "Any": "string",
-    "String": "string",
-    "Bigint": "integer",
-}
-
-
 # Repo relative paths
 
 MULTI_TURN_FUNC_DOC_PATH = Path("berkeley-function-call-leaderboard/bfcl_eval/data/multi_turn_func_doc")
