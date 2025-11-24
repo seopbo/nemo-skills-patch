@@ -176,12 +176,6 @@ if __name__ == "__main__":
         help="Number of tokens in chat template (will be subtracted from max_seq_length to not exceed max context)",
     )
     parser.add_argument(
-        "--tokenizer_type",
-        type=str,
-        default="hf",
-        help="Type of the tokenizer to use for RULER dataset. Options: hf, openai, gemini.",
-    )
-    parser.add_argument(
         "--tmp_data_dir",
         type=str,
         default=None,
