@@ -109,6 +109,11 @@ class SweBenchGenerationConfig:
     # This does not affect evaluation. If it is enabled, it still runs in the container_formatter containers.
     generic_inference_container: str | None = None
 
+    # If True and generic_inference_container is specified, will not prevent the agent from seeing future git history via tags.
+    # Reproduces evaluation prior to this issue being fixed: https://github.com/SWE-bench/SWE-bench/issues/465.
+    # Has no effect if generic_inference_container is None.
+    allow_git_leak: bool = False
+
     # Whether to run evaluation. If False, will only run inference (trajectory/patch generation).
     evaluate: bool = True
 
@@ -214,7 +219,10 @@ class SweBenchGenerationTask(GenerationTask):
             # with the following differences:
             #     1. we clone all branches because we can't always know which branch the commit is on,
             #     2. we compare commit times using Unix timestamps (%ct instead of %ci)
-            #        to fix issues with commits being in different timezones.
+            #        to fix issues with commits being in different timezones,
+            #     3. if ++allow_git_leak=True is set,
+            #        we use the old procedure from SWE-bench commit 665c1ce45659ce9a011c9698981e83e6ce6a6367
+            #        where the agent was allowed to see future git history via tags.
             container_commands.append(
                 # Remove existing repo if present
                 "rm -rf /testbed && "
@@ -224,21 +232,24 @@ class SweBenchGenerationTask(GenerationTask):
                 "cd /testbed && "
                 f"git reset --hard {data_point['base_commit']} && "
                 # Remove the remote and tags so the agent won't see newer commits
-                "git remote remove origin && "
-                # Remove only tags pointing to commits after target timestamp
-                f"TARGET_TIMESTAMP=$(git show -s --format=%ct {data_point['base_commit']}) && "
-                'git tag -l | while read tag; do TAG_COMMIT=$(git rev-list -n 1 "$tag"); TAG_TIME=$(git show -s --format=%ct "$TAG_COMMIT"); if [[ "$TAG_TIME" -gt "$TARGET_TIMESTAMP" ]]; then git tag -d "$tag"; fi; done && '
-                "git reflog expire --expire=now --all && "
-                "git gc --prune=now --aggressive && "
-                # Verify future logs aren't available
-                "AFTER_TIMESTAMP=$(($TARGET_TIMESTAMP + 1)) && "
-                'COMMIT_COUNT=$(git log --oneline --all --since="$AFTER_TIMESTAMP" | wc -l) && '
-                'if [ "$COMMIT_COUNT" -ne 0 ]; then '
-                "    echo 'Exiting because future logs are visible after resetting the repo to the base commit.' && "
-                "    echo 'This means something went wrong during the setup procedure.' && "
-                "    exit 1; "
-                "fi"
+                "git remote remove origin"
             )
+            if not self.cfg.allow_git_leak:
+                container_commands.append(
+                    # Remove only tags pointing to commits after target timestamp
+                    f"TARGET_TIMESTAMP=$(git show -s --format=%ct {data_point['base_commit']}) && "
+                    'git tag -l | while read tag; do TAG_COMMIT=$(git rev-list -n 1 "$tag"); TAG_TIME=$(git show -s --format=%ct "$TAG_COMMIT"); if [[ "$TAG_TIME" -gt "$TARGET_TIMESTAMP" ]]; then git tag -d "$tag"; fi; done && '
+                    "git reflog expire --expire=now --all && "
+                    "git gc --prune=now --aggressive && "
+                    # Verify future logs aren't available
+                    "AFTER_TIMESTAMP=$(($TARGET_TIMESTAMP + 1)) && "
+                    'COMMIT_COUNT=$(git log --oneline --all --since="$AFTER_TIMESTAMP" | wc -l) && '
+                    'if [ "$COMMIT_COUNT" -ne 0 ]; then '
+                    "    echo 'Exiting because future logs are visible after resetting the repo to the base commit.' && "
+                    "    echo 'This means something went wrong during the setup procedure.' && "
+                    "    exit 1; "
+                    "fi"
+                )
         else:
             # In this case, we expect that the correct repo will already be cloned in /testbed
             container_name = data_point["container_formatter"].format(
