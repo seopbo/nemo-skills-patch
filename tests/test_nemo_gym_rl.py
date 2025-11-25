@@ -5,7 +5,7 @@ def run_gym_rl_grpo():
     cluster = "ord"
 
     num_nodes=1
-    num_gpus=1
+    num_gpus=8
     num_training_jobs=1
 
     repo_dir = "/workspace/nemo-rl"
