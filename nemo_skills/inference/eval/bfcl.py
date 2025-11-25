@@ -245,7 +245,6 @@ class ServerMessageParser:
         """Parse the output dictionary to get the model response."""
 
         output_dict["message"] = output_dict["response"].choices[0].message
-        tool_calls = [] if output_dict["message"].tool_calls is None else output_dict["message"].tool_calls
 
         try:
             tool_calls = output_dict["message"].tool_calls
