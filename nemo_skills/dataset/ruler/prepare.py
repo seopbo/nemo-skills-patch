@@ -193,6 +193,10 @@ if __name__ == "__main__":
             "--tokenizer_path meta-llama/Llama-3.1-8B-Instruct --max_seq_length 131072"
         )
         exit(0)
+
+    if "--tokenizer_type" not in ruler_prepare_args:
+        ruler_prepare_args += " --tokenizer_type hf"
+
     print(f"Preparing RULER dataset for tasks: {args.tasks} with additional arguments: {ruler_prepare_args}")
     get_ruler_data(
         args.tasks,
