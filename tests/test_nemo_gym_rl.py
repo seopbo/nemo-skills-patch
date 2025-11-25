@@ -5,7 +5,7 @@ def run_gym_rl_grpo():
     cluster = "ord"
 
     num_nodes=1
-    num_gpus=8
+    num_gpus=1
     num_training_jobs=1
 
     repo_dir = "/workspace/nemo-rl"
@@ -13,7 +13,7 @@ def run_gym_rl_grpo():
     training_data = data_dir + "/train.jsonl"
     validation_data = data_dir + "/validation.jsonl"
 
-    run_n = 5
+    run_n = 6
     expname = f"penguin_grpo_qwen3_4binstruct_comp_coding_test_{run_n}"
     # gym_config_path = "examples/penguin/grpo_comp_coding_qwen3_4binstruct.yaml"
     model = "Qwen/Qwen3-4B-Instruct-2507"
@@ -29,6 +29,12 @@ def run_gym_rl_grpo():
             f"++grpo.val_at_start=false "
             f"++grpo.num_prompts_per_step={num_prompts} "
             f"++grpo.max_num_steps={num_steps} "
+            "++policy.max_total_sequence_length=1024 "
+            "++policy.dtensor_cfg.tensor_parallel_size=1 "
+            "++checkpointing.save_period=2 "
+            "++policy.train_global_batch_size=2 "
+            "++policy.train_micro_batch_size=1 "
+            "++policy.optimizer.kwargs.lr=1e-6 "
         ),
         cluster=cluster,
         expname=expname,
@@ -41,9 +47,9 @@ def run_gym_rl_grpo():
         training_data=training_data,
         validation_data=validation_data,
         gym_config_paths=[vllm_config_path, resource_server_config_path],
-        repo_location=repo_dir,
         backend="fsdp",
         disable_wandb=True,
+        with_sandbox=True,
         dry_run=False,
     )
 
