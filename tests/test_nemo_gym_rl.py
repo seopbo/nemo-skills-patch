@@ -21,8 +21,8 @@ def run_gym_rl_grpo():
     vllm_config_path = "responses_api_models/vllm_model/configs/vllm_model_for_training.yaml"
     resource_server_config_path = "resources_servers/comp_coding/configs/comp_coding.yaml"
 
-    num_prompts = 4
-    num_steps = 3
+    num_prompts = 2
+    num_steps = 2
     
     grpo_nemo_gym_rl(
         ctx=wrap_arguments(
@@ -31,8 +31,8 @@ def run_gym_rl_grpo():
             f"++grpo.max_num_steps={num_steps} "
             "++policy.max_total_sequence_length=1024 "
             "++policy.dtensor_cfg.tensor_parallel_size=1 "
-            "++checkpointing.save_period=2 "
-            "++policy.train_global_batch_size=2 "
+            "++checkpointing.save_period=10 "
+            # "++policy.train_global_batch_size=2 "
             "++policy.train_micro_batch_size=1 "
             "++policy.optimizer.kwargs.lr=1e-6 "
         ),
