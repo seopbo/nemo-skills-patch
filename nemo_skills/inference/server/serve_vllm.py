@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import argparse
+import shlex
 import subprocess
 
 
@@ -25,7 +26,37 @@ def main():
     parser.add_argument("--no_verbose", action="store_true", help="Print verbose logs")
     args, unknown = parser.parse_known_args()
 
-    extra_arguments = f"{' '.join(unknown)}"
+    # Reconstruct arguments with proper quoting for shell execution
+    # This is necessary because argparse strips quotes, and JSON values need to be quoted
+    extra_arguments_parts = []
+    i = 0
+    while i < len(unknown):
+        arg = unknown[i]
+        # If this is a flag (starts with --), check if next arg is its value
+        if arg.startswith("--") and i + 1 < len(unknown):
+            next_arg = unknown[i + 1]
+            # If next arg doesn't start with --, it's likely a value for this flag
+            if not next_arg.startswith("--"):
+                # Check if this looks like JSON (starts with { or [)
+                if next_arg.startswith("{") or next_arg.startswith("["):
+                    # Quote JSON values to prevent shell from splitting them
+                    extra_arguments_parts.append(f"{arg} {shlex.quote(next_arg)}")
+                    i += 2
+                    continue
+                # Quote values with spaces
+                elif " " in next_arg:
+                    extra_arguments_parts.append(f"{arg} {shlex.quote(next_arg)}")
+                    i += 2
+                    continue
+                else:
+                    extra_arguments_parts.append(f"{arg} {next_arg}")
+                    i += 2
+                    continue
+        # For flags without values or standalone arguments, add as-is
+        extra_arguments_parts.append(arg)
+        i += 1
+
+    extra_arguments = " ".join(extra_arguments_parts)
 
     print(f"Deploying model {args.model}")
     print("Starting OpenAI Server")
