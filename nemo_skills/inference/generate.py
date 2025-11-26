@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import asyncio
-import os
 import json
 import logging
+import os
 import random
 import shutil
 import subprocess
@@ -388,9 +388,11 @@ class GenerationTask:
                 additional_config={"sandbox": self.cfg.sandbox},
             )
         else:
-            if "data_dir" in self.cfg.eval_config and not (isinstance(self.cfg.eval_config["data_dir"], type(None)) or isinstance(self.cfg.eval_type, type(None))):
-                data_dir =os.path.join(self.cfg.eval_config["data_dir"], self.cfg.eval_type)
-                llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, data_dir = data_dir)
+            if "data_dir" in self.cfg.eval_config and not (
+                isinstance(self.cfg.eval_config["data_dir"], type(None)) or isinstance(self.cfg.eval_type, type(None))
+            ):
+                data_dir = os.path.join(self.cfg.eval_config["data_dir"], self.cfg.eval_type)
+                llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, data_dir=data_dir)
             else:
                 llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
 
@@ -527,18 +529,15 @@ class GenerationTask:
             fout.write(json.dumps(output) + "\n")
 
     def drop_binary_data(self, output):
-        """Remove binary data (like base64 audio) from messages to keep output files smaller."""            
+        """Remove binary data (like base64 audio) from messages to keep output files smaller."""
         for message in output["messages"]:
             # Skip if content is not a list (e.g., string content in system messages)
             if not isinstance(message.get("content"), list):
                 continue
-                
+
             # Filter out audio_url items from list-style content
-            message["content"] = [
-                content for content in message["content"]
-                if content.get("type") != "audio_url"
-            ]
-        
+            message["content"] = [content for content in message["content"] if content.get("type") != "audio_url"]
+
     async def postprocess_single_output(self, output, original_data_point):
         # to make it easier to follow up with other generations and limit accidental errors, we are adding
         # all of the original data to the output file alongside the new generations
@@ -554,7 +553,7 @@ class GenerationTask:
         for key in output:
             original_data_point.pop(key, None)
         output.update(original_data_point)
-        
+
         self.drop_binary_data(output)
 
         if self.cfg.parse_reasoning:

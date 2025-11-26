@@ -12,9 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import base64
 import logging
 import os
-import base64
+
 import requests
 
 from nemo_skills.utils import get_logger_name
@@ -23,6 +24,7 @@ from .base import BaseModel
 from .utils import ServerTokenizer
 
 LOG = logging.getLogger(get_logger_name(__file__))
+
 
 def audio_file_to_base64(audio_file_path: str):
     """Encodes an audio file into a base64 string."""
@@ -116,22 +118,16 @@ class VLLMModel(BaseModel):
                 message["content"] = content
             else:
                 raise TypeError(str(content))
-            
+
         if "audio" in message:
             audio = message["audio"]
             base64_audio = audio_file_to_base64(os.path.join(self.data_dir, audio["path"]))
-            audio_message = {
-                "type": "audio_url",
-                "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}
-            }
+            audio_message = {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
             message["content"].append(audio_message)
         elif "audios" in message:
             for audio in message["audios"]:
                 base64_audio = audio_file_to_base64(os.path.join(self.data_dir, audio["path"]))
-                audio_message = {
-                    "type": "audio_url",
-                    "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}
-                }
+                audio_message = {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
                 message["content"].append(audio_message)
         return message
 
