@@ -33,20 +33,19 @@ def read_jsonl(path: str) -> List[dict]:
 
 
 def merge_metadata(metadata_files: List[str]) -> Dict[str, dict]:
-    """Merge all keys per problem across provided JSONL files.
+    """Merge all keys per id across provided JSONL files.
 
-    If the same key appears for the same problem in multiple files, the last
+    If the same key appears for the same id in multiple files, the last
     occurrence wins (based on the order in metadata_files).
     """
-    by_problem = defaultdict(dict)
+    by_id = defaultdict(dict)
     for path in metadata_files:
         for sample in read_jsonl(path):
-            by_problem[sample["problem"]].update(sample)
-    return by_problem
-
+            by_id[sample["id"]].update(sample)
+    return by_id
 
 def collect_solutions(solutions_path: str) -> List[dict]:
-    """Collect solutions and optional judgements per problem.
+    """Collect solutions and optional judgements per id of the problem.
     Multiple files (e.g., output-rs*.jsonl) are supported and concatenated.
     """
 
@@ -62,7 +61,7 @@ def write(output_file: str, dataset: List[dict], metadata: Dict[str, dict]):
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
     with open(output_file, "w", encoding="utf-8") as fout:
         for sample in dataset:
-            sample.update(metadata[sample["problem"]])
+            sample.update(metadata[sample["id"]])
             fout.write(json.dumps(sample) + "\n")
 
 
