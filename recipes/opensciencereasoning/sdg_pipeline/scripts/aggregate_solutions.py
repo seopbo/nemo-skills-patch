@@ -85,6 +85,11 @@ def aggregate_samples(files: Iterable[Path]) -> List[Dict]:
                         "judgement",
                         "majority_voting_agreement_rate",
                         "majority_voting_agreement_at_n",
+                        "difficulty_model",
+                        "difficulty_model_pass_rate",
+                        "difficulty_model_pass_at_n",
+                        "subtopic",
+                        "topic"
                     ]
                 }
 
