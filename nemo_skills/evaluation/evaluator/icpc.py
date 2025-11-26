@@ -416,7 +416,7 @@ class ICPCEvaluator(BaseEvaluator):
             "score": problem_state["test_passed"],
             "outputs": problem_state["test_outputs"],
         }
-        if self.inputdata is not None:
+        if self.inputdata is not None and not getattr(entry, "only_sample_tests", False):
             problem_inputs = self.inputdata[str(entry["id"])]
             print(f"Problem inputs: {len(problem_inputs)}")
             for i in range(0, len(problem_inputs), batch_size):
