@@ -87,6 +87,7 @@ class IOIExecutionConfig(GenerateSolutionsConfig):
     average_model_choose_steps: int = 1
     sample_tests_attempts: int = 0
     per_step_evaluate: bool = True
+    only_sample_tests: bool = False
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
