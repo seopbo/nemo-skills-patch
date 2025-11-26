@@ -527,11 +527,17 @@ class GenerationTask:
             fout.write(json.dumps(output) + "\n")
 
     def drop_binary_data(self, output):
-        binary_data_to_drop_from_output = {"audio_url"}
-        if isinstance(output["messages"][0]["content"], list):
-            for content in output["messages"][0]["content"]:
-                if "type" in content and content["type"] in binary_data_to_drop_from_output:
-                    content[content["type"]]["url"] = ""
+        """Remove binary data (like base64 audio) from messages to keep output files smaller."""            
+        for message in output["messages"]:
+            # Skip if content is not a list (e.g., string content in system messages)
+            if not isinstance(message.get("content"), list):
+                continue
+                
+            # Filter out audio_url items from list-style content
+            message["content"] = [
+                content for content in message["content"]
+                if content.get("type") != "audio_url"
+            ]
         
     async def postprocess_single_output(self, output, original_data_point):
         # to make it easier to follow up with other generations and limit accidental errors, we are adding
