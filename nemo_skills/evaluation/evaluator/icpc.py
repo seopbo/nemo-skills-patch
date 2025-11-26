@@ -370,7 +370,11 @@ class ICPCEvaluator(BaseEvaluator):
         }
 
         all_tests = [(tname, t, "sample") for tname, t in problem_metadata["sample_tests"].items()]
-        all_tests = all_tests + [(tname, t, "test") for tname, t in problem_metadata["tests"].items()]
+        if getattr(entry, "only_sample_tests", False):
+            # todo (sean): hack to just run sample tests
+            all_tests = all_tests
+        else:
+            all_tests = all_tests + [(tname, t, "test") for tname, t in problem_metadata["tests"].items()]
 
         batch_size = self.eval_cfg.test_batch_size
 

@@ -268,7 +268,13 @@ class IOIExecutionGenerationTask(GenerationTask):
             sample_avg = 0.0
             if self.cfg.per_step_evaluate:
                 eval_start_t = time.time()
-                eval_results = await self.evaluator.eval_single({**data_point, "generation": cur_generation_response})
+                eval_results = await self.evaluator.eval_single(
+                    {
+                        **data_point,
+                        "generation": cur_generation_response,
+                        "only_sample_tests": self.cfg.only_sample_tests,
+                    }
+                )
                 eval_time = time.time() - eval_start_t
                 print(
                     f"Async Pos : {async_pos} Step : {step_num} Problem {data_point['id']}: Evaluation time = {eval_time:.3f}s"
@@ -385,27 +391,11 @@ class IOIExecutionGenerationTask(GenerationTask):
                 print("[TimeLimit] Reached limit after step save; exiting cleanly.")
                 sys.exit(0)
 
-        # Final evaluation of memory solutions (if any) using the helper
-        memory_solutions_results = []
-        if self.cfg.per_step_evaluate and int(selected_k) > 0 and self.saved_solutions:
-            details_by_idx = await self._evaluate_memory_solutions(data_point, return_details=True)
-            for idx, info in details_by_idx.items():
-                entry = self.saved_solutions[idx]
-                memory_solutions_results.append(
-                    {
-                        "solution": entry.get("solution") if isinstance(entry, dict) else entry,
-                        "step": entry.get("step") if isinstance(entry, dict) else None,
-                        "sample_score": info.get("sample_score"),
-                        "test_case_results": info.get("test_case_results"),
-                    }
-                )
-
         return {
             "id": data_point["id"],
             "generation": cur_generation_response,
             "steps": chat_history,
             "num_steps_completed": num_steps_completed,
-            "memory_solutions": memory_solutions_results,
             "num_generated_tokens": sum(step.get("num_generated_tokens", 0) for step in chat_history),
         }
 
@@ -432,70 +422,6 @@ class IOIExecutionGenerationTask(GenerationTask):
             k: {"score": float(v.get("score", 0.0)), "outputs": list(v.get("outputs", []))}
             for k, v in test_case_results.items()
         }
-
-    async def _evaluate_memory_solutions(self, data_point: dict, return_details: bool = False) -> dict:
-        """Evaluate all saved memory solutions.
-
-        When return_details is False (default), returns:
-            {memory_idx: {subtask: score}}
-        When return_details is True, returns:
-            {
-              memory_idx: {
-                "subtask_scores": {subtask: score},
-                "test_case_results": <raw evaluator results>,
-                "sample_score": <float>
-              }
-            }
-        """
-        if not self.saved_solutions:
-            return {}
-
-        idx_payloads = []
-        for idx, entry in enumerate(self.saved_solutions):
-            code = entry.get("solution") if isinstance(entry, dict) else entry
-            if not code:
-                continue
-            idx_payloads.append((idx, {**data_point, "generation": f"```cpp\n{code}\n```"}))
-
-        if not idx_payloads:
-            return {}
-
-        eval_tasks = [self.evaluator.eval_single(payload) for _, payload in idx_payloads]
-        eval_results_list = await asyncio.gather(*eval_tasks)
-
-        if return_details:
-            details_by_idx = {}
-            for (idx, _), res in zip(idx_payloads, eval_results_list):
-                tcr = res.get("test_case_results", {})
-                normalized = self._normalize_test_case_results(tcr)
-                # Compute sample average if available
-                outputs_all = tcr.get("outputs", [])
-                sample_outputs = [o for o in outputs_all if o.get("test_type") == "sample"]
-
-                def _avg(outputs_list):
-                    if not outputs_list:
-                        return 0.0
-                    try:
-                        total = len(outputs_list)
-                        passed = sum(1.0 if float(o.get("score", 0.0)) == 1.0 else 0.0 for o in outputs_list)
-                        return float(passed / total)
-                    except Exception:
-                        return 0.0
-
-                sample_avg = _avg(sample_outputs)
-                details_by_idx[idx] = {
-                    "subtask_scores": {k: v["score"] for k, v in normalized.items()},
-                    "test_case_results": tcr,
-                    "sample_score": sample_avg,
-                }
-            return details_by_idx
-        else:
-            scores_by_idx = {}
-            for (idx, _), res in zip(idx_payloads, eval_results_list):
-                tcr = res.get("test_case_results", {})
-                normalized = self._normalize_test_case_results(tcr)
-                scores_by_idx[idx] = {k: v["score"] for k, v in normalized.items()}
-            return scores_by_idx
 
     def _update_saved_solutions(self, solution: str) -> None:
         """Add current solution to sliding window and keep only k most recent."""
