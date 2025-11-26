@@ -13,6 +13,10 @@ pytest tests/gpu-tests/test_judge.py -s -x
 pytest tests/gpu-tests/test_run_cmd_llm_infer.py -s -x
 pytest tests/gpu-tests/test_nemo_evaluator.py -s -x
 
+# For audio generation switching to Omni-3B model
+export NEMO_SKILLS_TEST_HF_MODEL=Qwen/Qwen2.5-Omni-3B
+pytest tests/gpu-tests/test_vllm_audio.py -s -x
+
 # For contamination test, reasoning models are not a good choice. Switching to a instruct model.
 export NEMO_SKILLS_TEST_HF_MODEL=Qwen/Qwen3-4B-Instruct-2507
 pytest tests/gpu-tests/test_contamination.py -s -x

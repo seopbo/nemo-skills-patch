@@ -338,6 +338,9 @@ class GenerationTask:
                 LOG.info("Evaluator supports per-datapoint evals, will interleave evaluation with generation.")
                 self.evaluator = get_evaluator_class(self.cfg.eval_type, self.cfg.eval_config)
 
+        # Track whether we've shown the reasoning warning
+        self._reasoning_warning_shown = False
+
         LOG.info(
             "Async loop is maintaining %d generations in parallel. "
             "Use max_concurrent_requests to control the number of concurrent requests.",
@@ -530,6 +533,10 @@ class GenerationTask:
 
     def drop_binary_data(self, output):
         """Remove binary data (like base64 audio) from messages to keep output files smaller."""
+        # Skip if output doesn't have messages (e.g., text completion mode or error cases)
+        if "messages" not in output:
+            return
+
         for message in output["messages"]:
             # Skip if content is not a list (e.g., string content in system messages)
             if not isinstance(message.get("content"), list):
@@ -562,6 +569,16 @@ class GenerationTask:
                 self.cfg.generation_key,
                 self.cfg.end_reasoning_string,
             )
+
+        # Warn once if reasoning detected but not being parsed
+        if not self.cfg.parse_reasoning and not self._reasoning_warning_shown:
+            gen = output.get(self.cfg.generation_key)
+            if isinstance(gen, str) and self.cfg.end_reasoning_string in gen:
+                LOG.warning(
+                    f"Detected '{self.cfg.end_reasoning_string}' in generation but parse_reasoning=False. "
+                    "For reasoning models, set ++parse_reasoning=True to avoid incorrect code extraction."
+                )
+                self._reasoning_warning_shown = True
 
     def prefill_generation(self, data_point) -> dict | None:
         """Prefill generation in case LLM is not required."""
