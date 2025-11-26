@@ -337,8 +337,10 @@ class IOIExecutionGenerationTask(GenerationTask):
                 break
 
             # Check if all subtasks passed fully (score == 1 for every output)
-            if self.cfg.per_step_evaluate and all(
-                all(float(o["score"]) == 1.0 for o in v["outputs"]) for v in normalized_results.values()
+            if (
+                self.cfg.per_step_evaluate
+                and not self.cfg.only_sample_tests
+                and all(all(float(o["score"]) == 1.0 for o in v["outputs"]) for v in normalized_results.values())
             ):
                 print(f"[Success] Problem {data_point['id']}: All test cases passed at step {step_num}.")
 
