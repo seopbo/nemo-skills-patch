@@ -12,37 +12,4 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
-
-__pycache__
-.ipynb_checkpoints
-
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+from nemo_skills.code_execution.utils import extract_code_output, extract_code_to_execute, format_code_output

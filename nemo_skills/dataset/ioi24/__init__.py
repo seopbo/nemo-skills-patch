@@ -1,4 +1,4 @@
-# Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,37 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+# settings that define how evaluation should be done by default (all can be changed from cmdline)
+GENERATION_ARGS = "++prompt_config=generic/default ++eval_type=ioi"
+DATASET_GROUP = "code"
+METRICS_TYPE = "ioi"
 
-__pycache__
-.ipynb_checkpoints
-
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+# environment variables required by this benchmark
+SANDBOX_ENV_VARS = [
+    "UWSGI_PROCESSES=1024",
+    "UWSGI_CPU_AFFINITY=8",
+    "UWSGI_CHEAPER=1023",
+    "NUM_WORKERS=1",
+    "STATEFUL_SANDBOX=0",
+]

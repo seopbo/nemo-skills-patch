@@ -12,37 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+# settings that define how evaluation should be done by default (all can be changed from cmdline)
+DATASET_GROUP = "math"
+METRICS_TYPE = "math"
+GENERATION_ARGS = "++prompt_config=generic/math ++eval_type=math"
 
-__pycache__
-.ipynb_checkpoints
-
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+# some answers are not possible to compare symbolically, so have to use a judge model
+# setting openai judge by default, but can be overriden from command line for a locally hosted model
+JUDGE_PIPELINE_ARGS = {
+    "generation_type": "math_judge",
+    "model": "gpt-4.1",
+    "server_type": "openai",
+    "server_address": "https://api.openai.com/v1",
+}

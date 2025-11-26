@@ -1,0 +1,112 @@
+site_name: Nemo-Skills
+site_url: https://nvidia-nemo.github.io/Skills
+extra_css:
+  - css/extra.css
+plugins:
+  - search
+  - blog:
+      blog_dir: tutorials
+      post_dir: tutorials/posts
+  - redirects:
+      redirect_maps:
+        'openmathinstruct2/index.md': 'releases/openmathinstruct2/index.md'
+        'openmathreasoning1/index.md': 'releases/openmathreasoning/index.md'
+        'openmathreasoning1/dataset.md': 'releases/openmathreasoning/dataset.md'
+theme:
+  name: material
+  logo: favicon.ico
+  favicon: favicon.ico
+  palette:
+    primary: blue grey
+  features:
+    - content.code.copy
+    - content.code.annotate
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.indexes
+    - toc.follow
+markdown_extensions:
+  - meta
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+  - attr_list
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - footnotes
+nav:
+  - Nemo-Skills: index.md
+  - Getting started:
+    - basics/index.md
+    - Cluster configs: basics/cluster-configs.md
+    - Code packaging: basics/code-packaging.md
+    - Prompt format: basics/prompt-format.md
+    - Inference: basics/inference.md
+    - Chat Interface: basics/chat_interface.md
+    - Sandbox for code execution: basics/sandbox.md
+  - Pipelines:
+    - pipelines/index.md
+    - Generation: pipelines/generation.md
+    - Evaluation: pipelines/evaluation.md
+    - LLM-as-a-judge: pipelines/llm-as-a-judge.md
+    - Decontamination: pipelines/decontamination.md
+    - Training (NeMo-RL): pipelines/training.md
+    - Training (verl): pipelines/training-verl.md
+    - Arbitrary commands: pipelines/run-cmd.md
+    - Starting a Server: pipelines/start-server.md
+  - Evaluation:
+    - evaluation/index.md
+    - evaluation/natural-math.md
+    - evaluation/formal-math.md
+    - evaluation/code.md
+    - evaluation/scientific-knowledge.md
+    - evaluation/instruction-following.md
+    - evaluation/long-context.md
+    - evaluation/tool-calling.md
+    - evaluation/multilingual.md
+    - evaluation/speech-audio.md
+    - evaluation/other-benchmarks.md
+    - evaluation/robustness.md
+  - Agentic Inference:
+    - agentic_inference/parallel_thinking.md
+    - agentic_inference/tool_calling.md
+  - Tutorials:
+    - tutorials/index.md
+  - Papers & Releases:
+    - releases/index.md
+    - OpenReasoning:
+      - releases/openreasoning/index.md
+      - Model Evaluation: releases/openreasoning/evaluation.md
+      - Dataset construction: releases/openreasoning/dataset.md
+      - Model training: releases/openreasoning/training.md
+    - OpenCodeReasoning:
+      - releases/opencodereasoning/index.md
+      - Model Evaluation: releases/opencodereasoning/evaluation.md
+      - Dataset construction: releases/opencodereasoning/dataset.md
+    - OpenMathReasoning:
+      - releases/openmathreasoning/index.md
+      - Model Evaluation: releases/openmathreasoning/evaluation.md
+      - Dataset construction: releases/openmathreasoning/dataset.md
+      - Model training: releases/openmathreasoning/training.md
+    - OpenMathInstruct-2:
+      - releases/openmathinstruct2/index.md
+      - Model Evaluation: releases/openmathinstruct2/evaluation.md
+      - Dataset construction: releases/openmathinstruct2/dataset.md
+      - Model training: releases/openmathinstruct2/training.md

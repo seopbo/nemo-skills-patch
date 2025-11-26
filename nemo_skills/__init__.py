@@ -12,37 +12,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+from nemo_skills.version import __version__
 
-__pycache__
-.ipynb_checkpoints
-
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+# only used in ns setup command to initialize with defaults
+_containers = {
+    "trtllm": "nvcr.io/nvidia/tensorrt-llm/release:1.0.0",
+    "vllm": "vllm/vllm-openai:v0.10.2",
+    "sglang": "lmsysorg/sglang:v0.5.4",
+    "megatron": "dockerfile:dockerfiles/Dockerfile.megatron",
+    "sandbox": "dockerfile:dockerfiles/Dockerfile.sandbox",
+    "nemo-skills": "dockerfile:dockerfiles/Dockerfile.nemo-skills",
+    "verl": "dockerfile:dockerfiles/Dockerfile.verl",
+    "nemo-rl": "dockerfile:dockerfiles/Dockerfile.nemo-rl",
+}

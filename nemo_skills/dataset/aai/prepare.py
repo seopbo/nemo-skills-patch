@@ -12,37 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+import subprocess
 
-__pycache__
-.ipynb_checkpoints
-
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+if __name__ == "__main__":
+    benchmarks = ["mmlu-pro", "hle", "gpqa", "math-500", "aime24", "scicode", "livecodebench", "aalcr"]
+    subprocess.run(f"python -m nemo_skills.dataset.prepare {' '.join(benchmarks)}", shell=True, check=True)

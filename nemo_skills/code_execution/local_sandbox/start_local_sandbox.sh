@@ -1,3 +1,5 @@
+#!/bin/bash
+
 # Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -12,37 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+# NOTE: needs to run from the root of the repo!
 
-__pycache__
-.ipynb_checkpoints
+SANDBOX_NAME=${1:-'local-sandbox'}
+docker build --tag=${SANDBOX_NAME} --build-arg="NUM_WORKERS=$((`nproc --all`))" -f dockerfiles/Dockerfile.sandbox .
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+echo "Multi-worker mode: Starting $((`nproc --all`)) workers with session affinity"
+docker run --network=host \
+    --memory=${NEMO_SKILLS_SANDBOX_MEM_LIMIT:-"16g"} \
+    ${UWSGI_CPU_AFFINITY:+-e UWSGI_CPU_AFFINITY=${UWSGI_CPU_AFFINITY}} \
+    ${UWSGI_PROCESSES:+-e UWSGI_PROCESSES=${UWSGI_PROCESSES}} \
+    --restart unless-stopped \
+    --name=local-sandbox ${SANDBOX_NAME}

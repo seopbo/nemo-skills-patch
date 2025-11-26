@@ -12,37 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
 
-__pycache__
-.ipynb_checkpoints
+MAJOR = 0
+MINOR = 7
+PATCH = 0
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
+# Use the following formatting: (major, minor, patch, pre-release)
+VERSION = (MAJOR, MINOR, PATCH)
 
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+__shortversion__ = ".".join(map(str, VERSION[:3]))
+__version__ = ".".join(map(str, VERSION[:3]))

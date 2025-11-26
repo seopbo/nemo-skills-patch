@@ -12,37 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+import hydra
+from sdp.run_processors import run_processors
 
-__pycache__
-.ipynb_checkpoints
+from nemo_skills.utils import setup_logging
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
 
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
+@hydra.main(version_base=None, config_path="data_preparation_utils/config", config_name="math_sft.yaml")
+def main(cfg):
+    run_processors(cfg)
 
-.idea
+
+if __name__ == "__main__":
+    setup_logging()
+    main()

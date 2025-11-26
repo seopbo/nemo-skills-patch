@@ -12,37 +12,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+import shutil
+from pathlib import Path
 
-__pycache__
-.ipynb_checkpoints
+if __name__ == "__main__":
+    data_dir = Path(__file__).absolute().parent
+    data_dir.mkdir(exist_ok=True)
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+    original_file = str(data_dir / "test.txt")
+    output_file = str(data_dir / "test.jsonl")
+    shutil.copy(original_file, output_file)

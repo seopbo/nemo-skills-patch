@@ -12,37 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+import json
+from pathlib import Path
 
-__pycache__
-.ipynb_checkpoints
+from datasets import load_dataset
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
+if __name__ == "__main__":
+    data_dir = Path(__file__).absolute().parent
+    output_file = str(data_dir / "test.jsonl")
 
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+    dataset = load_dataset("anonymous1926/anonymous_dataset")
+    with open(output_file, "w") as f:
+        for split_name, split in dataset.items():
+            for row in split:
+                row["task_id"] = row.pop("problem_id")
+                row["question"] = row.pop("problem_statement")
+                row["split"] = split_name
+                f.write(json.dumps(row) + "\n")

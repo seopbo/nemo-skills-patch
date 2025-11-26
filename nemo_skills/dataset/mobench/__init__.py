@@ -12,37 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
-
-__pycache__
-.ipynb_checkpoints
-
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+# Default evaluation and generation settings for Lean4 proof benchmarks
+DATASET_GROUP = "lean4"
+METRICS_TYPE = "lean4-proof"
+GENERATION_ARGS = "++prompt_config=lean4/formal-proof-deepseek-prover-v2 ++eval_type=lean4-proof"
+REQUIRES_SANDBOX = True

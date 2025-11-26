@@ -12,37 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+from openai import OpenAI
 
-__pycache__
-.ipynb_checkpoints
+client = OpenAI(api_key="EMPTY", base_url="http://localhost:5000/v1", timeout=None)
+api_model = client.models.list().data[0].id
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+response = client.chat.completions.create(
+    model=api_model,
+    messages=[
+        {"role": "user", "content": "What is the capital of France?"},
+    ],
+    temperature=0.0,
+    max_tokens=4,
+    top_p=1.0,
+    n=1,
+    stream=False,
+)
+print(response.choices[0].message.content)

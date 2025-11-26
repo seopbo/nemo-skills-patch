@@ -12,37 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+import argparse
 
-__pycache__
-.ipynb_checkpoints
+from nemo_skills.dataset.utils import save_data_from_qwen
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--split",
+        default="all",
+        choices=("all", "test", "train"),
+    )
+    args = parser.parse_args()
 
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+    if args.split == "all":
+        for split in ["test", "train"]:
+            save_data_from_qwen("math", split)
+    else:
+        save_data_from_qwen("math", args.split)

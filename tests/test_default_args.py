@@ -12,37 +12,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+import pytest
 
-__pycache__
-.ipynb_checkpoints
+from nemo_skills.pipeline.cli import generate, wrap_arguments
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
 
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+def test_error_on_missing_default():
+    with pytest.raises(TypeError):
+        generate(ctx=wrap_arguments(""))

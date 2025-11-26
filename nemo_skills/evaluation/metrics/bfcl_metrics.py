@@ -12,37 +12,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+from nemo_skills.evaluation.metrics.base import BaseMetrics
 
-__pycache__
-.ipynb_checkpoints
 
-cluster_configs/*
-!cluster_configs/example-*.yaml
+class BFCLMetrics(BaseMetrics):
+    """Metrics for BFCL (Berkeley Function Calling Leaderboard) evaluation."""
 
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
+    # TODO: Ideally we should combine the accuracies across different subsets of the benchmark to
+    # report something similar to the final score in the BFCL leaderboard.
 
-.idea
+    def _get_score_dict(self, prediction: dict) -> dict[str, bool | int | float]:
+        return {"accuracy": prediction["is_correct"]}
+
+    def update(self, predictions):
+        super().update(predictions)
+        self._compute_pass_at_k(predictions=predictions)

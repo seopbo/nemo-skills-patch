@@ -12,37 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
-
-__pycache__
-.ipynb_checkpoints
-
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-
-.idea
+# settings that define how evaluation should be done by default (all can be changed from cmdline)
+DATASET_GROUP = "code"
+METRICS_TYPE = "scicode"
+GENERATION_ARGS = "++prompt_config=eval/scicode/default ++eval_type=scicode"
+GENERATION_MODULE = "nemo_skills.inference.eval.scicode"
+REQUIRES_SANDBOX = True
+EVAL_SPLIT = "test_aai"  # default to test + validation for consistency with AAI
