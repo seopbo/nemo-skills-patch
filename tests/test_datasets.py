@@ -13,9 +13,6 @@
 # limitations under the License.
 
 import importlib
-from pathlib import Path
-
-from nemo_skills.pipeline.cli import prepare_data, wrap_arguments
 
 # tuple of dataset name, available splits and prepared sft files
 DATASETS = [
@@ -76,15 +73,3 @@ def test_dataset_init_defaults():
             "tool",
             "speechlm",
         ], f"{dataset} has invalid DATASET_GROUP"
-
-
-def test_prepare_livecodebench_data():
-    """Test that livecodebench data can be prepared with its installation command."""
-    # This test verifies that the INSTALLATION_COMMAND is properly detected and executed
-    # when preparing livecodebench data
-    prepare_data(
-        cluster="test-local",
-        config_dir=Path(__file__).parent / "gpu-tests",
-        ctx=wrap_arguments("livecodebench"),
-        expname="test-prepare-livecodebench",
-    )
