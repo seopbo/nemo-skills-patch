@@ -239,8 +239,6 @@ def test_prepare_and_eval_all_datasets():
         "human-eval-infilling",
         "mbpp",
         "mmau-pro",
-        "aalcr",
-        "aime24",
     }
 
     dataset_names = sorted(
