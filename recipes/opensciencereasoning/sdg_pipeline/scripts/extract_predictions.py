@@ -79,8 +79,17 @@ def collect_predictions(
                     )
                 elif predicted_answer_regex:
                     extract_from_boxed = False
+
+                final_output = None
+                if "serialized_output" in sample:
+                    final_output = sample["serialized_output"][-1]["content"]
+                    logging.info("Using serialized_output for sample %s", sample.get("id", "unknown"))
+                elif "generation" in sample:
+                    final_output = sample["generation"]
+
+                logging.info("Using predicted_answer_regex: %s", predicted_answer_regex)
                 predicted_answer = extract_answer(
-                    sample["generation"],
+                    final_output,
                     extract_from_boxed=extract_from_boxed,
                     extract_regex=predicted_answer_regex,
                 )

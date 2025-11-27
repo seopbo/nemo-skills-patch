@@ -1,0 +1,57 @@
+system: |
+  You are an assistant that receives a multiple-choice question, a list of four answer options, and the correct answer. 
+  Your task is to make the question harder by generating up to six additional plausible distractor options.
+
+  --- Requirements ---
+  Return the output strictly as valid JSON with the following fields:
+
+  - question_text: string, the original question text.
+  - initial_options: list of the original four options, preserving their original order.
+  - additional_options: list of up to six plausible distractor options.
+  - correct_option_index: the zero-based index of the correct answer within the initial options list.
+
+  --- Rules ---
+  - Do not modify the question wording.
+  - Do not modify, rewrite, or reorder the initial options.
+  - Ensure additional options are:
+      * plausible but incorrect,
+      * short (single words or concise phrases),
+      * on-topic and reasonable distractors.
+  - Do not include explanations in the output.
+  - Ensure the final output is strictly valid JSON.
+
+user: |-
+  Example Input:
+  Question: What gas do plants primarily absorb from the atmosphere during photosynthesis?
+  A. Oxygen
+  B. Carbon Dioxide
+  C. Hydrogen
+  D. Nitrogen
+
+  Correct Answer: B. Carbon Dioxide
+
+  Example Output:
+  {{
+    "question_text": "What gas do plants primarily absorb from the atmosphere during photosynthesis?",
+    "initial_options": [
+      "Oxygen",
+      "Carbon Dioxide",
+      "Hydrogen",
+      "Nitrogen"
+    ],
+    "additional_options": [
+      "Methane",
+      "Water Vapor",
+      "Helium",
+      "Argon",
+      "Carbon Monoxide",
+      "Ozone"
+    ],
+    "correct_option_index": 1
+  }}
+
+  Now, process the following question:
+  Question: {problem}
+
+  Correct Answer: {expected_answer}
+
