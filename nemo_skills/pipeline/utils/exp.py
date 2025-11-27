@@ -377,13 +377,16 @@ def install_packages_wrap(cmd, installation_command: str | None = None):
         setup_env = f"export NEMO_SKILLS_JOB_UUID={job_uuid}"
 
         # Simple installation guard - first process to create lock file installs packages
+        # Properly quote the installation command to handle special characters like <, >, etc.
+        # shlex.quote() quotes the command as a single argument, so we use bash -c to execute it
+        quoted_command = shlex.quote(installation_command)
         install_guard = (
             f"{setup_env} && "
             f"if ! [ -f {lock_file} ]; then "
             f"echo 'Starting package installation with UUID: {job_uuid}'; "
             f"touch {lock_file}; "
             f"echo 'Installing packages: {installation_command}'; "
-            f"if {installation_command}; then "
+            f"if bash -c {quoted_command}; then "
             f"echo 'Package installation completed successfully'; "
             f"echo 'done' > {lock_file}; "
             f"else "

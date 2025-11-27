@@ -471,7 +471,7 @@ def eval(
     if " " in str(benchmarks):
         raise ValueError("benchmarks should be separated with commas")
 
-    benchmarks_dict, job_batches = prepare_eval_commands(
+    benchmarks_dict, job_batches, dataset_installation_command = prepare_eval_commands(
         cluster_config,
         benchmarks,
         split,
@@ -494,6 +494,16 @@ def eval(
         generation_type=generation_type,
         generation_module=generation_module,
     )
+
+    # Merge user-provided installation command with dataset-specific commands
+    final_installation_command = None
+    if installation_command and dataset_installation_command:
+        final_installation_command = f"{dataset_installation_command} && {installation_command}"
+        LOG.info(f"Merged installation commands: {final_installation_command}")
+    elif installation_command:
+        final_installation_command = installation_command
+    elif dataset_installation_command:
+        final_installation_command = dataset_installation_command
 
     sbatch_kwargs = parse_kwargs(sbatch_kwargs, exclusive=exclusive, qos=qos, time_min=time_min)
 
@@ -544,7 +554,7 @@ def eval(
                     get_server_command=job_server_command,
                     extra_package_dirs=[extra_datasets] if should_package_extra_datasets else None,
                     sbatch_kwargs=sbatch_kwargs,
-                    installation_command=installation_command,
+                    installation_command=final_installation_command,
                     skip_hf_home_check=skip_hf_home_check,
                 )
                 prev_tasks = [new_task]
@@ -597,7 +607,7 @@ def eval(
                     dependent_tasks=dependent_tasks,
                     all_tasks=all_tasks,
                     _task_dependencies=_task_dependencies,
-                    installation_command=installation_command,
+                    installation_command=final_installation_command,
                     skip_hf_home_check=skip_hf_home_check,
                     sbatch_kwargs=sbatch_kwargs,
                 )
@@ -624,7 +634,7 @@ def eval(
                     reuse_code_exp=reuse_code_exp,
                     reuse_code=reuse_code,
                     exclusive=exclusive,
-                    installation_command=installation_command,
+                    installation_command=final_installation_command,
                     sbatch_kwargs=sbatch_kwargs,
                     exp=exp,
                     cluster_config=cluster_config,
@@ -689,7 +699,7 @@ def eval(
                     task_dependencies=(
                         dependent_tasks if cluster_config["executor"] == "slurm" else all_tasks + _task_dependencies
                     ),
-                    installation_command=installation_command,
+                    installation_command=final_installation_command,
                     skip_hf_home_check=skip_hf_home_check,
                     sbatch_kwargs=sbatch_kwargs,
                 )
@@ -723,7 +733,7 @@ def eval(
                     task_dependencies=(
                         group_tasks[group] if cluster_config["executor"] == "slurm" else all_tasks + _task_dependencies
                     ),
-                    installation_command=installation_command,
+                    installation_command=final_installation_command,
                     skip_hf_home_check=skip_hf_home_check,
                     sbatch_kwargs=sbatch_kwargs,
                 )

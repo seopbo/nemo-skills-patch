@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Dict
 
 import nemo_skills.pipeline.utils as pipeline_utils
-from nemo_skills.dataset.utils import get_dataset_module, import_from_path
+from nemo_skills.dataset.utils import get_dataset_installation_command, get_dataset_module, import_from_path
 from nemo_skills.inference import GENERATION_MODULE_MAP
 from nemo_skills.inference.generate import GenerationTask
 from nemo_skills.utils import compute_chunk_ids, get_logger_name
@@ -292,6 +292,7 @@ def prepare_eval_commands(
             num_jobs = 1
 
     benchmarks_dict = {}  # benchmark_name -> benchmark_args
+    dataset_installation_commands = []
     for benchmark_or_group, rs_num in benchmarks_or_groups.items():
         cur_benchmarks = add_default_args(
             cluster_config,
@@ -330,6 +331,12 @@ def prepare_eval_commands(
             ):
                 LOG.warning("Found benchmark (%s) which requires sandbox to keep mounts, enabling it.", benchmark)
 
+            # Collect installation command for this benchmark
+            install_cmd = get_dataset_installation_command(benchmark)
+            if install_cmd and install_cmd not in dataset_installation_commands:
+                dataset_installation_commands.append(install_cmd)
+                LOG.info(f"Found installation command for benchmark {benchmark}: {install_cmd}")
+
     total_evals = 0
     for benchmark, benchmark_args in benchmarks_dict.items():
         if benchmark_args.num_samples == 0:
@@ -361,7 +368,12 @@ def prepare_eval_commands(
         num_jobs = total_evals
 
     if num_jobs == 0:
-        return benchmarks_dict, []
+        # Aggregate installation commands from all benchmarks
+        aggregated_dataset_installation_command = None
+        if dataset_installation_commands:
+            aggregated_dataset_installation_command = " && ".join(dataset_installation_commands)
+            LOG.info(f"Aggregated dataset installation command: {aggregated_dataset_installation_command}")
+        return benchmarks_dict, [], aggregated_dataset_installation_command
 
     evals_per_job = total_evals // num_jobs if num_jobs > 0 else total_evals
     remainder = total_evals % num_jobs
@@ -493,4 +505,10 @@ def prepare_eval_commands(
 
                 cur_eval += 1
 
-    return benchmarks_dict, job_batches
+    # Aggregate installation commands from all benchmarks
+    aggregated_dataset_installation_command = None
+    if dataset_installation_commands:
+        aggregated_dataset_installation_command = " && ".join(dataset_installation_commands)
+        LOG.info(f"Aggregated dataset installation command: {aggregated_dataset_installation_command}")
+
+    return benchmarks_dict, job_batches, aggregated_dataset_installation_command

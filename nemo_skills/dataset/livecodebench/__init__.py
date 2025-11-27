@@ -17,3 +17,7 @@ DATASET_GROUP = "code"
 METRICS_TYPE = "livecodebench"
 EVAL_SPLIT = "test_v6_2408_2505"
 GENERATION_ARGS = "++prompt_config=eval/livecodebench/python_codegen ++eval_type=livecodebench"
+
+# Installation command to run before both prepare_data and eval pipelines
+# This will be automatically applied when preparing or evaluating this dataset
+INSTALLATION_COMMAND = "pip install 'datasets<4'"

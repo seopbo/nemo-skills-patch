@@ -236,3 +236,21 @@ def get_mcq_fields(question, choices):
         "options": options_text,
         **options_dict,
     }
+
+
+def get_dataset_installation_command(dataset_name: str) -> str | None:
+    """
+    Get the INSTALLATION_COMMAND from a dataset's __init__.py file.
+
+    Args:
+        dataset_name: Name of the dataset (e.g., "gsm8k", "ruler")
+
+    Returns:
+        Installation command string if found, None otherwise
+    """
+    try:
+        dataset_module = importlib.import_module(f"nemo_skills.dataset.{dataset_name}")
+        return getattr(dataset_module, "INSTALLATION_COMMAND", None)
+    except (ModuleNotFoundError, ImportError):
+        # Dataset module not found, return None
+        return None

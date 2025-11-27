@@ -18,6 +18,7 @@ from typing import List
 
 import typer
 
+from nemo_skills.dataset.utils import get_dataset_installation_command
 from nemo_skills.pipeline.app import app, typer_unpacker
 from nemo_skills.pipeline.run_cmd import run_cmd as _run_cmd
 from nemo_skills.pipeline.utils import (
@@ -89,6 +90,25 @@ def prepare_data(
     setup_logging(disable_hydra_logs=False, use_rich=True)
     extra_arguments = f"{' '.join(ctx.args)}"
     command = f"python -m nemo_skills.dataset.prepare {extra_arguments}"
+
+    # Parse datasets from extra_arguments and collect their installation commands
+    # Datasets are passed as positional arguments to the prepare script
+    dataset_installation_commands = []
+    for arg in ctx.args:
+        # Skip flags/options (starting with -)
+        if not arg.startswith("-"):
+            # This could be a dataset name
+            install_cmd = get_dataset_installation_command(arg)
+            if install_cmd:
+                dataset_installation_commands.append(install_cmd)
+                LOG.info(f"Found installation command for dataset {arg}: {install_cmd}")
+
+    # Aggregate installation commands
+    aggregated_installation_command = None
+    if dataset_installation_commands:
+        # Combine all installation commands with &&
+        aggregated_installation_command = " && ".join(dataset_installation_commands)
+        LOG.info(f"Aggregated installation command: {aggregated_installation_command}")
 
     if not data_dir and not skip_data_dir_check:
         for dataset in DATASETS_REQUIRE_DATA_DIR:
@@ -166,6 +186,7 @@ def prepare_data(
         check_mounted_paths=check_mounted_paths,
         skip_hf_home_check=skip_hf_home_check,
         sbatch_kwargs=sbatch_kwargs,
+        installation_command=aggregated_installation_command,
     )
 
 
