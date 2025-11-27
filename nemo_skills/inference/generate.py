@@ -15,7 +15,6 @@
 import asyncio
 import json
 import logging
-import os
 import random
 import shutil
 import subprocess
@@ -392,11 +391,9 @@ class GenerationTask:
                 additional_config={"sandbox": self.cfg.sandbox},
             )
         else:
-            if "data_dir" in self.cfg.eval_config and not (
-                isinstance(self.cfg.eval_config["data_dir"], type(None)) or isinstance(self.cfg.eval_type, type(None))
-            ):
-                data_dir = os.path.join(self.cfg.eval_config["data_dir"], self.cfg.eval_type)
-                llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, data_dir=data_dir)
+            # data_dir is only needed if audio/media paths are relative
+            if "data_dir" in self.cfg.eval_config and not isinstance(self.cfg.eval_config["data_dir"], type(None)):
+                llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, data_dir=self.cfg.eval_config["data_dir"])
             else:
                 llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
 
