@@ -351,7 +351,6 @@ class ICPCEvaluator(BaseEvaluator):
 
         # todo (sean): hack to just run sample tests
         only_sample_tests = entry.get("only_sample_tests", False)
-        print(f"Only sample tests: {only_sample_tests}")
 
         if pid not in self.precompiled_cache:
             self.precompiled_cache[pid] = await asyncio.to_thread(
