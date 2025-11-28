@@ -349,6 +349,10 @@ class ICPCEvaluator(BaseEvaluator):
         user_run_code = problem_metadata["user_run"]
         grader_files = problem_metadata["grader_files"]
 
+        # todo (sean): hack to just run sample tests
+        only_sample_tests = entry.get("only_sample_tests", False)
+        print(f"Only sample tests: {only_sample_tests}")
+
         if pid not in self.precompiled_cache:
             self.precompiled_cache[pid] = await asyncio.to_thread(
                 _precompile_grader,
@@ -370,7 +374,7 @@ class ICPCEvaluator(BaseEvaluator):
         }
 
         all_tests = [(tname, t, "sample") for tname, t in problem_metadata["sample_tests"].items()]
-        if getattr(entry, "only_sample_tests", False):
+        if only_sample_tests:
             # todo (sean): hack to just run sample tests
             all_tests = all_tests
         else:
@@ -416,7 +420,7 @@ class ICPCEvaluator(BaseEvaluator):
             "score": problem_state["test_passed"],
             "outputs": problem_state["test_outputs"],
         }
-        if self.inputdata is not None and not getattr(entry, "only_sample_tests", False):
+        if self.inputdata is not None and not only_sample_tests:
             problem_inputs = self.inputdata[str(entry["id"])]
             print(f"Problem inputs: {len(problem_inputs)}")
             for i in range(0, len(problem_inputs), batch_size):
