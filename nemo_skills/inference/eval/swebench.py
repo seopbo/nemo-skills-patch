@@ -43,6 +43,7 @@ LOG = logging.getLogger(get_logger_name(__file__))
 class SupportedAgentFrameworks(str, Enum):
     swe_agent = "swe_agent"
     openhands = "openhands"
+    mini_swe_agent = "mini_swe_agent"
 
 
 # Like nemo_skills.inference.generate.InferenceConfig, except most parameters are not passed by default
@@ -231,6 +232,20 @@ class SweBenchGenerationTask(GenerationTask):
                 "uv venv --python 3.12 --managed-python venv && "
                 "source venv/bin/activate && "
                 "uv pip install -e ."
+            )
+        elif self.cfg.agent_framework == SupportedAgentFrameworks.mini_swe_agent:
+            if self.cfg.agent_framework_repo is None:
+                self.cfg.agent_framework_repo = "https://github.com/SWE-agent/mini-swe-agent.git"
+            setup_commands.append(
+                # clone the swe-agent repo
+                "rm -rf /root/mini-swe-agent && "
+                f"git clone {self.cfg.agent_framework_repo} /root/mini-swe-agent && "
+                "cd /root/mini-swe-agent && "
+                f"git checkout {self.cfg.agent_framework_commit} && "
+                # make venv & install mini-swe-agent dependencies
+                "uv venv --python 3.12 --managed-python venv && "
+                "source venv/bin/activate && "
+                "uv pip install -e .mini-swe-agent"
             )
         elif self.cfg.agent_framework == SupportedAgentFrameworks.openhands:
             if self.cfg.agent_framework_repo is None:
@@ -484,6 +499,57 @@ class SweBenchGenerationTask(GenerationTask):
 
         return pred_jsonl_file
 
+    async def _run_mini_swe_agent(self, data_point, api_base):
+        """
+        Runs mini-swe-agent on one instance.
+        Returns the absolute (not mounted) path to a .jsonl file in the SWE-bench evaluation format.
+        """
+        if self.cfg.agent_config is None:
+            self.cfg.agent_config = "eval/swe-bench/mini-swe-agent/mini"
+
+        completion_kwargs = {
+            openai_param: getattr(self.cfg.inference, ns_param)
+            for ns_param, openai_param in NS_TO_OPENAI_PARAM.items()
+            if getattr(self.cfg.inference, ns_param) is not None
+        }
+        if "top_logprobs" in completion_kwargs:
+            completion_kwargs["logprobs"] = True
+
+        mini_swe_agent_cmd = (
+            # copy installed repo & uv dir from /root_mount
+            "cp -r /root_mount/mini-swe-agent /root && "
+            "cp -r /root_mount/uv /root && "
+            "cd /root/mini-swe-agent && "
+            # run the agent
+            f"/root/mini-swe-agent/venv/bin/python -m mini run "
+            f"    --config_spec {get_config_path(self.cfg.agent_config)} "
+            f"    --agent.model.name hosted_vllm/{self.cfg.server.model} "
+            f"    --yolo "
+            f"    --task {shlex.quote(data_point['problem_statement'])} && "
+            # move trajectories to the mounted directory
+            f"cp -r trajectories /trajectories_mount/"
+        )
+
+        # Execute mini-swe-agent command
+        search_path = os.path.join(
+            self.output_dir, "trajectories", "*", "*", data_point["instance_id"], f"{data_point['instance_id']}.pred"
+        )
+        pred_file = await self._execute_container_command(data_point, mini_swe_agent_cmd, search_path, mode="agent")
+
+        with open(pred_file, "r") as f:
+            trajectory_dict = json.loads(f.read().strip())
+
+        # need to rename .pred to .jsonl
+        pred_jsonl_file = pred_file.replace(".pred", ".jsonl")
+        with open(pred_jsonl_file, "w") as f:
+            f.write(json.dumps(trajectory_dict))
+
+        # TODO: get num_generated_tokens and other stats from .traj file
+        # looks like data['info']['model_stats']
+        # {'instance_cost': 0, 'tokens_sent': 40858, 'tokens_received': 1775, 'api_calls': 9}
+
+        return pred_jsonl_file
+
     async def _run_openhands(self, data_point, api_base):
         """
         Runs OpenHands on one instance.
@@ -609,6 +675,8 @@ class SweBenchGenerationTask(GenerationTask):
 
         if self.cfg.agent_framework == SupportedAgentFrameworks.swe_agent:
             pred_file = await self._run_swe_agent(data_point, api_base)
+        elif self.cfg.agent_framework == SupportedAgentFrameworks.mini_swe_agent:
+            pred_file = await self._run_mini_swe_agent(data_point, api_base)
         elif self.cfg.agent_framework == SupportedAgentFrameworks.openhands:
             pred_file = await self._run_openhands(data_point, api_base)
         else:
