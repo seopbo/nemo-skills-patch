@@ -27,7 +27,9 @@ To skip tests if server is not available:
     pytest tests/test_generate_server.py -v --skip-if-no-server
 """
 
+import multiprocessing
 import os
+import time
 
 import pytest
 import requests
@@ -126,27 +128,100 @@ def skip_if_no_server(pytestconfig) -> bool:
     return pytestconfig.getoption("--skip-if-no-server", default=False)
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def server_config() -> dict:
     """Fixture providing default server configuration."""
-    return create_server_config()
+    # Use API key from environment or skip if not available
+    api_key = os.environ.get("NVIDIA_API_KEY")
+    if not api_key or api_key == "YOUR_NVIDIA_API_KEY":
+        pytest.skip("NVIDIA_API_KEY not set or is placeholder. Set it to run tests.")
+
+    return create_server_config(
+        api_key=api_key,
+        model=os.environ.get("NVIDIA_MODEL", NVIDIA_MODEL),
+        base_url=os.environ.get("NVIDIA_BASE_URL", NVIDIA_BASE_URL),
+    )
+
+
+def _run_server(config_dict):
+    """Helper function to run the server in a subprocess."""
+    from nemo_skills.inference.generate import GenerateSolutionsConfig, GenerationTask
+
+    cfg = GenerateSolutionsConfig(_init_nested=True, **config_dict)
+    task = GenerationTask(cfg)
+    task.generate()
+
+
+@pytest.fixture(scope="session")
+def server_process(server_config, server_url, skip_if_no_server, pytestconfig):
+    """
+    Fixture that starts a server process for the test session.
+
+    If server is already running, uses that. Otherwise starts a new one.
+    """
+    # Check if server is already running
+    if check_server_health(server_url, timeout=2):
+        yield None
+        return
+
+    # Skip if we should skip when server is not available
+    if skip_if_no_server:
+        pytest.skip("Server not available and --skip-if-no-server is set")
+
+    # Check if we should auto-start (default: True, can be disabled with --no-auto-start-server)
+    auto_start = pytestconfig.getoption("--auto-start-server", default=True)
+    if not auto_start:
+        pytest.fail(
+            f"Server not available at {server_url}. "
+            "Start the server manually, use --auto-start-server, or use --skip-if-no-server to skip tests."
+        )
+
+    # Start server in a subprocess
+    process = multiprocessing.Process(target=_run_server, args=(server_config,), daemon=True)
+    process.start()
+
+    # Wait for server to be ready
+    max_wait = 60  # Wait up to 60 seconds
+    ready = False
+    for _ in range(max_wait):
+        if check_server_health(server_url, timeout=2):
+            ready = True
+            break
+        if not process.is_alive():
+            # Process died, check exit code
+            pytest.fail(f"Server process died before becoming ready (exit code: {process.exitcode})")
+        time.sleep(1)
+
+    if not ready:
+        process.terminate()
+        process.join(timeout=5)
+        if process.is_alive():
+            process.kill()
+        pytest.fail(f"Server failed to start within {max_wait} seconds")
+
+    yield process
+
+    # Cleanup: terminate the server process
+    if process.is_alive():
+        process.terminate()
+        process.join(timeout=10)
+        if process.is_alive():
+            # Force kill if it didn't terminate gracefully
+            process.kill()
+            process.join(timeout=5)
 
 
 @pytest.fixture(scope="function")
-def server_available(server_url, skip_if_no_server):
+def server_available(server_url, server_process):
     """
-    Fixture that checks if server is available and skips tests if not.
+    Fixture that ensures server is available for tests.
 
-    Note: This fixture does not start the server. The server should be started
-    manually or via a separate process before running tests.
+    This fixture depends on server_process which will start the server if needed.
     """
+    # server_process fixture handles starting the server
+    # Just verify it's still available
     if not check_server_health(server_url):
-        if skip_if_no_server:
-            pytest.skip("Server not available and --skip-if-no-server is set")
-        pytest.fail(
-            f"Server not available at {server_url}. "
-            "Start the server manually or use --skip-if-no-server to skip tests."
-        )
+        pytest.fail(f"Server became unavailable at {server_url}")
     return True
 
 
@@ -163,6 +238,18 @@ def pytest_addoption(parser):
         action="store_true",
         default=False,
         help="Skip tests if server is not available",
+    )
+    parser.addoption(
+        "--auto-start-server",
+        action="store_true",
+        default=True,
+        help="Automatically start server if not running (default: True)",
+    )
+    parser.addoption(
+        "--no-auto-start-server",
+        action="store_false",
+        dest="auto_start_server",
+        help="Do not automatically start server (fail if server is not available)",
     )
 
 
