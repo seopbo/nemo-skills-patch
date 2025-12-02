@@ -380,6 +380,10 @@ class GenerationTask:
     def setup_llm(self):
         self.sandbox = get_sandbox(**self.cfg.sandbox) if self.cfg.sandbox is not None else None
 
+        self.data_dir = None
+        if "data_dir" in self.cfg.eval_config and not isinstance(self.cfg.eval_config.get("data_dir"), type(None)):
+            self.data_dir = self.cfg.eval_config["data_dir"]
+
         if self.cfg.code_execution:
             llm = get_code_execution_model(**self.cfg.server, tokenizer=self.tokenizer, sandbox=self.sandbox)
         elif self.cfg.tool_modules is not None:
@@ -391,11 +395,7 @@ class GenerationTask:
                 additional_config={"sandbox": self.cfg.sandbox},
             )
         else:
-            # data_dir is only needed if audio/media paths are relative
-            if "data_dir" in self.cfg.eval_config and not isinstance(self.cfg.eval_config["data_dir"], type(None)):
-                llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, data_dir=self.cfg.eval_config["data_dir"])
-            else:
-                llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
+            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
 
         if self.cfg.parallel_thinking.mode is not None:
             # We don't want to override these key variables which overlap with self.cfg
