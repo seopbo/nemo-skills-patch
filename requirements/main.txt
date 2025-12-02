@@ -18,6 +18,7 @@ datasets<4  # lcb problem with datasets 4.0.0
 # ddgs # Needed for BFCLv4 - currently cannot be installed directly due to lepton obsolete httpx version in use
 evalplus @ git+https://github.com/evalplus/evalplus@c91370f
 faiss-cpu # Needed for BFCLv4
+fastapi
 fire
 
 # needed local code execution server for persistent sessions
@@ -46,4 +47,5 @@ sympy
 tqdm
 transformers
 typer >= 0.13
+uvicorn
 wandb

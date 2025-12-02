@@ -27,6 +27,9 @@ from typing import Any
 
 import hydra
 import litellm
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from omegaconf import ListConfig
 from tqdm import tqdm
 from transformers import AutoTokenizer
@@ -87,8 +90,8 @@ class InferenceConfig:
 class GenerateSolutionsConfig:
     """Generation parameters."""
 
-    input_file: str  # Path to the input file with data
-    output_file: str  # Where to save the generations
+    input_file: str | None = None  # Path to the input file with data
+    output_file: str | None = None  # Where to save the generations
     prompt_config: str | None = None  # How to format the data into prompts
 
     # Deprecated, please use endpoint_type in the InferenceConfig instead
@@ -190,10 +193,16 @@ class GenerateSolutionsConfig:
     eval_type: str | None = None  # "lean4-proof", "math", etc.
     eval_config: dict = field(default_factory=dict)  # Config for the evaluator
 
+    # FastAPI server mode configuration
+    start_server: bool = False  # If True, start a FastAPI server instead of batch generation
+    generate_host: str = "0.0.0.0"  # Host to bind the FastAPI server to
+    generate_port: int = 7000  # Port to bind the FastAPI server to
+
     def __post_init__(self):
         self._post_init_validate_data()
         self._post_init_validate_server()
         self._post_init_validate_params()
+        self._post_init_validate_server_mode()
         self._post_init_deprecated_params()
 
     def _post_init_validate_data(self):
@@ -224,6 +233,20 @@ class GenerateSolutionsConfig:
         for param, default_value in self._get_disallowed_params():
             if getattr(self, param) != default_value:
                 raise ValueError(f"{param} must be {default_value}")
+
+    def _post_init_validate_server_mode(self):
+        """Validate input_file and output_file based on start_server mode."""
+        if self.start_server:
+            if self.input_file is not None or self.output_file is not None:
+                raise ValueError(
+                    "When start_server=True, input_file and output_file must be None. "
+                    "The server processes individual data points via API requests."
+                )
+        else:
+            if self.input_file is None:
+                raise ValueError("input_file is required when start_server=False")
+            if self.output_file is None:
+                raise ValueError("output_file is required when start_server=False")
 
     def _post_init_deprecated_params(self):
         if self.use_completions_api:
@@ -607,8 +630,11 @@ class GenerationTask:
         data_point.update(eval_results)
         return data_point
 
-    async def _generate_and_save_datapoint(self, data_point, all_data, fout, pbar):
-        """Starts generation, evaluation and saves the output for a single data point."""
+    async def _process_single_datapoint_core(self, data_point, all_data):
+        """Core logic for processing a single data point: generation, stats, postprocessing, and evaluation.
+
+        Returns the processed output dictionary.
+        """
         # Generate output for this single data point
         start_time = time.time()
         output = await self.process_single_datapoint(data_point, all_data)
@@ -624,6 +650,12 @@ class GenerationTask:
         # evaluate single-data point if requested and evaluator supports that
         if self.should_run_evaluation and self.evaluator:
             output = await self.evaluate_single_datapoint({**data_point, **output})
+
+        return output
+
+    async def _generate_and_save_datapoint(self, data_point, all_data, fout, pbar):
+        """Starts generation, evaluation and saves the output for a single data point."""
+        output = await self._process_single_datapoint_core(data_point, all_data)
 
         # Thread-safe output writing
         async with self.output_lock:
@@ -694,6 +726,33 @@ class GenerationTask:
         Path(self.cfg.output_file + "-async").unlink()
         self.cleanup_litellm_cache()
 
+    def start_fastapi_server(self):
+        """Start a FastAPI server that exposes a /generate endpoint for processing individual data points."""
+        app = FastAPI(title="NeMo Skills Generation Server")
+
+        @app.post("/generate")
+        async def generate_endpoint(data_point: dict):
+            """Generate output for a single data point.
+
+            Request body should be the data point dictionary directly (not wrapped in a 'data_point' key).
+            The body is parsed as JSON and passed directly to the generation logic.
+            """
+            try:
+                # Process the data point using the core logic
+                # Use empty list for all_data since we're processing individual requests
+                output = await self._process_single_datapoint_core(data_point, [])
+
+                return JSONResponse(content=output)
+            except Exception as e:
+                LOG.exception("Error processing generation request")
+                raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
+        LOG.info(
+            f"Starting FastAPI server on {self.cfg.generate_host}:{self.cfg.generate_port}. "
+            f"Access the /generate endpoint at http://{self.cfg.generate_host}:{self.cfg.generate_port}/generate"
+        )
+        uvicorn.run(app, host=self.cfg.generate_host, port=self.cfg.generate_port)
+
     def wait_for_server(self):
         if not self.cfg.server.get("base_url") and not self.cfg.server.get("host") and not self.cfg.server.get("port"):
             LOG.info("Skipping server wait as no server address is provided.")
@@ -713,10 +772,18 @@ class GenerationTask:
     def setup_litellm_cache(self):
         if self.cfg.enable_litellm_cache:
             # One cache per (output_file_name, chunk_id) pair
-            output_file_name = Path(self.cfg.output_file).name
-            self.litellm_cache_dir = (
-                Path(self.cfg.output_file).parent / "litellm_cache" / f"{output_file_name}_{self.cfg.chunk_id or 0}"
-            )
+            # In server mode, use a default cache directory
+            if self.cfg.output_file is None:
+                cache_name = "server_cache"
+            else:
+                output_file_name = Path(self.cfg.output_file).name
+                cache_name = f"{output_file_name}_{self.cfg.chunk_id or 0}"
+
+            if self.cfg.output_file is None:
+                # Use a default cache directory in server mode
+                self.litellm_cache_dir = Path.cwd() / "litellm_cache" / cache_name
+            else:
+                self.litellm_cache_dir = Path(self.cfg.output_file).parent / "litellm_cache" / cache_name
             litellm.cache = litellm.Cache(type="disk", disk_cache_dir=self.litellm_cache_dir)
 
     def cleanup_litellm_cache(self):
@@ -724,6 +791,14 @@ class GenerationTask:
             shutil.rmtree(self.litellm_cache_dir)
 
     def generate(self):
+        if self.cfg.start_server:
+            # Server mode: start FastAPI server
+            self.wait_for_server()
+            self.wait_for_sandbox()
+            self.start_fastapi_server()
+            return
+
+        # Normal batch generation mode
         Path(self.cfg.output_file).absolute().parent.mkdir(parents=True, exist_ok=True)
 
         data = self.load_data()
