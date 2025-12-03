@@ -219,7 +219,7 @@ def run_pipeline_on_chunks():
         cmd = [
             "python", 
             "pipeline/sdg_pipeline.py",
-            "--settings", "kimi-no-tool-generate",
+            "--settings", "kimi-no-tool-hle",
             "--override",
             "cluster=lax",
             f"dataset_name={dataset_name}",
