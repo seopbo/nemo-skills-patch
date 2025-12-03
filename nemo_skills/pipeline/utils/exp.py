@@ -198,8 +198,8 @@ def get_executor(
     if cluster_config["executor"] == "local":
         env_vars["PYTHONUNBUFFERED"] = "1"  # this makes sure logs are streamed right away
         resolved_container = resolve_container_image(container, cluster_config)
-        if os.getenv("NEMO_SKILLS_MOUNT_DOCKER_SOCKET"):
-            mounts.append("/var/run/docker.sock:/var/run/docker.sock")
+        if os.getenv("NEMO_SKILLS_MOUNT_DOCKER_SOCKET") and "/var/run/docker.sock:/var/run/docker.sock" not in mounts:
+            mounts = mounts + ["/var/run/docker.sock:/var/run/docker.sock"]  # avoid modifying mounts inplace
         return DockerExecutor(
             container_image=resolved_container,
             packager=packager,
