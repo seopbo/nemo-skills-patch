@@ -1,0 +1,35 @@
+# Overrides to enable python-tool-assisted generations across pipelines.
+
+stages:
+  filter_problems:
+    enabled: False
+  decontaminate:
+    enabled: False
+  topics_labeling:
+    enabled: False
+  difficulty_estimation:
+    enabled: False
+  aggregate:
+    enabled: False
+
+  generate_solutions:
+    predicted_answer_regex: 'Answer: ([A-Z])(?![A-Za-z])'
+    make_judgement: False
+    prompt_config: ++prompt_config=eval/aai/mcq-10choices
+    code_tags: ++code_tags=gpt-oss
+    enable_code_execution: ++code_execution=true
+    code_execution_limits: ++server.code_execution.max_code_executions=100
+    builtin_tools: ++chat_template_kwargs.builtin_tools=[python]
+    generation_kwargs:
+      args:
+        input_file: ${input_file}
+        with_sandbox: True
+
+  filter_solutions:
+    input_file: ${directories.step-4-generate-solutions}/final_result.jsonl
+    only_correct_solutions: True
+    is_ground_truth_answer_present: True
+    difficulty_model_pass_rate_range: null
+    metadata_values: null
+    dependencies:
+      - generate_solutions

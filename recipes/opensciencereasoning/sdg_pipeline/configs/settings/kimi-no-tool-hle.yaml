@@ -1,0 +1,48 @@
+# Overrides to enable python-tool-assisted generations across pipelines.
+
+stages:
+  filter_problems:
+    enabled: False
+  decontaminate:
+    enabled: False
+  topics_labeling:
+    enabled: False
+  difficulty_estimation:
+    enabled: False
+  aggregate:
+    enabled: False
+
+  generate_solutions:
+    prompt_config: ++prompt_config=generic/hle
+    predicted_answer_regex: '\*?\*?Answer:\*?\*?\s*(.*?)(?=\s*\*?\*?Confidence:|\s*$)'
+    code_tags: ""
+    enable_code_execution: ""
+    code_execution_limits: ""
+    builtin_tools: ""
+
+    generation_kwargs:
+      args:
+        input_file: ${input_file}        
+        model: /hf_models/Kimi-K2-Thinking
+        server_type: sglang
+        server_gpus: 8
+        server_nodes: 1
+        dependent_jobs: 1
+        num_chunks: ${num_chunks}
+        num_random_seeds: ${num_random_seeds}
+        server_args: "--trust-remote-code --tool-call-parser kimi_k2 --reasoning-parser kimi_k2 --tp 8"
+        with_sandbox: False
+
+      ctx_args: >-
+        ${stages.generate_solutions.prompt_config}
+        ++inference.tokens_to_generate=200000
+        ++inference.temperature=1.0      
+
+  filter_solutions:
+    input_file: ${directories.step-4-generate-solutions}/final_result.jsonl
+    only_correct_solutions: True
+    is_ground_truth_answer_present: True
+    difficulty_model_pass_rate_range: null
+    metadata_values: null
+    dependencies:
+      - generate_solutions

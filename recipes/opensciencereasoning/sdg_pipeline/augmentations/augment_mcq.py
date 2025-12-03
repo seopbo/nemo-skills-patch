@@ -60,19 +60,6 @@ def augment_mcq(cluster, expname, stage_config, **kwargs):
         **generation_args,
     )
 
-   
-    # run_cmd(
-    #     ctx=wrap_arguments(
-    #         f"python /nemo_run/code/recipes/opensciencereasoning/sdg_pipeline/scripts/aggregate_difficulty.py "
-    #         f"    --judgement_dir '{output_dir}/judgement' "
-    #         f"    --output_file '{output_dir}/{OUTPUT_FILE}' "
-    #         f"    --difficulty_model '{generation_args['model'].split('/')[-1]}' "
-    #     ),
-    #     cluster=cluster,
-    #     log_dir=f"{output_dir}/logs",
-    #     run_after=f"{expname}-judgement",
-    #     expname=expname,
-    # )
 
 
 # Register the configuration with Hydra's ConfigStore

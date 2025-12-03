@@ -10,7 +10,7 @@ generation_kwargs:
     server_gpus: 8
     server_nodes: 1
     dependent_jobs: 1
-    num_chunks: 5
+    num_chunks: 20
   ctx_args: >-
     ++prompt_config=/nemo_run/code/recipes/opensciencereasoning/sdg_pipeline/augmentations/augment_mcq.yaml
     ++inference.tokens_to_generate=16000

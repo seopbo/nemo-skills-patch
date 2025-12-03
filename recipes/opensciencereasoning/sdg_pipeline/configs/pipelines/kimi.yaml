@@ -28,11 +28,11 @@ pipeline_stages:
   - topics_labeling             # Label topics and subtopics
   - generate_solutions          # Generate solutions
   - difficulty_estimation       # Estimate difficulty of problems
-  # - aggregate                   # Aggregate all the metadata into a single file
-  # - filter_solutions            # Filter solutions
-  # - prepare_for_sft             # Prepare for SFT
-  # - convert_to_messages_format  # Convert to messages format for training
-  # - bucket                      # Bucket by token length
+  - aggregate                   # Aggregate all the metadata into a single file
+  - filter_solutions            # Filter solutions
+  - prepare_for_sft             # Prepare for SFT
+  - convert_to_messages_format  # Convert to messages format for training
+  - bucket                      # Bucket by token length
 
 # Directory structure configuration
 directories:
@@ -167,28 +167,20 @@ stages:
     generation_kwargs:
       args:
         input_file: ${directories.step-1-decontaminate}/final_result.jsonl
-        model: /hf_models/gpt-oss-120b
-        server_type: vllm
+        model: /hf_models/Kimi-K2-Thinking
+        server_type: sglang
         server_gpus: 8
         server_nodes: 1
         dependent_jobs: 1
         num_chunks: ${num_chunks}
         num_random_seeds: ${num_random_seeds}
-        server_args: "--async-scheduling"
+        server_args: "--trust-remote-code --tool-call-parser kimi_k2 --reasoning-parser kimi_k2 --tp 8"
         with_sandbox: False
 
       ctx_args: >-
-        ${stages.generate_solutions.prompt_config}
-        ${stages.generate_solutions.code_tags}
-        ${stages.generate_solutions.enable_code_execution}
-        ${stages.generate_solutions.code_execution_limits}
-        ++max_concurrent_requests=1024
-        ++inference.tokens_to_generate=16000
-        ++inference.endpoint_type=text
+        ++inference.tokens_to_generate=200000
         ++inference.temperature=1.0
-        ++inference.top_p=1.0
-        ${stages.generate_solutions.reasoning_effort}
-        ${stages.generate_solutions.builtin_tools}
+        
 
     judge_kwargs:
       ctx_args: >-

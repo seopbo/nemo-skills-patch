@@ -523,12 +523,12 @@ def prepare_for_sft(cluster, expname, run_after, stage_config, **kwargs):
     prepare_data_ctx_args = prepare_data_kwargs.get("ctx_args", "")
 
     cmd = (
-        f"mkdir -p {output_dir} && python -m nemo_skills.training.prepare_data "
+        f"mkdir -p {output_dir} && python -m nemo_skills.training.prepare_data --config-name=stem_sft.yaml"
         f"    ++input_files='{input_file}' "
         f"    ++output_path='{output_dir}/prepared.jsonl' "
         f"    ++add_unlabeled=True "
         f"    ++add_incorrect=True "
-        f"    ++exclude_optional_keys=True "
+        f"    ++exclude_optional_keys=False "
         f"    {prepare_data_ctx_args}"
     )
     run_cmd(
