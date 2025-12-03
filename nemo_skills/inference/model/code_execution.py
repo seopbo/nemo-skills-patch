@@ -127,6 +127,14 @@ class CodeExecutionWrapper:
             "reasoning_effort": reasoning_effort,
         }
         session_id = None
+        execution_dict, session_id = await self.sandbox.execute_code(
+            generated_code="1+1",
+            language=self.config.code_execution_language,
+            timeout=self.config.code_execution_timeout,
+            max_output_characters=self.config.max_code_output_characters,
+            session_id=session_id,
+            traceback_verbosity=self.config.sandbox_traceback_verbosity,
+        )
         code_rounds_executed = 0
         total_num_generated_tokens = 0
         generation_time = 0
