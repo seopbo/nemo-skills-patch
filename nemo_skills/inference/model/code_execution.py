@@ -135,6 +135,7 @@ class CodeExecutionWrapper:
             session_id=session_id,
             traceback_verbosity=self.config.sandbox_traceback_verbosity,
         )
+        time.sleep(1.0)
         code_rounds_executed = 0
         total_num_generated_tokens = 0
         generation_time = 0
