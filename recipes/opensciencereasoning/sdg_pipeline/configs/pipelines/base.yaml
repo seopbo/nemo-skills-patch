@@ -28,11 +28,11 @@ pipeline_stages:
   - topics_labeling             # Label topics and subtopics
   - generate_solutions          # Generate solutions
   - difficulty_estimation       # Estimate difficulty of problems
-  # - aggregate                   # Aggregate all the metadata into a single file
-  # - filter_solutions            # Filter solutions
-  # - prepare_for_sft             # Prepare for SFT
-  # - convert_to_messages_format  # Convert to messages format for training
-  # - bucket                      # Bucket by token length
+  - aggregate                   # Aggregate all the metadata into a single file
+  - filter_solutions            # Filter solutions
+  - prepare_for_sft             # Prepare for SFT
+  - convert_to_messages_format  # Convert to messages format for training
+  - bucket                      # Bucket by token length
 
 # Directory structure configuration
 directories:
