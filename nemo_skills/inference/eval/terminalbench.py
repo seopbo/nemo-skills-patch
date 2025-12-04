@@ -184,6 +184,7 @@ class TerminalBenchGenerationTask(GenerationTask):
         else:
             # Build image on the fly
             container_path = f"{data_point['task_id']}.sif"
+            docker_image = f"docker-daemon://tb__{data_point['task_id'].replace('.', '-')}__client"
             build_cmd = (
                 # activate terminal-bench environment
                 f"cd {TB_REPO_PATH} && "
@@ -191,7 +192,7 @@ class TerminalBenchGenerationTask(GenerationTask):
                 # build docker image
                 f"tb tasks build --task-id {data_point['task_id']} --tasks-dir nv-internal && "
                 # convert docker image to apptainer image
-                f"apptainer build {container_path} docker-daemon://tb__{data_point['task_id']}__client"
+                f"apptainer build {container_path} {docker_image}"
             )
             try:
                 await self._run_command(build_cmd, logs_dir / f"{data_point['task_id']}.build.log")
