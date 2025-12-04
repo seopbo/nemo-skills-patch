@@ -16,6 +16,7 @@ import contextlib
 import logging
 import os
 import shlex
+import subprocess
 import uuid
 from dataclasses import dataclass, fields
 from functools import lru_cache
@@ -199,13 +200,25 @@ def get_executor(
         env_vars["PYTHONUNBUFFERED"] = "1"  # this makes sure logs are streamed right away
         resolved_container = resolve_container_image(container, cluster_config)
         if os.getenv("NEMO_SKILLS_MOUNT_HOST_DOCKER"):
-            # Mount Docker socket & binary from the host machine
-            docker_mounts = [
-                "/var/run/docker.sock:/var/run/docker.sock",  # docker socket
-                "/usr/bin/docker:/usr/bin/docker",  # docker binary
-            ]
+            # Mount Docker socket & binary from the host machine.
+            extra_mounts = ["/var/run/docker.sock:/var/run/docker.sock"]  # docker socket
+
+            # Get docker binary path
+            docker_binary = subprocess.check_output("which docker", shell=True, text=True).strip()
+            extra_mounts.append(docker_binary + ":" + docker_binary)
+
+            # Get docker compose binary path
+            compose_binary = subprocess.check_output(
+                "docker info -f json | jq -r '.ClientInfo.Plugins[] | select(.Name == \"compose\").Path'",
+                shell=True,
+                text=True,
+            ).strip()
+            if not compose_binary:
+                raise ValueError("Docker Compose was not found. It is required to run terminal-bench locally.")
+            extra_mounts.append(compose_binary + ":" + compose_binary)
+
             # Avoid modifying mounts inplace
-            for mount in docker_mounts:
+            for mount in extra_mounts:
                 if mount not in mounts:
                     mounts = mounts + [mount]
         return DockerExecutor(
