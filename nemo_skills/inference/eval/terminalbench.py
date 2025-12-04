@@ -117,16 +117,19 @@ class TerminalBenchGenerationTask(GenerationTask):
             self.output_dir = self.output_dir / f"rs{self.cfg.inference.random_seed}"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        # set up terminal-bench repo
         setup_cmd = (
+            # clone terminal-bench repo
             f"git clone {self.cfg.tb_repo} {TB_REPO_PATH} && "
             f"cd {TB_REPO_PATH} && "
             f"git checkout {self.cfg.tb_commit} && "
+            # set up virtual environment with uv
             "curl -LsSf https://astral.sh/uv/install.sh | sh && "
             "source /root/.local/bin/env && "
             "uv venv && "
             "source .venv/bin/activate && "
-            "uv pip install -e ."
+            "uv pip install -e . && "
+            # fix errors when running apptainer with --fakeroot
+            "apptainer config fakeroot --add root"
         )
         asyncio.run(self._run_command(setup_cmd, self.output_dir / "setup.log"))
 
