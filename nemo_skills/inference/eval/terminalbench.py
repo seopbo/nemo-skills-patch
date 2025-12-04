@@ -194,11 +194,12 @@ class TerminalBenchGenerationTask(GenerationTask):
                 # convert docker image to apptainer image
                 f"apptainer build {container_path} {docker_image}"
             )
+            build_log_path = logs_dir / f"{data_point['task_id']}.build.log"
             try:
-                await self._run_command(build_cmd, logs_dir / f"{data_point['task_id']}.build.log")
+                await self._run_command(build_cmd, build_log_path)
             except ValueError:
                 raise ValueError(
-                    f"Container build for task {data_point['task_id']} failed.\n"
+                    f"Container build for task {data_point['task_id']} failed. View logs at: {build_log_path}\n"
                     "This may be because Docker is not available on your system. "
                     "If that is the case, you can build Apptainer .sif images elsewhere and use them, e.g. like this:\n"
                     "ns prepare_data terminal-bench --container_formatter /your_mounted_images_folder/{task_id}.sif"
