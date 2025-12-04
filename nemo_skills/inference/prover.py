@@ -13,10 +13,10 @@
 # limitations under the License.
 
 import logging
+import re
 import sys
 from copy import deepcopy
 from dataclasses import asdict, is_dataclass
-from typing import List
 
 import hydra
 
@@ -32,7 +32,13 @@ from nemo_skills.utils import (
 )
 
 from .generate import GenerateSolutionsConfig, GenerationTask
-from .lean4_utils import *
+from .lean4_utils import (
+    extract_code,
+    get_error_str,
+    parse_error,
+    refine_by_sorry,
+    replace_statement_in_proof,
+)
 
 LOG = logging.getLogger(get_logger_name(__file__))
 
@@ -133,7 +139,7 @@ class ProverTask(GenerationTask):
         self.refine_prompt = get_prompt(self.cfg.refinement_prompt_config)
 
     # with adaptive reasoning
-    async def _generate_single_completion(self, prompt: List[str], **kwargs):
+    async def _generate_single_completion(self, prompt: list[str], **kwargs):
         if is_dataclass(self.cfg.inference):
             inference_params = asdict(self.cfg.inference)
         else:
@@ -156,7 +162,9 @@ class ProverTask(GenerationTask):
                 generation_params["extra_body"].get("reasoning_effort", None)
             )
             while len(generation["generation"]) == 0 and reasoning_effort_index > 0:
-                print(f"Reasoning effort is too high, reducing to {reasoning_effort_list[reasoning_effort_index - 1]}")
+                LOG.info(
+                    "Reasoning effort is too high, reducing to %s", reasoning_effort_list[reasoning_effort_index - 1]
+                )
                 reasoning_effort_index = reasoning_effort_index - 1
                 generation_params["extra_body"]["reasoning_effort"] = reasoning_effort_list[reasoning_effort_index]
                 generation = await self.llm.generate_async(**generation_params)
@@ -178,29 +186,32 @@ class ProverTask(GenerationTask):
     async def _transform_for_refinement(self, prompt_turn_list):
         if len(prompt_turn_list) != 3:
             return prompt_turn_list
-        new_conversation = [{'role': 'user', 'content': ''}]
+        new_conversation = [{"role": "user", "content": ""}]
 
-        lean_attempt = prompt_turn_list[1]['content']
+        lean_attempt = prompt_turn_list[1]["content"]
 
-        assert 'Before producing the Lean 4 code to formally prove the given theorem, provide a detailed analysis of the error message.' in prompt_turn_list[2]['content'], prompt_turn_list[2]['content']
+        assert (
+            "Before producing the Lean 4 code to formally prove the given theorem, provide a detailed analysis of the error message."
+            in prompt_turn_list[2]["content"]
+        ), prompt_turn_list[2]["content"]
 
-        new_conversation[0]['content'] = (
-            f'Here is a proof attempt for the following theorem in Lean4.\n\n{lean_attempt}\n\n' +
-            prompt_turn_list[2]['content'].replace(
-                'Before producing the Lean 4 code to formally prove the given theorem, provide a detailed analysis of the error message.',
+        new_conversation[0]["content"] = (
+            f"Here is a proof attempt for the following theorem in Lean4.\n\n{lean_attempt}\n\n"
+            + prompt_turn_list[2]["content"].replace(
+                "Before producing the Lean 4 code to formally prove the given theorem, provide a detailed analysis of the error message.",
                 (
-                    'Your task is to fix this proof. Before producing the Lean 4 code to formally prove '
-                    'the given theorem, do a detailed analysis of the error message. '
-                    'Your final answer must be a single, complete Lean 4 markdown code block containing the '
-                    'completed theorem. Do NOT include any text or explanation before or after the code block. '
-                    'Begin with ```lean4 and end with ```.'
-                )
+                    "Your task is to fix this proof. Before producing the Lean 4 code to formally prove "
+                    "the given theorem, do a detailed analysis of the error message. "
+                    "Your final answer must be a single, complete Lean 4 markdown code block containing the "
+                    "completed theorem. Do NOT include any text or explanation before or after the code block. "
+                    "Begin with ```lean4 and end with ```."
+                ),
             )
         )
 
         return new_conversation
 
-    async def _signle_data_point_generate(self, data_point, data):
+    async def _single_data_point_generate(self, data_point, data):
         formal_statement = (
             (data_point["header"].strip() + "\n")
             + data_point["informal_prefix"].strip()
@@ -212,12 +223,12 @@ class ProverTask(GenerationTask):
         full_prompt_turn_list = deepcopy(
             prompt_turn_list
         )  # We need to get a full copy of the prompt turn list for the final result in case remove_cot is enabled. This is only used to generate SFT data.
-        promt_turn_list_list = []  # We need to store the prompt turn list for each turn for the final result in case delete_wrong_turns is enabled. This is only used to generate SFT data.
+        prompt_turn_list_list = []  # We need to store the prompt turn list for each turn for the final result in case delete_wrong_turns is enabled. This is only used to generate SFT data.
         base_prompt_turn_list = deepcopy(prompt_turn_list)
 
         code_list = []
         results_dict_list = []
-        assert type(prompt_turn_list) == list, "prompt_turn_list should be a list"
+        assert isinstance(prompt_turn_list, list), "prompt_turn_list should be a list"
 
         success = False
         turn_idx = 0
@@ -249,7 +260,7 @@ class ProverTask(GenerationTask):
             new_prompt_turn_list = deepcopy(prompt_turn_list)
             new_prompt_turn_list += [{"role": "assistant", "content": generation["generation"]}]
 
-            promt_turn_list_list.append(
+            prompt_turn_list_list.append(
                 new_prompt_turn_list
             )  # This stores the latest turn list after each generation.
 
@@ -369,7 +380,7 @@ class ProverTask(GenerationTask):
         if len(results_dict_list) > 0 and results_dict_list[-1]["success"]:
             success = True
 
-        # Usually only need prompt_turn_list for standard SFT, full_prompt_turn_list for SFT with remove_cot enabled, promt_turn_list_list for SFT with delete_wrong_turns enabled.
+        # Usually only need prompt_turn_list for standard SFT, full_prompt_turn_list for SFT with remove_cot enabled, prompt_turn_list_list for SFT with delete_wrong_turns enabled.
         return {
             "code_list": code_list,
             "results_dict_list": results_dict_list,
@@ -377,7 +388,7 @@ class ProverTask(GenerationTask):
             "turn_idx": turn_idx,
             "success": success,
             "full_prompt_turn_list": full_prompt_turn_list,
-            "promt_turn_list_list": promt_turn_list_list,
+            "prompt_turn_list_list": prompt_turn_list_list,
         }
 
     async def pass_at_N(self, data_point, data, N=None):
@@ -385,10 +396,8 @@ class ProverTask(GenerationTask):
             N = self.cfg.n_pass
 
         new_results_dict = {"success": False}
-        # results_dict_list = []
         for i in range(N):
-            results_dict = await self._signle_data_point_generate(data_point, data)
-            # results_dict_list.append(results_dict)
+            results_dict = await self._single_data_point_generate(data_point, data)
 
             if results_dict["success"]:
                 new_results_dict["success"] = True
