@@ -222,9 +222,10 @@ def get_benchmark_args_from_module(
         LOG.info(f"{benchmark} requires extra docker privileges, setting NEMO_SKILLS_PRIVILEGED_DOCKER=1")
         os.environ["NEMO_SKILLS_PRIVILEGED_DOCKER"] = "1"
 
-        # terminal-bench runs docker itself inside docker, which requires mounting the docker socket from the host machine
+        # terminal-bench runs docker inside docker to build images on-the-fly,
+        # which requires mounting the docker binary & socket from the host machine
         if benchmark == "terminal-bench":
-            os.environ["NEMO_SKILLS_MOUNT_DOCKER_SOCKET"] = "1"
+            os.environ["NEMO_SKILLS_MOUNT_HOST_DOCKER"] = "1"
 
     eval_args += f" ++split={split} "
 

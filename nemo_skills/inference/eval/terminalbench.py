@@ -185,13 +185,12 @@ class TerminalBenchGenerationTask(GenerationTask):
             # Build image on the fly
             container_path = f"{data_point['task_id']}.sif"
             build_cmd = (
+                # activate terminal-bench environment
                 f"cd {TB_REPO_PATH} && "
                 f"source .venv/bin/activate && "
-                # Install Docker
-                f"curl -fsSL https://get.docker.com | sh && "
-                # Build Docker image
+                # build docker image
                 f"tb tasks build --task-id {data_point['task_id']} --tasks-dir nv-internal && "
-                # Convert Docker image to Apptainer image
+                # convert docker image to apptainer image
                 f"apptainer build {container_path} docker-daemon://tb__{data_point['task_id']}__client"
             )
             try:
@@ -208,8 +207,10 @@ class TerminalBenchGenerationTask(GenerationTask):
         #       currently tasks are stored directly inside the repo as subfolders.
         #       will we need datasets that are stored outside of the tb repo we're cloning?
         tb_cmd = (
+            # activate terminal-bench environment
             f"cd {TB_REPO_PATH} && "
             f"source .venv/bin/activate && "
+            # run agent & evaluation
             f"tb run "
             f"    --agent {self.cfg.agent} "
             f"    --model hosted_vllm/{self.cfg.server.model} "
@@ -220,6 +221,7 @@ class TerminalBenchGenerationTask(GenerationTask):
             f"    --image-path {container_path} "
             f"    --output-path runs "
             f"    --run-id {data_point['task_id']} && "
+            # copy results
             f"cp -r runs/{data_point['task_id']} {runs_dir}"
         )
 
