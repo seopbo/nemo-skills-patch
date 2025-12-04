@@ -207,15 +207,14 @@ def get_executor(
             docker_binary = subprocess.check_output("which docker", shell=True, text=True).strip()
             extra_mounts.append(docker_binary + ":" + docker_binary)
 
-            # Get docker compose binary path
-            compose_binary = subprocess.check_output(
-                "docker info -f json | jq -r '.ClientInfo.Plugins[] | select(.Name == \"compose\").Path'",
+            # Get docker plugins binary paths (e.g. compose, buildx)
+            plugin_binaries = subprocess.check_output(
+                "docker info -f json | jq -r .ClientInfo.Plugins[].Path",
                 shell=True,
                 text=True,
-            ).strip()
-            if not compose_binary:
-                raise ValueError("Docker Compose was not found. It is required to run terminal-bench locally.")
-            extra_mounts.append(compose_binary + ":" + compose_binary)
+            )
+            for binary in plugin_binaries.strip().split("\n"):
+                extra_mounts.append(binary + ":" + binary)
 
             # Avoid modifying mounts inplace
             for mount in extra_mounts:
