@@ -55,10 +55,12 @@ class ProverConfig(GenerateSolutionsConfig):
     n_pass: int = 1  # number of passes to run the prover
 
     # Lean 4 specific parameters
-    nemotron_refinement: bool = False  # whether to use nemotron for refinement
+    nemotron_refinement: bool = False  # whether to use single-turn nemotron-style refinement
     refinement: bool = False  # whether to refine the code
     refinement_max_turns: int = 2  # maximum number of turns for refinement
-    refinement_prompt_config: str | None = None  # prompt for refining the code
+    refinement_prompt_config: str | None = None  # prompt for multi-turn refinement feedback
+    # prompt for single-turn nemotron refinement (used when nemotron_refinement=True)
+    nemotron_refinement_prompt_config: str | None = None
     adaptive_reasoning: bool = False  # whether to adapt the reasoning effort
     parse_generation: bool = False  # whether to parse the generation
     remove_cot: bool = False  # whether to remove the cot from the generation
@@ -138,6 +140,12 @@ class ProverTask(GenerationTask):
         )
         self.refine_prompt = get_prompt(self.cfg.refinement_prompt_config)
 
+        if self.cfg.nemotron_refinement:
+            assert self.cfg.nemotron_refinement_prompt_config is not None, (
+                "nemotron_refinement_prompt_config is required when nemotron_refinement is enabled."
+            )
+            self.nemotron_refine_prompt = get_prompt(self.cfg.nemotron_refinement_prompt_config)
+
     # with adaptive reasoning
     async def _generate_single_completion(self, prompt: list[str], **kwargs):
         if is_dataclass(self.cfg.inference):
@@ -177,39 +185,20 @@ class ProverTask(GenerationTask):
             )
         return generation
 
-    # factor out his part so it won't become a bottleneck.
+    # factor out this part so it won't become a bottleneck.
     async def _extract_and_replace_code(self, formal_statement, generation):
         code = extract_code(generation)
         full_code = replace_statement_in_proof(formal_statement, code)
         return code, full_code
 
-    async def _transform_for_refinement(self, prompt_turn_list):
-        if len(prompt_turn_list) != 3:
-            return prompt_turn_list
-        new_conversation = [{"role": "user", "content": ""}]
-
-        lean_attempt = prompt_turn_list[1]["content"]
-
-        assert (
-            "Before producing the Lean 4 code to formally prove the given theorem, provide a detailed analysis of the error message."
-            in prompt_turn_list[2]["content"]
-        ), prompt_turn_list[2]["content"]
-
-        new_conversation[0]["content"] = (
-            f"Here is a proof attempt for the following theorem in Lean4.\n\n{lean_attempt}\n\n"
-            + prompt_turn_list[2]["content"].replace(
-                "Before producing the Lean 4 code to formally prove the given theorem, provide a detailed analysis of the error message.",
-                (
-                    "Your task is to fix this proof. Before producing the Lean 4 code to formally prove "
-                    "the given theorem, do a detailed analysis of the error message. "
-                    "Your final answer must be a single, complete Lean 4 markdown code block containing the "
-                    "completed theorem. Do NOT include any text or explanation before or after the code block. "
-                    "Begin with ```lean4 and end with ```."
-                ),
-            )
+    def _transform_for_nemotron_refinement(self, proof_attempt: str, error_message: str) -> list[dict]:
+        """Transform multi-turn refinement into single-turn nemotron-style prompt."""
+        return self.nemotron_refine_prompt.fill(
+            {
+                "proof_attempt": proof_attempt,
+                "error_message": error_message,
+            }
         )
-
-        return new_conversation
 
     async def _single_data_point_generate(self, data_point, data):
         formal_statement = (
@@ -232,10 +221,12 @@ class ProverTask(GenerationTask):
 
         success = False
         turn_idx = 0
+        last_proof_attempt = None  # Track for nemotron refinement
+        last_error_message = None  # Track for nemotron refinement
         for turn_idx in range(self.cfg.refinement_max_turns):
             results_dict = {}  # everything will be stored in this dict
-            if turn_idx != 0 and self.cfg.nemotron_refinement:
-                prepared_conversation = await self._transform_for_refinement(prompt_turn_list)
+            if turn_idx != 0 and self.cfg.nemotron_refinement and last_proof_attempt and last_error_message:
+                prepared_conversation = self._transform_for_nemotron_refinement(last_proof_attempt, last_error_message)
             else:
                 prepared_conversation = prompt_turn_list
             prefix_tokens = self.llm.tokenizer.apply_chat_template(
@@ -265,6 +256,7 @@ class ProverTask(GenerationTask):
             )  # This stores the latest turn list after each generation.
 
             code, full_code = await self._extract_and_replace_code(formal_statement, generation["generation"])
+            last_proof_attempt = generation["generation"]  # Track for nemotron refinement
             code_list.append(full_code)
             results_dict["code"] = code  # We keep track of the uncleaned code.
             if self.cfg.remove_cot and not (
@@ -310,7 +302,8 @@ class ProverTask(GenerationTask):
                     }
                 results_dict["execution_result"] = execution_result
                 results_dict["success"] = False
-                feedback = self.refine_prompt.fill({"error_message": execution_result["stdout"]})
+                last_error_message = execution_result["stdout"]  # Track for nemotron refinement
+                feedback = self.refine_prompt.fill({"error_message": last_error_message})
                 results_dict["feedback"] = feedback[0]["content"]
             else:
                 execution_result = await self.llm.sandbox.execute_lean4_code(
@@ -339,12 +332,10 @@ class ProverTask(GenerationTask):
                             if len(execution_result["stderr"]) > 1000:
                                 error_message += "... (truncated)"
 
-                        feedback = self.refine_prompt.fill(
-                            {
-                                "error_message": "We use <error></error> to signal the position of the error. \n"
-                                + error_message
-                            }
+                        last_error_message = (
+                            "We use <error></error> to signal the position of the error. \n" + error_message
                         )
+                        feedback = self.refine_prompt.fill({"error_message": last_error_message})
                         results_dict["feedback"] = feedback[0]["content"]
                         results_dict["success"] = False
                 # This is only used for the case when the code execution timed out.
@@ -355,11 +346,10 @@ class ProverTask(GenerationTask):
                         "stdout": execution_result,
                     }
                     results_dict["success"] = False
-                    feedback = self.refine_prompt.fill(
-                        {
-                            "error_message": "The compilation timed out. There might be a heavy computation in the code or an endless loop."
-                        }
+                    last_error_message = (
+                        "The compilation timed out. There might be a heavy computation in the code or an endless loop."
                     )
+                    feedback = self.refine_prompt.fill({"error_message": last_error_message})
                     results_dict["feedback"] = feedback[0]["content"]
                 else:
                     raise ValueError(f"Unknown execution result type: {type(execution_result)}")

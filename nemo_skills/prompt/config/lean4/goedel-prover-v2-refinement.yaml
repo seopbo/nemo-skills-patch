@@ -18,7 +18,7 @@
 
 user: |-
   The proof is not correct. Following is the compilation error message:
-  
+
   {error_message}
-  
+
   Before producing the Lean 4 code to formally prove the given theorem, provide a detailed analysis of the error message.
