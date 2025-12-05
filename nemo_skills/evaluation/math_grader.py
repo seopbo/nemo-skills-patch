@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import glob
 import logging
 import re
 
@@ -22,12 +21,6 @@ from math_verify import LatexExtractionConfig, StringExtractionConfig, parse, ve
 from nemo_skills.utils import get_logger_name
 
 LOG = logging.getLogger(get_logger_name(__file__))
-
-
-def unroll_files(input_files):
-    for manifest_pattern in input_files:
-        for manifest in sorted(glob.glob(manifest_pattern, recursive=True)):
-            yield manifest
 
 
 def _additional_normalization(expr):
@@ -72,17 +65,24 @@ def math_equal(gt_answer, predicted_answer, take_modulo: int | None = None, **kw
     gt_answer = _additional_normalization(gt_answer)
     predicted_answer = _additional_normalization(predicted_answer)
 
-    # Try literal comparison
-    literal_pattern = r"[a-zA-Z ,]+|[0-9 ]+"
     normalized_gt = normalize_latex(gt_answer, NormalizationConfig)
     normalized_pred = normalize_latex(predicted_answer, NormalizationConfig)
-    is_literal = re.fullmatch(literal_pattern, normalized_gt) and re.fullmatch(literal_pattern, normalized_pred)
     is_normalized_equal = normalized_gt.replace(" ", "") == normalized_pred.replace(" ", "")
 
-    if is_literal or is_normalized_equal:
-        return is_normalized_equal
+    # Fast path: if normalized strings are equal, no need for symbolic comparison
+    if is_normalized_equal:
+        return True
 
-    # Fallback to symbolic comparison
+    # For TEXT literals (not numeric), use direct string comparison
+    text_literal_pattern = r"[a-zA-Z ,]+"
+    is_text_literal = re.fullmatch(text_literal_pattern, normalized_gt) and re.fullmatch(
+        text_literal_pattern, normalized_pred
+    )
+    if is_text_literal:
+        return False  # Already checked is_normalized_equal above
+
+    # Fallback to symbolic comparison via math_verify
+    # This handles leading zeros ("016" == "16"), fractions, expressions, etc.
     current_gt_answer = gt_answer
     current_predicted_answer = predicted_answer
 
@@ -99,51 +99,29 @@ def math_equal(gt_answer, predicted_answer, take_modulo: int | None = None, **kw
     return verify(parsed_gt, parsed_pred, **kwargs)
 
 
-def evaluate_result(
-    line_dict: dict,
-    numeric_precision=15,
-    timeout=10,
-    take_modulo=None,
-    use_predicted_answer_key: bool = False,
-    extract_from_boxed: bool = True,
-    extract_regex: str = r"The final answer is (.+)$",
+def extract_answer(
+    string: str, extract_from_boxed: bool = True, extract_regex: str = r"The final answer is (.+)$", relaxed=False
 ):
-    if not line_dict:  # can be empty for incomplete generations
-        return {}
+    """Extract Answer String from \\boxed expression or based on regex
+    If relaxed=True: try both methods, boxed first.
+    If relaxed=False: use only one method based on extract_from_boxed flag.
+    """
+    if relaxed:
+        return search_boxed(string) or search_regex(string, extract_regex)
 
-    if not use_predicted_answer_key:
-        line_dict["predicted_answer"] = extract_answer(
-            line_dict["generation"],
-            extract_from_boxed=extract_from_boxed,
-            extract_regex=extract_regex,
-        )
-    else:
-        if "predicted_answer" not in line_dict:
-            raise ValueError(
-                "predicted_answer key not found in the line_dict. Set use_predicted_answer_key=False to re-extract"
-            )
-
-    gt_answer = line_dict["expected_answer"]
-    predicted_answer = line_dict["predicted_answer"]
-
-    line_dict["symbolic_correct"] = math_equal(
-        gt_answer,
-        predicted_answer,
-        take_modulo=take_modulo,
-        numeric_precision=numeric_precision,
-        timeout_seconds=timeout,
-    )
-    return line_dict
+    if extract_from_boxed:
+        return search_boxed(string)
+    return search_regex(string, extract_regex)
 
 
-def extract_answer(string: str, extract_from_boxed: bool = True, extract_regex: str = r"The final answer is (.+)$"):
-    """Extract Answer String from \\boxed expression or based on regex"""
-    if not extract_from_boxed:
-        match = re.search(extract_regex, string)
-        if match:
-            return match.group(1)
-        return None
+def search_regex(string: str, regex: str):
+    match = re.findall(regex, string)
+    if match:
+        return match[-1]
+    return None
 
+
+def search_boxed(string: str):
     if "\\boxed" not in string:
         return None
 

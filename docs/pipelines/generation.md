@@ -95,6 +95,11 @@ See [nemo_skills/inference/generate.py](https://github.com/NVIDIA-NeMo/Skills/bl
     Before running the generation we always print the first prompt that we are about to send to an LLM.
     It's a good idea to inspect that and make sure it's formatted properly.
 
+!!! tip "Passing Main Arguments with Config Files"
+
+    For parameters that are difficult to escape on the command line (like `end_reasoning_string='</think>'`),
+    you can use YAML config files instead. See [Passing Main Arguments with Config Files](index.md###passing-main-arguments-with-config-files) for details.
+
 
 ## Sampling multiple generations
 
@@ -108,7 +113,7 @@ as an example.
 First, let's prepare the data if you have not done so yet.
 
 ```bash
-ns prepare_data math
+ns prepare_data hendrycks_math
 ```
 
 Then we can run the generation
@@ -122,8 +127,8 @@ ns generate \
        --server_nodes=2 \
        --num_random_seeds=32 \
        --output_dir=/workspace/synthetic-math-solutions \
-       --eval_args="++eval_type=math" \
        --input_file=/nemo_run/code/nemo_skills/dataset/math/train.jsonl \
+       ++eval_type=hendrycks_math \
        ++prompt_config=generic/math-base \
        ++examples_type=math_text_detailed \
        ++inference.endpoint_type=text \
@@ -133,13 +138,13 @@ ns generate \
 
 In this case we are assuming you're running on a slurm cluster and have downloaded Llama 3.1 405B.
 
-Note that in this case we use a path to one the train set of the "math" dataset which we prepared with previous command.
+Note that in this case we use a path to one the train set of the "hendrycks_math" dataset which we prepared with previous command.
 We are using a [generic/math](https://github.com/NVIDIA-NeMo/Skills/blob/main/nemo_skills/prompt/config/generic/math.yaml) config
 and a tokenizer for the base model
 (we found Llama 3.1 follows few-shots much better without chat tokens).
 Finally, we are specifying few shot examples which come from
 [here](https://github.com/NVIDIA-NeMo/Skills/blob/main/nemo_skills/prompt/few_shot_examples/math.py)
-and asking the script to evaluate the generated solutions by providing `--eval_args`.
+and asking the script to evaluate the generated solutions by providing `++eval_type=math`.
 
 An example prompt (printed by the generate script) for that job is below.
 
@@ -383,7 +388,7 @@ We support three methods for automatic trimming of generation budget or context:
         tokenizer="Qwen/Qwen3-0.6B",
     )
 
-    input_prompt = prompt.fill({"problem": "What's 2 + 2?"})
+    input_prompt = prompt.fill({"problem": "What's 2 + 2?"}, format_as_string=True)
     llm = get_model(
         model="Qwen/Qwen3-0.6B",
         server_type="vllm",
@@ -415,7 +420,7 @@ We support three methods for automatic trimming of generation budget or context:
 
     # Construct a fake long prompt
     fake_long_prompt = "aa" * 500_000 + "bb" * 500_000
-    input_prompt = prompt.fill({"problem": "What's the next character after " + fake_long_prompt})
+    input_prompt = prompt.fill({"problem": "What's the next character after " + fake_long_prompt}, format_as_string=True)
     llm = get_model(
         model="Qwen/Qwen3-0.6B",
         server_type="vllm",
@@ -448,7 +453,7 @@ We support three methods for automatic trimming of generation budget or context:
 
     # Construct a fake long prompt
     fake_long_prompt = "aa" * 500_000 + "bb" * 500_000
-    input_prompt = prompt.fill({"problem": "What's the next character after " + fake_long_prompt})
+    input_prompt = prompt.fill({"problem": "What's the next character after " + fake_long_prompt}, format_as_string=True)
     llm = get_model(
         model="Qwen/Qwen3-0.6B",
         server_type="vllm",
@@ -465,3 +470,5 @@ We support three methods for automatic trimming of generation budget or context:
         ++server.enable_soft_fail=True
         ++server.context_limit_retry_strategy=reduce_prompt_from_end
     ```
+
+
