@@ -592,6 +592,10 @@ class GenerationTask:
 
     def drop_binary_data(self, output):
         """Remove binary data (like base64 audio) from messages to keep output files smaller."""
+        # Skip if output doesn't have messages (e.g., text completion mode or error cases)
+        if "messages" not in output:
+            return
+
         for message in output["messages"]:
             # Skip if content is not a list (e.g., string content in system messages)
             if not isinstance(message.get("content"), list):
