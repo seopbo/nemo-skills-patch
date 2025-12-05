@@ -38,8 +38,8 @@ def mock_generation_task():
 
 def test_audio_file_to_base64(mock_generation_task):
     """Test basic audio file encoding to base64."""
-    with tempfile.NamedTemporaryFile(mode='wb', suffix='.wav', delete=False) as f:
-        test_content = b'RIFF' + b'\x00' * 100
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".wav", delete=False) as f:
+        test_content = b"RIFF" + b"\x00" * 100
         f.write(test_content)
         temp_path = f.name
 
@@ -60,8 +60,8 @@ def test_convert_audio_to_base64_with_audio(mock_generation_task, tmp_path):
     """
     audio_path = tmp_path / "audio" / "test.wav"
     audio_path.parent.mkdir(exist_ok=True)
-    with open(audio_path, 'wb') as f:
-        f.write(b'RIFF' + b'\x00' * 100)
+    with open(audio_path, "wb") as f:
+        f.write(b"RIFF" + b"\x00" * 100)
 
     message = {"role": "user", "content": "Describe this audio", "audio": {"path": str(audio_path)}}
 
