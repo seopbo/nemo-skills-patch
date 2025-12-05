@@ -13,6 +13,7 @@
 # limitations under the License.
 
 import asyncio
+import base64
 import json
 import logging
 import random
@@ -185,6 +186,9 @@ class GenerateSolutionsConfig:
 
     # If True, will enable litellm disk cache (useful for keeping intermediate results in case of job timelimit failures)
     enable_litellm_cache: bool = False
+
+    # List of content types to drop from messages (e.g., base64 audio) to keep output files smaller
+    drop_content_types: list[str] = field(default_factory=lambda: ["audio_url"])
 
     # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
     eval_type: str | None = None  # "lean4-proof", "math", etc.
@@ -380,10 +384,6 @@ class GenerationTask:
     def setup_llm(self):
         self.sandbox = get_sandbox(**self.cfg.sandbox) if self.cfg.sandbox is not None else None
 
-        self.data_dir = None
-        if "data_dir" in self.cfg.eval_config and not isinstance(self.cfg.eval_config.get("data_dir"), type(None)):
-            self.data_dir = self.cfg.eval_config["data_dir"]
-
         if self.cfg.code_execution:
             llm = get_code_execution_model(**self.cfg.server, tokenizer=self.tokenizer, sandbox=self.sandbox)
         elif self.cfg.tool_modules is not None:
@@ -525,6 +525,67 @@ class GenerationTask:
                 filled_prompt += self.cfg.prompt_suffix
         return filled_prompt
 
+    def preprocess_prompt(self, prompt: str | list[dict]) -> str | list[dict]:
+        """Preprocess the prompt before sending to the model.
+
+        Override this method to add custom preprocessing logic.
+        By default, auto-detects and handles audio file path to base64 conversion.
+        """
+        if not isinstance(prompt, list):
+            return prompt
+
+        # Auto-detect and convert audio file paths to base64
+        prompt = [self._convert_audio_to_base64(message) for message in prompt]
+
+        return prompt
+
+    def _audio_file_to_base64(self, audio_file_path: str) -> str:
+        """Encodes an audio file into a base64 string."""
+        with open(audio_file_path, "rb") as audio_file:
+            audio_content = audio_file.read()
+            return base64.b64encode(audio_content).decode("utf-8")
+
+    def _convert_audio_to_base64(self, message: dict) -> dict:
+        """Convert audio file paths in a message to base64 inline content.
+
+        Looks for 'audio' or 'audios' keys in the message and converts them
+        to base64-encoded audio_url content items. Removes the original keys
+        after conversion to prevent double-processing by model-specific code.
+
+        CRITICAL: Audio must come BEFORE text for Qwen Audio to transcribe correctly.
+        """
+        if "audio" not in message and "audios" not in message:
+            return message
+
+        audio_items = []
+
+        # Handle single audio
+        if "audio" in message:
+            audio = message.pop("audio")
+            base64_audio = self._audio_file_to_base64(audio["path"])
+            audio_items.append({"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}})
+
+        # Handle multiple audios
+        if "audios" in message:
+            for audio in message.pop("audios"):
+                base64_audio = self._audio_file_to_base64(audio["path"])
+                audio_items.append(
+                    {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
+                )
+
+        # Convert existing content to list format and place AFTER audio
+        content = message.get("content", "")
+        if isinstance(content, str):
+            text_items = [{"type": "text", "text": content}] if content else []
+        elif isinstance(content, list):
+            text_items = content
+        else:
+            raise TypeError(f"Unsupported content type: {type(content)}")
+
+        message["content"] = audio_items + text_items
+
+        return message
+
     def dump_outputs(self, outputs, data_points, fout):
         for output in outputs:
             fout.write(json.dumps(output) + "\n")
@@ -536,8 +597,10 @@ class GenerationTask:
             if not isinstance(message.get("content"), list):
                 continue
 
-            # Filter out audio_url items from list-style content
-            message["content"] = [content for content in message["content"] if content.get("type") != "audio_url"]
+            # Filter out content types specified in drop_content_types config
+            message["content"] = [
+                content for content in message["content"] if content.get("type") not in self.cfg.drop_content_types
+            ]
 
     async def postprocess_single_output(self, output, original_data_point):
         # to make it easier to follow up with other generations and limit accidental errors, we are adding
@@ -587,10 +650,13 @@ class GenerationTask:
             # Already a dict from Hydra
             inference_params = dict(self.cfg.inference)
 
+        prompt = self.fill_prompt(data_point, all_data)
+        prompt = self.preprocess_prompt(prompt)
+
         generation_params = {
             **inference_params,
             **self.extra_generate_params,
-            "prompt": self.fill_prompt(data_point, all_data),
+            "prompt": prompt,
             "stop_phrases": [self.cfg.stop_phrase] if self.cfg.stop_phrase else None,
         }
 
