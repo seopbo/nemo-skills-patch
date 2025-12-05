@@ -83,9 +83,14 @@ class TerminalBenchGenerationConfig:
     dry_run: bool = False
 
     # if True, will move full generation to _full_generation key and keep cfg.generation_key without thinking tokens
-    remove_thinking: bool = False
-    thinking_begin: str = "<think>"
-    thinking_end: str = "</think>"
+    parse_reasoning: bool = False
+    end_reasoning_string: str = "</think>"
+
+    # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
+    eval_type: str | None = None  # "lean4-proof", "math", etc.
+    eval_config: dict = field(default_factory=dict)  # Config for the evaluator
+
+    wait_for_sandbox: bool = False  # sandbox isn't used in this module
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
@@ -108,6 +113,15 @@ class TerminalBenchGenerationTask(GenerationTask):
 
         # needs to skip completed samples, not used otherwise
         self.cfg.prompt_format = "ns"
+
+        if self.cfg.eval_type is not None:
+            raise ValueError(
+                "Terminal-Bench generation task does not support eval_type parameter. Evaluation is done automatically."
+            )
+
+        self.should_run_evaluation = False
+        self.evaluator = None
+        self._reasoning_warning_shown = False
 
         # set up output folder,
         # making sure it is different for each random seed if we're running with --benchmarks=terminal-bench:N
