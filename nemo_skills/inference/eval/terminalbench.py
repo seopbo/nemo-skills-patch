@@ -200,6 +200,10 @@ class TerminalBenchGenerationTask(GenerationTask):
             container_path = data_point["container_formatter"].format(task_id=data_point["task_id"])
         else:
             # Build image on the fly
+            LOG.info(
+                f"container_formatter not specified for task {data_point['task_id']}. "
+                "Attempting to build the container on the fly."
+            )
             container_path = f"{data_point['task_id']}.sif"
             docker_image = f"docker-daemon://tb__{data_point['task_id'].replace('.', '-')}__client"
             build_cmd = (
