@@ -104,7 +104,8 @@ if __name__ == "__main__":
         help="Container formatter string. "
         "If not specified, containers will be built on the fly before running evaluation. This requires Docker. "
         "You can build .sif containers and store them in a mounted directory "
-        "which you can reference here to avoid rebuilding all the time.",
+        "which you can reference here to avoid rebuilding all the time. Example: "
+        "ns prepare_data terminal-bench --container_formatter /your_mounted_images_folder/{task_id}.sif",
     )
     parser.add_argument(
         "--setup", type=str, default="default", help="Setup name (used as nemo-skills split parameter)."
