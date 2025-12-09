@@ -12,16 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from nemo_skills.version import __version__
-
-# only used in ns setup command to initialize with defaults
-_containers = {
-    "trtllm": "nvcr.io/nvidia/tensorrt-llm/release:1.0.0",
-    "vllm": "dockerfile:dockerfiles/Dockerfile.vllm",
-    "sglang": "lmsysorg/sglang:v0.5.4",
-    "megatron": "dockerfile:dockerfiles/Dockerfile.megatron",
-    "sandbox": "dockerfile:dockerfiles/Dockerfile.sandbox",
-    "nemo-skills": "dockerfile:dockerfiles/Dockerfile.nemo-skills",
-    "verl": "dockerfile:dockerfiles/Dockerfile.verl",
-    "nemo-rl": "dockerfile:dockerfiles/Dockerfile.nemo-rl",
-}
+# settings that define how evaluation should be done by default (all can be changed from cmdline)
+DATASET_GROUP = "math"
+METRICS_TYPE = "math"
+GENERATION_ARGS = "++prompt_config=generic/math ++eval_type=math"

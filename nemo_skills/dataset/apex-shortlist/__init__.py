@@ -12,9 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# settings that define how evaluation should be done by default (all can be changed from cmdline)
 DATASET_GROUP = "math"
-METRICS_TYPE = "answer-judgement"
-GENERATION_ARGS = "++prompt_config=judge/math-proof-judge ++generation_key=judgement"
-
-# This is a judge-only dataset (judges proofs directly)
-JUDGE_PIPELINE_ARGS = {}
+METRICS_TYPE = "math"
+GENERATION_ARGS = "++prompt_config=generic/math ++eval_type=math"

@@ -182,6 +182,109 @@ class SweBenchGenerationTask(GenerationTask):
 
         self.should_run_evaluation = False
         self.evaluator = None
+        self._reasoning_warning_shown = False
+
+        # Set up output folder,
+        # making sure it is different for each random seed if we're running with --benchmarks=swe-bench:N
+        # to avoid overwriting files.
+
+        self.output_dir = Path(self.cfg.output_file).parent
+        if self.cfg.inference.random_seed is not None:
+            self.output_dir = self.output_dir / f"rs{self.cfg.inference.random_seed}"
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Install SWE-agent/OpenHands and the SWE-bench evaluation harness. Here's how it works:
+        #
+        # 1. This code installs SWE-agent/OpenHands and the eval harness in the Nemo-Skills container.
+        #    All required files, venvs and dependencies are stored in /root.
+        # 2. When we start SWE-bench containers via Apptainer, we mount /root to /root_mount.
+        # 3. Inside of the child containers, we copy the required files from /root_mount to /root and run from there.
+        #
+        # The goal is to run inference & evaluation inside of the SWE-bench containers,
+        # but avoid having to download & install everything in each container separately.
+
+        setup_commands = []
+
+        # Install uv.
+        setup_commands.append(
+            # install uv
+            "curl -Lf https://astral.sh/uv/install.sh | sh && "
+            "source /root/.local/bin/env && "
+            # tell uv to store its data in /root/uv
+            "export UV_PYTHON_INSTALL_DIR=/root/uv/python && "
+            "export UV_TOOL_DIR=/root/uv/tool && "
+            "export UV_TOOL_BIN_DIR=/root/uv/tool-bin"
+        )
+
+        # Install SWE-agent/OpenHands.
+        if self.cfg.agent_framework == SupportedAgentFrameworks.swe_agent:
+            if self.cfg.agent_framework_repo is None:
+                self.cfg.agent_framework_repo = "https://github.com/SWE-agent/SWE-agent.git"
+            setup_commands.append(
+                # clone the swe-agent repo
+                "rm -rf /root/SWE-agent && "
+                f"git clone {self.cfg.agent_framework_repo} /root/SWE-agent && "
+                "cd /root/SWE-agent && "
+                f"git checkout {self.cfg.agent_framework_commit} && "
+                # make venv & install swe-agent dependencies
+                "uv venv --python 3.12 --managed-python venv && "
+                "source venv/bin/activate && "
+                "uv pip install -e ."
+            )
+        elif self.cfg.agent_framework == SupportedAgentFrameworks.openhands:
+            if self.cfg.agent_framework_repo is None:
+                self.cfg.agent_framework_repo = "https://github.com/OpenHands/OpenHands.git"
+            setup_commands.append(
+                # install python 3.12 with uv
+                "uv python install 3.12 && "
+                # install poetry in an isolated environment
+                "uv tool install poetry && "
+                # add dir with poetry executable to PATH
+                "export PATH=/root/uv/tool-bin:$PATH && "
+                # download tmux as appimage
+                "mkdir -p /root/tmux && "
+                "curl -Lf https://github.com/nelsonenzo/tmux-appimage/releases/download/3.5a/tmux.appimage -o /root/tmux/tmux && "
+                "chmod 777 /root/tmux/tmux && "
+                # download jq
+                "mkdir -p /root/jq && "
+                "curl -Lf https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-linux-amd64 -o /root/jq/jq && "
+                "chmod 777 /root/jq/jq && "
+                # clone the openhands repo
+                "rm -rf /root/OpenHands && "
+                f"git clone {self.cfg.agent_framework_repo} /root/OpenHands && "
+                "cd /root/OpenHands && "
+                f"git checkout {self.cfg.agent_framework_commit} && "
+                # skip installing playwright, it is only needed for browsing features
+                "export INSTALL_PLAYWRIGHT=0 && "
+                # tell poetry to store venvs inside of the project folder (/root/OpenHands)
+                "export POETRY_VIRTUALENVS_IN_PROJECT=true && "
+                # this will make a venv using poetry & install openhands dependencies
+                # we no longer use 'make build' because it installs lots of unnecessary dependencies, e.g. frontend
+                "make install-python-dependencies && "
+                "poetry run python -m pip install datasets"
+            )
+        else:
+            raise ValueError(
+                f"Unsupported agent framework: {self.cfg.agent_framework}. "
+                f"Supported frameworks: {', '.join(SupportedAgentFrameworks)}."
+            )
+
+        # Install the SWE-bench evaluation harness.
+        setup_commands.append(
+            # clone the swe-bench repo
+            "rm -rf /root/SWE-bench && "
+            f"git clone {self.cfg.eval_harness_repo} /root/SWE-bench && "
+            "cd /root/SWE-bench && "
+            f"git checkout {self.cfg.eval_harness_commit} && "
+            # make venv & install swe-bench dependencies
+            "uv venv --python 3.12 --managed-python venv && "
+            "source venv/bin/activate && "
+            "uv pip install -e ."
+        )
+
+        # Run all commands with retries and timeout
+        combined_setup_command = " && ".join(setup_commands)
+        asyncio.run(self._execute_local_command(combined_setup_command, timeout=self.cfg.setup_timeout))
 
     def log_example_prompt(self, data):
         return
