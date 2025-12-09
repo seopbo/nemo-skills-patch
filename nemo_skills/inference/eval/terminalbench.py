@@ -97,6 +97,36 @@ cs = hydra.core.config_store.ConfigStore.instance()
 cs.store(name="base_terminalbench_generation_config", node=TerminalBenchGenerationConfig)
 
 
+def get_setup_cmd(tb_repo, tb_commit):
+    return (
+        # clone terminal-bench repo
+        f"git clone {tb_repo} {TB_REPO_PATH} && "
+        f"cd {TB_REPO_PATH} && "
+        f"git checkout {tb_commit} && "
+        # set up virtual environment with uv
+        "curl -LsSf https://astral.sh/uv/install.sh | sh && "
+        "source /root/.local/bin/env && "
+        "uv venv && "
+        "source .venv/bin/activate && "
+        "uv pip install -e . && "
+        # fix errors when running apptainer with --fakeroot
+        "apptainer config fakeroot --add root"
+    )
+
+
+def get_build_cmd(task_id, task_dir, sif_path):
+    docker_image = f"docker-daemon://tb__{task_id.replace('.', '-')}__client"
+    return (
+        # activate terminal-bench environment
+        f"cd {TB_REPO_PATH} && "
+        f"source .venv/bin/activate && "
+        # build docker image
+        f"tb tasks build --task-id {task_id} --tasks-dir {task_dir} && "
+        # convert docker image to apptainer image
+        f"apptainer build {sif_path} {docker_image}"
+    )
+
+
 class TerminalBenchGenerationTask(GenerationTask):
     def __init__(self, cfg: TerminalBenchGenerationConfig):
         self.cfg = cfg
@@ -131,20 +161,7 @@ class TerminalBenchGenerationTask(GenerationTask):
             self.output_dir = self.output_dir / f"rs{self.cfg.inference.random_seed}"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-        setup_cmd = (
-            # clone terminal-bench repo
-            f"git clone {self.cfg.tb_repo} {TB_REPO_PATH} && "
-            f"cd {TB_REPO_PATH} && "
-            f"git checkout {self.cfg.tb_commit} && "
-            # set up virtual environment with uv
-            "curl -LsSf https://astral.sh/uv/install.sh | sh && "
-            "source /root/.local/bin/env && "
-            "uv venv && "
-            "source .venv/bin/activate && "
-            "uv pip install -e . && "
-            # fix errors when running apptainer with --fakeroot
-            "apptainer config fakeroot --add root"
-        )
+        setup_cmd = get_setup_cmd(self.cfg.tb_repo, self.cfg.tb_commit)
         asyncio.run(self._run_command(setup_cmd, self.output_dir / "setup.log"))
 
     def log_example_prompt(self, data):
@@ -205,16 +222,7 @@ class TerminalBenchGenerationTask(GenerationTask):
                 "Attempting to build the container on the fly."
             )
             container_path = f"{data_point['task_id']}.sif"
-            docker_image = f"docker-daemon://tb__{data_point['task_id'].replace('.', '-')}__client"
-            build_cmd = (
-                # activate terminal-bench environment
-                f"cd {TB_REPO_PATH} && "
-                f"source .venv/bin/activate && "
-                # build docker image
-                f"tb tasks build --task-id {data_point['task_id']} --tasks-dir nv-internal && "
-                # convert docker image to apptainer image
-                f"apptainer build {container_path} {docker_image}"
-            )
+            build_cmd = get_build_cmd(data_point["task_id"], data_point["task_dir"], container_path)
             build_log_path = logs_dir / f"{data_point['task_id']}.build.log"
             try:
                 await self._run_command(build_cmd, build_log_path)
@@ -238,7 +246,7 @@ class TerminalBenchGenerationTask(GenerationTask):
             f"    --agent {self.cfg.agent} "
             f"    --model hosted_vllm/{self.cfg.server.model} "
             f"    --agent-kwarg api_base={api_base} "
-            f"    --dataset-path nv-internal "
+            f"    --dataset-path {data_point['task_dir']}"
             f"    --task-id {data_point['task_id']} "
             f"    --backend singularity "
             f"    --image-path {container_path} "

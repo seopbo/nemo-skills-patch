@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# TODO: make actual prepare script
-
 import argparse
 import json
 from pathlib import Path
@@ -115,5 +113,9 @@ if __name__ == "__main__":
     output_file = Path(__file__).parent / f"{args.setup}.jsonl"
     with open(output_file, "w") as fout:
         for task in NV_INTERNAL_TASKS:
-            row = {"task_id": task, "container_formatter": args.container_formatter}
+            row = {
+                "task_id": task,
+                "task_dir": "nv-internal",
+                "container_formatter": args.container_formatter,
+            }
             print(json.dumps(row), file=fout)
