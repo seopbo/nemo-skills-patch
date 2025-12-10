@@ -26,7 +26,8 @@ from typing import Dict
 from urllib.error import URLError
 
 from nemo_skills.evaluation.math_grader import extract_answer
-from nemo_skills.pipeline.utils import cluster_download_file, get_unmounted_path
+from nemo_skills.pipeline.utils import cluster_download_file, get_unmounted_path, is_mounted_filepath
+from nemo_skills.pipeline.utils.packager import get_registered_external_repo
 
 
 @contextlib.contextmanager
@@ -88,9 +89,26 @@ def _get_dataset_module_from_cluster(cluster_config, mounted_path):
 
 
 def get_default_dataset_module(dataset, data_dir=None, cluster_config=None):
+    """
+    Resolve and import the specified dataset module and determine its data path and whether it was loaded from a cluster location.
+    
+    Parameters:
+        dataset (str): Dataset import name or package path (e.g., "my_dataset" or "package.subpkg").
+        data_dir (str | None): Optional filesystem path to the dataset. When provided, the function will prefer loading the module from this path; when None, it resolves the default nemo_skills dataset location.
+        cluster_config (dict | None): Optional cluster configuration that influences path resolution and loading strategy (e.g., executor type, mounted path handling).
+    
+    Returns:
+        tuple: A 3-tuple (dataset_module, data_path, is_on_cluster) where
+            - dataset_module: the imported Python module for the dataset,
+            - data_path (str): the filesystem path used for the dataset (either resolved default or the provided data_dir),
+            - is_on_cluster (bool): `True` if the module was loaded from a cluster-mounted location, `False` otherwise.
+    """
     is_on_cluster = False
     if data_dir is None:
-        data_path = "/nemo_run/code/nemo_skills/dataset"
+        if is_mounted_filepath(cluster_config, data_dir) or cluster_config["executor"] == "none":
+            data_path = str(get_registered_external_repo("nemo_skills").path / "dataset")
+        else:
+            data_path = "/nemo_run/code/nemo_skills/dataset"
         dataset_module = importlib.import_module(f"nemo_skills.dataset.{dataset}")
     else:
         data_path = data_dir

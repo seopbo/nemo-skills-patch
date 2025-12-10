@@ -87,11 +87,31 @@ def get_benchmark_args_from_module(
     benchmark_group=None,
     override_dict=None,
 ):
+    """
+    Constructs a BenchmarkArgs instance for a single benchmark module by resolving input paths, generation/judge settings, sandbox requirements, and related metadata.
+    
+    Parameters:
+        benchmark_module: The imported benchmark module or object containing dataset and configuration attributes.
+        benchmark: Dot-separated benchmark identifier (e.g., "my.benchmark") used to build dataset paths and names.
+        split: Dataset split to use (e.g., "test"); if None, the module's EVAL_SPLIT or "test" is used.
+        cluster_config: Cluster/executor configuration mapping used to determine mounted paths and executor behavior.
+        data_path: Base path (mounted or local) where benchmark datasets are stored.
+        is_on_cluster: True when running on-cluster (use mounted paths); False when running locally (may use unmounted/local paths).
+        eval_requires_judge: If True, forces evaluation to reserve judged-output handling (affects eval_subfolder).
+        benchmark_group: Optional group name to include in the evaluation subfolder.
+        override_dict: Optional dictionary of values that override attributes on the benchmark_module.
+    
+    Returns:
+        BenchmarkArgs: Populated dataclass containing resolved input_file, generation arguments, judge settings, sandbox flags, sampling/chunk counts, eval_subfolder, and any sandbox environment overrides.
+    
+    Raises:
+        ValueError: If the resolved dataset file does not exist on the cluster or locally.
+    """
     if split is None:
         split = get_arg_from_module_or_dict(benchmark_module, "EVAL_SPLIT", "test", override_dict)
 
     if not is_on_cluster:
-        if pipeline_utils.is_mounted_filepath(cluster_config, data_path):
+        if pipeline_utils.is_mounted_filepath(cluster_config, data_path) or cluster_config["executor"] == "none":
             input_file = f"{data_path}/{benchmark.replace('.', '/')}/{split}.jsonl"
             unmounted_input_file = pipeline_utils.get_unmounted_path(cluster_config, input_file)
             unmounted_path = str(Path(__file__).parents[3] / unmounted_input_file.replace("/nemo_run/code/", ""))
