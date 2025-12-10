@@ -48,7 +48,7 @@ def build(task_id, task_dir, output_dir):
         # Build image
         print(f"Building {task_id}...")
         cmd = get_build_cmd(task_id, task_dir, sif_path)
-        result = subprocess.run(f"/bin/bash -c {shlex.quote(cmd)}", capture_output=True, text=True)
+        result = subprocess.run(f"/bin/bash -c {shlex.quote(cmd)}", shell=True, capture_output=True, text=True)
 
         if result.returncode == 0:
             print(f"✓ {task_id} -> {sif_path}")
@@ -103,7 +103,7 @@ def main():
     print(f"Setting up Terminal-Bench repo from {tb_repo}, commit: {tb_commit}")
     cmd = get_setup_cmd(tb_repo, tb_commit)
     try:
-        result = subprocess.run(f"/bin/bash -c {shlex.quote(cmd)}", shell=True)
+        result = subprocess.run(f"/bin/bash -c {shlex.quote(cmd)}", shell=True, capture_output=True, text=True)
         if result.returncode != 0:
             print("✗ Failed to set up terminal-bench repo")
             print(f"  Error: {result.stderr.strip()}")
