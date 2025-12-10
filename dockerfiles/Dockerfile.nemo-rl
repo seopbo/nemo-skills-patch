@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1
 # copied and edited from https://github.com/NVIDIA/NeMo-RL/blob/main/docker/Dockerfile
 # TODO: from next update try to re-use their dockerfile as is as they support specifying the commit
 
@@ -5,8 +6,8 @@ ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:25.05-cuda12.9-devel-ubuntu24.04
 
 FROM scratch AS nemo-rl
 
-ARG NRL_GIT_REF=main
-ADD --keep-git-dir=true https://github.com/NVIDIA-NeMo/RL.git#${NRL_GIT_REF} /
+ARG NEMO_RL_COMMIT=${NEMO_RL_COMMIT:-09476838c92c27a7488afbe6febb6339d3d79be9}
+ADD --keep-git-dir=true https://github.com/NVIDIA-NeMo/RL.git#${NEMO_RL_COMMIT} /
 
 
 FROM ${BASE_IMAGE} AS base
@@ -111,12 +112,10 @@ WORKDIR /opt/NeMo-RL
 
 FROM hermetic AS release
 
-ARG NEMO_RL_COMMIT
 ARG NVIDIA_BUILD_ID
 ARG NVIDIA_BUILD_REF
 ARG RC_DATE=00.00
 ARG TARGETARCH
-ENV NEMO_RL_COMMIT=${NEMO_RL_COMMIT:-09476838c92c27a7488afbe6febb6339d3d79be9}
 ENV NVIDIA_BUILD_ID=${NVIDIA_BUILD_ID:-<unknown>}
 ENV NVIDIA_BUILD_REF=${NVIDIA_BUILD_REF:-<unknown>}
 LABEL com.nvidia.build.id="${NVIDIA_BUILD_ID}"
