@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import asyncio
-import base64
 import json
 import logging
+import os
 import random
 import shutil
 import subprocess
@@ -189,6 +189,11 @@ class GenerateSolutionsConfig:
 
     # List of content types to drop from messages (e.g., base64 audio) to keep output files smaller
     drop_content_types: list[str] = field(default_factory=lambda: ["audio_url"])
+
+    # Audio chunking configuration
+    enable_audio_chunking: bool = True
+    audio_chunk_task_types: list[str] | None = None  # If None, chunk all task types; if specified, only chunk these
+    chunk_audio_threshold_sec: int = 30  # Duration in seconds for each audio chunk
 
     # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
     eval_type: str | None = None  # "lean4-proof", "math", etc.
@@ -384,6 +389,21 @@ class GenerationTask:
     def setup_llm(self):
         self.sandbox = get_sandbox(**self.cfg.sandbox) if self.cfg.sandbox is not None else None
 
+        # Prepare data_dir for audio processing
+        data_dir = ""
+        if "data_dir" in self.cfg.eval_config and not (
+            isinstance(self.cfg.eval_config["data_dir"], type(None)) or isinstance(self.cfg.eval_type, type(None))
+        ):
+            data_dir = os.path.join(self.cfg.eval_config["data_dir"], self.cfg.eval_type)
+
+        # Prepare audio chunking config
+        audio_chunking_config = {
+            "data_dir": data_dir,
+            "enable_audio_chunking": self.cfg.enable_audio_chunking,
+            "audio_chunk_task_types": self.cfg.audio_chunk_task_types,
+            "chunk_audio_threshold_sec": self.cfg.chunk_audio_threshold_sec,
+        }
+
         if self.cfg.code_execution:
             llm = get_code_execution_model(**self.cfg.server, tokenizer=self.tokenizer, sandbox=self.sandbox)
         elif self.cfg.tool_modules is not None:
@@ -395,7 +415,7 @@ class GenerationTask:
                 additional_config={"sandbox": self.cfg.sandbox},
             )
         else:
-            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
+            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, **audio_chunking_config)
 
         if self.cfg.parallel_thinking.mode is not None:
             # We don't want to override these key variables which overlap with self.cfg
@@ -529,62 +549,10 @@ class GenerationTask:
         """Preprocess the prompt before sending to the model.
 
         Override this method to add custom preprocessing logic.
-        By default, auto-detects and handles audio file path to base64 conversion.
+        Audio conversion is now handled by the model (e.g., VLLMModel).
         """
         if not isinstance(prompt, list):
             return prompt
-
-        # Auto-detect and convert audio file paths to base64
-        prompt = [self._convert_audio_to_base64(message) for message in prompt]
-
-        return prompt
-
-    def _audio_file_to_base64(self, audio_file_path: str) -> str:
-        """Encodes an audio file into a base64 string."""
-        with open(audio_file_path, "rb") as audio_file:
-            audio_content = audio_file.read()
-            return base64.b64encode(audio_content).decode("utf-8")
-
-    def _convert_audio_to_base64(self, message: dict) -> dict:
-        """Convert audio file paths in a message to base64 inline content.
-
-        Looks for 'audio' or 'audios' keys in the message and converts them
-        to base64-encoded audio_url content items. Removes the original keys
-        after conversion to prevent double-processing by model-specific code.
-
-        CRITICAL: Audio must come BEFORE text for Qwen Audio to transcribe correctly.
-        """
-        if "audio" not in message and "audios" not in message:
-            return message
-
-        audio_items = []
-
-        # Handle single audio
-        if "audio" in message:
-            audio = message.pop("audio")
-            base64_audio = self._audio_file_to_base64(audio["path"])
-            audio_items.append({"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}})
-
-        # Handle multiple audios
-        if "audios" in message:
-            for audio in message.pop("audios"):
-                base64_audio = self._audio_file_to_base64(audio["path"])
-                audio_items.append(
-                    {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
-                )
-
-        # Convert existing content to list format and place AFTER audio
-        content = message.get("content", "")
-        if isinstance(content, str):
-            text_items = [{"type": "text", "text": content}] if content else []
-        elif isinstance(content, list):
-            text_items = content
-        else:
-            raise TypeError(f"Unsupported content type: {type(content)}")
-
-        message["content"] = audio_items + text_items
-
-        return message
 
     def dump_outputs(self, outputs, data_points, fout):
         for output in outputs:
@@ -663,6 +631,10 @@ class GenerationTask:
             "prompt": prompt,
             "stop_phrases": [self.cfg.stop_phrase] if self.cfg.stop_phrase else None,
         }
+
+        # Pass task_type for audio chunking
+        if "task_type" in data_point:
+            generation_params["task_type"] = data_point["task_type"]
 
         if self.cfg.code_execution:
             if self.cfg.override_max_code_executions and self.cfg.total_code_executions_in_prompt is not None:
