@@ -102,7 +102,7 @@ def main():
     print(f"Setting up Terminal-Bench repo from {tb_repo}, commit: {tb_commit}")
     cmd = get_setup_cmd(tb_repo, tb_commit)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, shell=True)
         if result.returncode != 0:
             print("✗ Failed to set up terminal-bench repo")
             print(f"  Error: {result.stderr.strip()}")
