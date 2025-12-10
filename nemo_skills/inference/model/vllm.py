@@ -268,8 +268,6 @@ class VLLMModel(BaseModel):
             needs_chunking, audio_path, duration = self._needs_audio_chunking(messages, task_type)
 
             if needs_chunking:
-                import re
-
                 audio_array, sampling_rate = load_audio_file(audio_path)
                 chunks = chunk_audio(audio_array, sampling_rate, self.chunk_audio_threshold_sec)
 
@@ -296,48 +294,15 @@ class VLLMModel(BaseModel):
 
                         chunk_messages.append(msg_copy)
 
-                    # Preprocess messages to strip /no_think for Qwen models
                     chunk_messages = self._preprocess_messages_for_model(chunk_messages)
 
-                    # Generate for this chunk (pass as prompt, which accepts list[dict])
                     result = await super().generate_async(
                         prompt=chunk_messages, tokens_to_generate=tokens_to_generate, **kwargs
                     )
 
                     generation = result.get("generation", "")
-
-                    # Post-process Qwen2-Audio output using AudioBench's
-                    # https://github.com/AudioLLMs/AudioBench/blob/main/src/model_src/qwen2_audio_7b_instruct.py
-
-                    # Possible issue: Remove SRT subtitle timestamps
-                    timestamp_pattern = r"\d+\s+\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}\s+"
-                    generation = re.sub(timestamp_pattern, "", generation)
-                    timestamp_pattern_no_num = r"\d{2}:\d{2}:\d{2},\d{3}\s+-->\s+\d{2}:\d{2}:\d{2},\d{3}\s*"
-                    generation = re.sub(timestamp_pattern_no_num, "", generation)
-                    generation = re.sub(r"\\n\d+\s+(?=\d{2}:\d{2})", " ", generation)
-                    generation = re.sub(r"\n\d+\s+(?=\d{2}:\d{2})", " ", generation)
-
-                    # === AudioBench's way of processing output ===
-
-                    # Step 1: Extract from double quotes
-                    match = re.search(r'"((?:\\.|[^"\\])*)"', generation)
-                    if match:
-                        generation = match.group(1)
-
-                    # Handle colon-quote patterns
-                    if ":'" in generation:
-                        generation = "'" + generation.split(":'")[1]
-                    elif ": '" in generation:
-                        generation = "'" + generation.split(": '")[1]
-
-                    # Step 3: ALWAYS extract from single quotes
-                    match = re.search(r"'(.*)'", generation)
-                    if match:
-                        generation = match.group(1)
-
                     chunk_results.append(generation.strip())
 
-                # Aggregate all chunks
                 aggregated_text = " ".join(chunk_results)
 
                 # Return result with aggregated generation
