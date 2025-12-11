@@ -24,5 +24,3 @@ stages:
     enabled: False
   filter_solutions:
     input_file: ${base_output_dir}/solution-sdg/step-4-generate-solutions/final_result.jsonl
-  
-    
