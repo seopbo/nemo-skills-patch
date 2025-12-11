@@ -15,6 +15,7 @@ import argparse
 import json
 import logging
 import os
+import random
 from pathlib import Path
 
 import tiktoken
@@ -72,6 +73,70 @@ def count_n_tokens(prompt: str, tokenizer_name: str) -> int:
     """
     enc = tiktoken.get_encoding(tokenizer_name)
     return len(enc.encode(prompt))
+
+
+def find_optimal_documents(documents, all_documents, documents_keys, question_text, 
+                          max_context_window, current_tokens, tokenizer_name):
+    """
+    Find optimal subset of extra documents to maximize token usage while staying under max_context_window.
+    Uses exhaustive search to find the best combination.
+    
+    Args:
+        documents: List of current documents
+        all_documents: Dictionary of all available documents
+        documents_keys: Set of keys for documents already included
+        question_text: The question text
+        max_context_window: Maximum allowed tokens
+        current_tokens: Current token count
+        tokenizer_name: Name of tokenizer to use
+    
+    Returns:
+        Tuple of (optimized_documents, optimized_prompt, new_token_count)
+    """
+    from itertools import combinations
+    
+    documents_extra = list(set(all_documents.keys()) - set(documents_keys))
+    max_aalcr_tokens = count_n_tokens(construct_prompt(documents + [all_documents[i] for i in documents_extra], question_text), tokenizer_name)
+    if max_aalcr_tokens <= max_context_window:
+        documents_extra = documents_extra * ((max_context_window - current_tokens) // (max_aalcr_tokens - current_tokens) + 1)
+
+    random.shuffle(documents_extra)
+    
+    # Pre-compute marginal token cost for each extra document
+    doc_sizes = []
+    for document_key in documents_extra:
+        test_docs = documents + [all_documents[document_key]]
+        test_prompt = construct_prompt(test_docs, question_text)
+        marginal_tokens = count_n_tokens(test_prompt, tokenizer_name) - current_tokens
+        doc_sizes.append((document_key, marginal_tokens))
+    
+    remaining_capacity = max_context_window - current_tokens
+    doc_sizes.sort(key=lambda x: x[1])
+    
+    # Use exhaustive search for optimal solution
+    best_docs = documents[:]
+    best_tokens = current_tokens
+    
+    for r in range(1, len(doc_sizes) + 1):
+        for combo in combinations(doc_sizes, r):
+            estimated_size = sum(size for _, size in combo)
+            if estimated_size > remaining_capacity * 1.2:
+                continue
+            
+            test_docs = documents + [all_documents[key] for key, _ in combo]
+            random.shuffle(test_docs)
+            test_prompt = construct_prompt(test_docs, question_text)
+            test_tokens = count_n_tokens(test_prompt, tokenizer_name)
+            
+            if test_tokens <= max_context_window and test_tokens > best_tokens:
+                best_docs = test_docs
+                best_tokens = test_tokens
+    
+    if best_tokens > current_tokens:
+        return construct_prompt(best_docs, question_text), best_tokens
+    
+    # Return original if no improvement found
+    return construct_prompt(documents, question_text), current_tokens
 
 
 def find_actual_file(base_path, target_filename):
@@ -148,32 +213,49 @@ def find_actual_file(base_path, target_filename):
 
 
 def write_data_to_file(output_file, data, txt_file_folder, max_context_window, tokenizer_name):
+    all_documents = {}
+    for idx, entry in tqdm(enumerate(data), desc=f"Reading all docs"):
+        document_set_id = entry["document_set_id"]
+        document_category = entry["document_category"]
+        data_source_filenames = entry["data_source_filenames"].split(";")
+        for data_source_filename in data_source_filenames:
+            base_path = f"{txt_file_folder}/{document_category}/{document_set_id}"
+            actual_filename = find_actual_file(base_path, data_source_filename)
+            key = f"{base_path}/{actual_filename}"
+            if key in all_documents:
+                continue
+            try:
+                with open(
+                    key,
+                    "rt",
+                    encoding="utf-8",
+                ) as fin:
+                    document = fin.read()
+                    all_documents[key] = document
+
+            except FileNotFoundError:
+                if actual_filename != data_source_filename:
+                    LOG.debug(f"File {base_path}/{data_source_filename} is missing")
+            
+            
+                
     with open(output_file, "wt", encoding="utf-8") as fout:
         for idx, entry in tqdm(enumerate(data), desc=f"Writing {output_file.name}"):
             entry["index"] = entry.pop("question_id")
-
             document_set_id = entry.pop("document_set_id")
             document_category = entry["document_category"]
             data_source_filenames = entry.pop("data_source_filenames").split(";")
 
             # Collect documents
             documents = []
+            documents_keys = []
             for data_source_filename in data_source_filenames:
                 base_path = f"{txt_file_folder}/{document_category}/{document_set_id}"
                 actual_filename = find_actual_file(base_path, data_source_filename)
-
-                # Debug output removed
-                try:
-                    with open(
-                        f"{base_path}/{actual_filename}",
-                        "rt",
-                        encoding="utf-8",
-                    ) as fin:
-                        document = fin.read()
-                        documents.append(document)
-                except FileNotFoundError:
-                    if actual_filename != data_source_filename:
-                        LOG.debug(f"File {base_path}/{data_source_filename} is missing")
+                key = f"{base_path}/{actual_filename}"
+                if key in all_documents:
+                    documents.append(all_documents[key])
+                    documents_keys.append(key)
 
             # Use construct_prompt to format the question with documents
             question_text = entry.pop("question")
@@ -181,12 +263,15 @@ def write_data_to_file(output_file, data, txt_file_folder, max_context_window, t
 
             # find n_tokens with tokenizer_name
             n_tokens = count_n_tokens(question, tokenizer_name)
-            if max_context_window is not None:
-                if n_tokens > max_context_window:
-                    LOG.warning(f"Skipping {idx} because it has {n_tokens} tokens")
-                    continue
 
-            if n_tokens != entry["input_tokens"]:  # check if the n_tokens exactly match the input_tokens in the entry
+            if max_context_window is not None:
+                # Find optimal subset of documents to maximize token usage
+                question, n_tokens = find_optimal_documents(
+                    documents, all_documents, documents_keys, question_text,
+                    max_context_window, n_tokens, tokenizer_name
+                )
+
+            elif n_tokens != entry["input_tokens"]:  # check if the n_tokens exactly match the input_tokens in the entry
                 raise ValueError(f"n_tokens: {n_tokens} != input_tokens: {entry['input_tokens']}")
 
             entry[f"n_tokens_{tokenizer_name}"] = n_tokens
@@ -248,8 +333,15 @@ if __name__ == "__main__":
         action="store_true",
         help="Debug mode",
     )
+    parser.add_argument(
+        "--random_seed",
+        type=int,
+        default=42,
+        help="Random seed",
+    )
 
     args = parser.parse_args()
+    random.seed(args.random_seed)
 
     # Setup logging
     setup_logging(log_level=logging.DEBUG if args.debug else logging.INFO)
