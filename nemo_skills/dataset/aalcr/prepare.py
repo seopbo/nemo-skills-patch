@@ -76,7 +76,7 @@ def count_n_tokens(prompt: str, tokenizer_name: str) -> int:
 
 
 def find_optimal_documents(documents, all_documents, documents_keys, question_text, 
-                          max_context_window, current_tokens, tokenizer_name):
+                          max_context_window, current_tokens, tokenizer_name, max_aalcr_tokens):
     """
     Find optimal subset of extra documents to maximize token usage while staying under max_context_window.
     Uses exhaustive search to find the best combination.
@@ -93,44 +93,34 @@ def find_optimal_documents(documents, all_documents, documents_keys, question_te
     Returns:
         Tuple of (optimized_documents, optimized_prompt, new_token_count)
     """
-    from itertools import combinations
-    
-    documents_extra = list(set(all_documents.keys()) - set(documents_keys))
-    max_aalcr_tokens = count_n_tokens(construct_prompt(documents + [all_documents[i] for i in documents_extra], question_text), tokenizer_name)
+    documents_keys_extra = list(set(all_documents.keys()) - set(documents_keys))
     if max_aalcr_tokens <= max_context_window:
-        documents_extra = documents_extra * ((max_context_window - current_tokens) // (max_aalcr_tokens - current_tokens) + 1)
+        documents_keys_extra = documents_keys_extra * ((max_context_window - current_tokens) // (max_aalcr_tokens - current_tokens) + 1)
 
-    random.shuffle(documents_extra)
+    random.shuffle(documents_keys_extra)
     
-    # Pre-compute marginal token cost for each extra document
-    doc_sizes = []
-    for document_key in documents_extra:
-        test_docs = documents + [all_documents[document_key]]
-        test_prompt = construct_prompt(test_docs, question_text)
-        marginal_tokens = count_n_tokens(test_prompt, tokenizer_name) - current_tokens
-        doc_sizes.append((document_key, marginal_tokens))
+    # Use random greedy approach for fast document selection
+    budget = max_context_window * 0.9 - current_tokens
+    cumulative_tokens = [sum(all_documents[documents_keys_extra[j]]["tokens"] for j in range(i+1)) for i in range(len(documents_keys_extra))]
+    closest_idx = max([i for i in range(len(cumulative_tokens)) if cumulative_tokens[i] < budget], default=-1) if cumulative_tokens else -1
     
-    remaining_capacity = max_context_window - current_tokens
-    doc_sizes.sort(key=lambda x: x[1])
+    best_docs = documents + [all_documents[i]["document"] for i in documents_keys_extra[:closest_idx+1]]
+    best_tokens = count_n_tokens(construct_prompt(best_docs, question_text), tokenizer_name)
+    documents_keys_extra = documents_keys_extra[closest_idx+1:]
+    assert best_tokens <= max_context_window
     
-    # Use exhaustive search for optimal solution
-    best_docs = documents[:]
-    best_tokens = current_tokens
-    
-    for r in range(1, len(doc_sizes) + 1):
-        for combo in combinations(doc_sizes, r):
-            estimated_size = sum(size for _, size in combo)
-            if estimated_size > remaining_capacity * 1.2:
-                continue
-            
-            test_docs = documents + [all_documents[key] for key, _ in combo]
-            random.shuffle(test_docs)
+    # Greedily add documents one by one until we can't fit more
+    for i, doc_key in enumerate(documents_keys_extra):
+        if best_tokens + all_documents[doc_key]["tokens"] <= max_context_window:
+            test_docs = best_docs + [all_documents[doc_key]["document"]]
             test_prompt = construct_prompt(test_docs, question_text)
             test_tokens = count_n_tokens(test_prompt, tokenizer_name)
             
-            if test_tokens <= max_context_window and test_tokens > best_tokens:
+            if test_tokens <= max_context_window:
                 best_docs = test_docs
                 best_tokens = test_tokens
+            elif best_tokens >= max_context_window * 0.95:  
+                break
     
     if best_tokens > current_tokens:
         return construct_prompt(best_docs, question_text), best_tokens
@@ -231,14 +221,19 @@ def write_data_to_file(output_file, data, txt_file_folder, max_context_window, t
                     encoding="utf-8",
                 ) as fin:
                     document = fin.read()
-                    all_documents[key] = document
+                    all_documents[key] = {
+                        "document": document,
+                        "tokens": count_n_tokens(document, tokenizer_name)
+                    }
 
             except FileNotFoundError:
                 if actual_filename != data_source_filename:
                     LOG.debug(f"File {base_path}/{data_source_filename} is missing")
-            
+    
+    max_aalcr_tokens = count_n_tokens(construct_prompt([item["document"] for item in all_documents.values()], question=data[0]["question"]), tokenizer_name)
     LOG.info(f"Found total {len(all_documents)} documents")
-                
+    LOG.info(f"Max tokens of all documents: {max_aalcr_tokens}")
+
     with open(output_file, "wt", encoding="utf-8") as fout:
         for idx, entry in tqdm(enumerate(data), desc=f"Writing {output_file.name}"):
             entry["index"] = entry.pop("question_id")
@@ -254,7 +249,7 @@ def write_data_to_file(output_file, data, txt_file_folder, max_context_window, t
                 actual_filename = find_actual_file(base_path, data_source_filename)
                 key = f"{base_path}/{actual_filename}"
                 if key in all_documents:
-                    documents.append(all_documents[key])
+                    documents.append(all_documents[key]["document"])
                     documents_keys.append(key)
 
             # Use construct_prompt to format the question with documents
@@ -268,7 +263,7 @@ def write_data_to_file(output_file, data, txt_file_folder, max_context_window, t
                 # Find optimal subset of documents to maximize token usage
                 question, n_tokens = find_optimal_documents(
                     documents, all_documents, documents_keys, question_text,
-                    max_context_window, n_tokens, tokenizer_name
+                    max_context_window, n_tokens, tokenizer_name, max_aalcr_tokens
                 )
 
             elif n_tokens != entry["input_tokens"]:  # check if the n_tokens exactly match the input_tokens in the entry
