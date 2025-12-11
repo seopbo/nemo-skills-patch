@@ -79,11 +79,15 @@ def collect_predictions(
                     )
                 elif predicted_answer_regex:
                     extract_from_boxed = False
-                predicted_answer = extract_answer(
-                    sample["generation"],
-                    extract_from_boxed=extract_from_boxed,
-                    extract_regex=predicted_answer_regex,
-                )
+                try:
+                    predicted_answer = extract_answer(
+                        sample["generation"],
+                        extract_from_boxed=extract_from_boxed,
+                        extract_regex=predicted_answer_regex,
+                    )
+                except Exception as e:
+                    LOG.warning("Failed to extract answer for sample %s: %s", sample, e)
+                    predicted_answer = None
                 sample["predicted_answer"] = predicted_answer
                 samples.append(sample)
 

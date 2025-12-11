@@ -196,7 +196,7 @@ stages:
       ctx_args: >-
         ++prompt_config=judge/general-judge
       args:
-        model: /hf_models/Qwen2.5-32B-Instruct
+        model: /hf_models/gpt-oss-20b
         server_type: vllm
         server_gpus: 8
         server_nodes: 1

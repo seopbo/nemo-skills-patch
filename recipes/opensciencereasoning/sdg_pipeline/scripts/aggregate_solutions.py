@@ -20,15 +20,37 @@ import json
 import logging
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, Iterable, List, Union
 
-from nemo_skills.evaluation.metrics.utils import is_correct_judgement
 from recipes.opensciencereasoning.sdg_pipeline.scripts.constants import BASE_FIELDS
 
 LOG = logging.getLogger(__name__)
 
 
 DEFAULT_OUTPUT_PATTERN = "output*.jsonl"
+
+def is_correct_judgement(judgement, return_none=False) -> Union[bool, None]:
+    logging.info("Judgement string: %s", judgement)
+    
+    if "Judgement:" in judgement:
+        logging.info("Found 'Judgement:' in string, extracting verdict.")
+        verdict = judgement.split("Judgement:")[-1].strip()
+        if verdict.lower().startswith("yes"):
+            return True
+        elif verdict.lower().startswith("no"):
+            return False
+    
+    judgement = judgement.lower().strip()
+    logging.info("Normalized judgement string: %s", judgement)
+    if judgement == "yes":
+        return True
+    if judgement == "no":
+        return False
+    if return_none:
+        return None
+    else:
+        return False  # improper judgement format, so have to judge as false
+
 
 
 def parse_args() -> argparse.Namespace:
