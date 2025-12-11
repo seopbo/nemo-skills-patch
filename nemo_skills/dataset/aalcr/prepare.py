@@ -237,7 +237,7 @@ def write_data_to_file(output_file, data, txt_file_folder, max_context_window, t
                 if actual_filename != data_source_filename:
                     LOG.debug(f"File {base_path}/{data_source_filename} is missing")
             
-            
+    LOG.info(f"Found total {len(all_documents)} documents")
                 
     with open(output_file, "wt", encoding="utf-8") as fout:
         for idx, entry in tqdm(enumerate(data), desc=f"Writing {output_file.name}"):
