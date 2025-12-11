@@ -116,10 +116,11 @@ def map_prompts_to_dataset(input_file: str, output_file: str, prompts_path: str,
             try:
                 sample['_filled_prompt'] = selected_prompt["prompt"].format(**sample)
             except IndexError:
-                logging.warning("Failed to fill prompt with sample fields; leaving _filled_prompt as original prompt: %s"
-                 + selected_prompt["prompt"],
-                 + "sample keys: ",
-                 + "\n- ".join(sample.keys()))
+                logging.warning(
+                    "Failed to fill prompt with sample fields; leaving _filled_prompt as original prompt: %s; sample keys:\n- %s",
+                    selected_prompt["prompt"],
+                    "\n- ".join(sample.keys())
+                )
                 sample['_filled_prompt'] = selected_prompt["prompt"]
                 
             
