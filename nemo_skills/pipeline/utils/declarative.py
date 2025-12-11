@@ -499,7 +499,10 @@ class Pipeline:
             Tuple of (Script_object, exec_config)
         """
         script, exec_config = command.prepare_for_execution(cluster_config)
-        if cluster_config.get("executor") in ("none", "local"):
+        # Only rewrite paths for "none" executor (native execution without containers)
+        # For "local" executor (Docker), paths should stay as /nemo_run/code/... since
+        # that's where the code is mounted inside the container
+        if cluster_config.get("executor") == "none":
             script = self._rewrite_local_paths(script)
         # Note: mpirun wrapping for multi-task scripts is handled by the executor
         return script, exec_config
