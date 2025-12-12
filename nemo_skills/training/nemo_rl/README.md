@@ -32,16 +32,67 @@ This directory contains the integration between NeMo-RL (reinforcement learning 
 
 ## Key Concepts
 
-### NeMo-Skills as a Proxy Server
+### Understanding NeMo-RL's Generation Architecture
 
-The `nemo_skills/inference/generate.py` script can run as a server that:
+**Important:** NeMo-RL uses **Ray-based colocated generation** by default, NOT HTTP servers.
 
-1. **Receives requests** via OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/completions`)
-2. **Applies NeMo-Skills logic** (prompt formatting, code execution, few-shot examples)
-3. **Forwards to the model server** (vLLM, TRT-LLM, OpenAI, etc.)
-4. **Returns enriched responses** to NeMo-RL
+```
+┌─────────────────────────────────────────────────────────────────────────┐
+│                         NeMo-RL Ray Cluster                             │
+│                                                                         │
+│   ┌─────────────────┐      Ray Actor Calls       ┌──────────────────┐   │
+│   │  GRPO Training  │ ◄────────────────────────► │ policy_generation │  │
+│   │     Loop        │     (no HTTP involved)     │  (vLLM wrapped)   │  │
+│   └─────────────────┘                            └──────────────────┘   │
+│                                                                         │
+│   Prompt formatting happens in ns_data_processor BEFORE generation     │
+└─────────────────────────────────────────────────────────────────────────┘
+```
 
-This allows NeMo-RL/NeMo-Gym to use their existing model backends (like `SimpleResponsesAPIModel` or `VLLMModel`) while getting NeMo-Skills' rich prompting capabilities.
+- **`generation.colocated.enabled: true`** (default) - vLLM shares training GPUs via Ray actors
+- **No HTTP server** - Communication is via Ray object references
+- **Prompting already applied** - `ns_data_processor` in `start_grpo.py` calls `get_prompt()` at data prep time
+
+### Two Integration Options
+
+#### Option 1: Data-Level Integration (Already Built-In!)
+
+The `ns_data_processor` in `start_grpo.py` already uses NeMo-Skills' `get_prompt()` function.
+Prompt formatting is applied during data preparation, before generation.
+
+```yaml
+data:
+  prompt:
+    prompt_config: generic/math      # NeMo-Skills prompt template
+    examples_type: gsm8k_text_with_code  # Few-shot examples
+```
+
+This is sufficient for most use cases where you need prompt formatting.
+
+#### Option 2: HTTP Proxy with NeMo-Gym Integration
+
+NeMo-RL can expose its vLLM generation workers as an HTTP server! This enables:
+
+1. **NeMo-Gym agents** to call the policy model via HTTP
+2. **NeMo-Skills proxy** to add prompt formatting, code execution, etc.
+
+Enable with:
+```yaml
+env:
+  should_use_nemo_gym: true  # Automatically enables expose_http_server
+
+policy:
+  generation:
+    vllm_cfg:
+      async_engine: true           # Required for HTTP exposure
+      expose_http_server: true     # Exposes /v1/chat/completions
+```
+
+The NeMo-Skills proxy (`generate.py`) can then:
+1. **Receive requests** via OpenAI-compatible endpoints
+2. **Apply NeMo-Skills logic** (prompt formatting, code execution)
+3. **Forward to NeMo-RL's vLLM HTTP endpoint**
+4. **Return enriched responses** to NeMo-Gym agents
 
 ### Minimal Environment Implementation
 
@@ -298,10 +349,43 @@ nemo_skills/training/nemo_rl/
 ├── prompts/
 │   ├── cot.txt
 │   └── math.txt
+├── utils/
+│   ├── __init__.py
+│   └── skills_proxy.py         # OpenAI-compatible proxy server utilities
 ├── start_grpo.py               # GRPO training entry point
 ├── start_sft.py                # SFT training entry point
 ├── convert_dcp_to_hf.py        # FSDP checkpoint conversion
 └── convert_megatron_to_hf.py   # Megatron checkpoint conversion
+```
+
+## Using the Proxy Utilities Directly
+
+The `skills_proxy` module can be used independently to create OpenAI-compatible
+proxy servers:
+
+```python
+from nemo_skills.training.nemo_rl.utils.skills_proxy import create_skills_proxy_app
+import uvicorn
+
+# Option 1: Use with a GenerationTask
+from nemo_skills.inference.generate import GenerationTask, GenerateSolutionsConfig
+
+cfg = GenerateSolutionsConfig(...)
+task = GenerationTask(cfg)
+app = create_skills_proxy_app(generation_task=task)
+uvicorn.run(app, host="0.0.0.0", port=7000)
+
+# Option 2: Use with a custom process function
+async def my_process_fn(data_point: dict, all_data: list) -> dict:
+    # Your custom generation logic
+    return {"generation": "Hello!", "num_generated_tokens": 1}
+
+app = create_skills_proxy_app(
+    process_fn=my_process_fn,
+    prompt_format="ns",
+    generation_key="generation",
+)
+uvicorn.run(app, host="0.0.0.0", port=7000)
 ```
 
 ## Troubleshooting
