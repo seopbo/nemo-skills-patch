@@ -411,14 +411,13 @@ class GenerationTask:
             LOG.info(f"vLLM is serving model: {vllm_config.model_name}")
 
         # Configure the server to use the discovered vLLM backend
-        # Use OmegaConf.update to properly merge into the struct config
-        server_config = {
-            "server_type": "vllm",
-            "host": vllm_config.host,
-            "port": vllm_config.port,
-            "model": vllm_config.model_name or "nemo-skills-proxy",
-        }
-        OmegaConf.update(self.cfg, "server", server_config, merge=True)
+        # Disable struct mode to allow adding new keys, then update
+        OmegaConf.set_struct(self.cfg.server, False)
+        self.cfg.server["server_type"] = "vllm"
+        self.cfg.server["host"] = vllm_config.host
+        self.cfg.server["port"] = vllm_config.port
+        self.cfg.server["model"] = vllm_config.model_name or "nemo-skills-proxy"
+        OmegaConf.set_struct(self.cfg.server, True)
 
     def setup_prompt(self):
         if self.cfg.prompt_format == "openai":
