@@ -97,7 +97,7 @@ import typer
 from nemo_evaluator_launcher.api import RunConfig
 from nemo_evaluator_launcher.common.helpers import get_eval_factory_command
 from nemo_evaluator_launcher.common.mapping import get_task_from_mapping, load_tasks_mapping
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import OmegaConf
 
 import nemo_skills.pipeline.utils as pipeline_utils
 from nemo_skills.pipeline.app import app, typer_unpacker
@@ -289,8 +289,8 @@ def nemo_evaluator(
             expname=expname,
             idx=idx,
             task_name=task.name,
-            launcher_run_cfg=launcher_run_cfg,
-            task_cfg=task,
+            launcher_run_cfg=OmegaConf.to_container(launcher_run_cfg, resolve=True),
+            task_cfg=OmegaConf.to_container(task, resolve=True),
             task_definition=task_definition,
             base_output_root=base_output_root,
             eval_image=eval_image,
@@ -498,13 +498,17 @@ def _create_serving_command_obj(
 
 @dataclass
 class _TaskCreationContext:
-    """Local helper to pass around the information about the task and easier logic sharing."""
+    """Local helper to pass around the information about the task and easier logic sharing.
+
+    Note: launcher_run_cfg and task_cfg are stored as plain dicts (not OmegaConf) to allow
+    serialization by nemo_run/fiddle. Convert back to DictConfig if OmegaConf operations are needed.
+    """
 
     expname: str
     idx: int
     task_name: str
-    launcher_run_cfg: RunConfig
-    task_cfg: DictConfig
+    launcher_run_cfg: dict  # Stored as plain dict for serialization compatibility
+    task_cfg: dict  # Stored as plain dict for serialization compatibility
     task_definition: dict
     base_output_root: Optional[str]
     eval_image: str
@@ -649,8 +653,8 @@ def _build_client_command(
 
 def _build_task_cmd(
     task_name: str,
-    launcher_run_cfg: DictConfig,
-    task_cfg: DictConfig,
+    launcher_run_cfg: dict,
+    task_cfg: dict,
     task_definition: dict,
     expname: str,
     base_output_root: Optional[str],
@@ -666,8 +670,8 @@ def _build_task_cmd(
 
     Args:
         task_name: Task identifier (e.g., "ifeval", "gpqa_diamond")
-        launcher_run_cfg: Global evaluator configuration from RunConfig
-        task_cfg: Task-specific configuration (may include task-level overrides)
+        launcher_run_cfg: Global evaluator configuration (as plain dict)
+        task_cfg: Task-specific configuration (as plain dict, may include task-level overrides)
         task_definition: Task definition from mapping (container, harness info)
         expname: Experiment name for output directory structure
         base_output_root: Base directory for task outputs
@@ -685,7 +689,9 @@ def _build_task_cmd(
         - Judge: config.params.extra.judge.url
         Output directory is set to: {base_output_root}/{expname}/nemo-evaluator-results/{task_name}
     """
-    task_cfg_copy = copy.deepcopy(task_cfg)
+    # Convert back to DictConfig for OmegaConf operations
+    launcher_run_cfg = OmegaConf.create(launcher_run_cfg)
+    task_cfg_copy = OmegaConf.create(copy.deepcopy(task_cfg))
     if url_override:
         OmegaConf.update(task_cfg_copy, "overrides", {"target.api_endpoint.url": url_override}, force_add=True)
 
