@@ -254,21 +254,26 @@ class SandboxScript(BaseJobScript):
 
         - Allocates port if not provided
         - Builds sandbox command using sandbox_command()
-        - Sets self.inline to the command string
+        - Sets self.inline to a callable that returns command and environment vars
         """
         # Allocate port if not provided
         if self.port is None and self.allocate_port:
             self.port = get_free_port(strategy="random")
             LOG.debug(f"Allocated port {self.port} for sandbox")
 
-        # Build sandbox command
+        # Build sandbox command and metadata (including environment vars)
         # Note: keep_mounts is handled at the executor level, not in the command itself
-        cmd, _ = sandbox_command(
+        cmd, metadata = sandbox_command(
             cluster_config=self.cluster_config,
             port=self.port,
         )
 
-        self.set_inline(cmd)
+        # Use a callable to return both command and environment variables
+        # This ensures the sandbox's LISTEN_PORT and NGINX_PORT are properly set
+        def build_cmd() -> Tuple[str, Dict]:
+            return cmd, {"environment": metadata.get("environment", {})}
+
+        self.set_inline(build_cmd)
         super().__post_init__()
 
 
