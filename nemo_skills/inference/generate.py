@@ -216,7 +216,10 @@ class GenerateSolutionsConfig:
             )
 
     def _post_init_validate_server(self):
-        if self.server["server_type"] == "megatron":
+        # Skip server validation when in server mode - we're starting an API server, not connecting to one
+        if self.start_server:
+            return
+        if self.server.get("server_type") == "megatron":
             LOG.warning("Megatron inference is extremely slow. It's highly recommended to use other server types!")
 
     def _post_init_validate_params(self):
