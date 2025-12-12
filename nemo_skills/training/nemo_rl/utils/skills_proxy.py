@@ -516,7 +516,7 @@ class GenerationTaskProtocol(Protocol):
 
     @property
     def cfg(self) -> Any:
-        """Configuration object with prompt_format and generation_key."""
+        """Configuration object with generation_key and other settings."""
         ...
 
     async def _process_single_datapoint_core(self, data_point: dict[str, Any], all_data: list) -> dict[str, Any]:
@@ -536,23 +536,24 @@ ProcessFn = Callable[[dict[str, Any], list], Coroutine[Any, Any, dict[str, Any]]
 def create_skills_proxy_app(
     generation_task: GenerationTaskProtocol | None = None,
     process_fn: ProcessFn | None = None,
-    prompt_format: str = "ns",
     generation_key: str = "generation",
     title: str = "NeMo Skills Generation Server",
 ) -> FastAPI:
     """
     Create a FastAPI application that serves as an OpenAI-compatible proxy.
 
-    This factory function creates endpoints that apply NeMo-Skills prompting
-    logic before forwarding to the model server.
+    This proxy passes OpenAI-format messages through to the NeMo-Skills generation
+    pipeline, which can handle code execution loops, tool calling, and sandbox
+    integration.
+
+    When used with NeMo-RL (which already templates prompts via ns_data_processor),
+    configure with prompt_format=openai to pass messages through without re-templating.
 
     Args:
         generation_task: A GenerationTask instance (has cfg and _process_single_datapoint_core).
                         Either this or process_fn must be provided.
         process_fn: Alternative to generation_task - a coroutine function that processes
                    data points. Signature: async (data_point: dict, all_data: list) -> dict
-        prompt_format: The prompt format to use ("ns" or "openai"). Only used if process_fn
-                      is provided instead of generation_task.
         generation_key: The key in the output dict that contains the generation.
                        Only used if process_fn is provided.
         title: Title for the FastAPI application.
@@ -577,11 +578,9 @@ def create_skills_proxy_app(
 
     # Get configuration from task or use defaults
     if generation_task is not None:
-        _prompt_format = getattr(generation_task.cfg, "prompt_format", "ns")
         _generation_key = getattr(generation_task.cfg, "generation_key", "generation")
         _process_fn = generation_task._process_single_datapoint_core
     else:
-        _prompt_format = prompt_format
         _generation_key = generation_key
         _process_fn = process_fn
 
@@ -609,9 +608,14 @@ def create_skills_proxy_app(
     async def chat_completions(request: ChatCompletionRequest):
         """OpenAI-compatible chat completions endpoint.
 
-        This endpoint allows NeMo-Gym/NeMo-RL to use this server as a drop-in
-        replacement for any OpenAI-compatible model server. The NeMo-Skills
-        prompting logic is applied transparently.
+        This endpoint passes messages through to the NeMo-Skills generation pipeline.
+        Messages are passed through directly (no re-templating), making it compatible
+        with NeMo-RL which already templates prompts via ns_data_processor.
+
+        The generation pipeline handles:
+        - Code execution loops (if code_execution=True)
+        - Tool calling (if configured)
+        - Sandbox integration
 
         Usage with NeMo-RL:
             Configure policy.generation to point to this server as an OpenAI endpoint.
@@ -620,36 +624,13 @@ def create_skills_proxy_app(
             Set the base_url to point to this server.
         """
         try:
-            # Build data point from the request
-            data_point = {}
+            # Build data point - pass messages through directly
+            messages = [{"role": m.role, "content": m.content} for m in request.messages]
+            data_point = {"messages": messages}
 
-            # If extra_data is provided, use it as the base for prompt filling
+            # If extra_data is provided, merge it (for metadata like expected_answer)
             if request.extra_data:
                 data_point.update(request.extra_data)
-
-            # Add messages for prompt filling
-            messages = [{"role": m.role, "content": m.content} for m in request.messages]
-
-            if _prompt_format == "openai":
-                data_point["messages"] = messages
-            else:
-                # For NeMo-Skills format, extract content from the last user message
-                for msg in reversed(request.messages):
-                    if msg.role == "user":
-                        # If the user content looks like JSON, try to parse it
-                        try:
-                            user_data = json.loads(msg.content)
-                            if isinstance(user_data, dict):
-                                data_point.update(user_data)
-                            else:
-                                # Set both question and problem for compatibility with different prompt templates
-                                data_point["question"] = msg.content
-                                data_point["problem"] = msg.content
-                        except json.JSONDecodeError:
-                            # Set both question and problem for compatibility with different prompt templates
-                            data_point["question"] = msg.content
-                            data_point["problem"] = msg.content
-                        break
 
             # Process through NeMo-Skills pipeline
             output = await _process_fn(data_point, [])
@@ -686,7 +667,7 @@ def create_skills_proxy_app(
     async def completions(request: CompletionRequest):
         """OpenAI-compatible text completions endpoint.
 
-        Similar to chat completions but for raw text prompts.
+        Converts text prompts to message format and passes through to the pipeline.
         """
         try:
             # Handle single prompt or list of prompts
@@ -696,8 +677,8 @@ def create_skills_proxy_app(
             total_completion_tokens = 0
 
             for idx, prompt in enumerate(prompts):
-                # Build data point - set both question and problem for prompt template compatibility
-                data_point = {"question": prompt, "problem": prompt}
+                # Convert text prompt to message format for consistent handling
+                data_point = {"messages": [{"role": "user", "content": prompt}]}
                 if request.extra_data:
                     data_point.update(request.extra_data)
 
