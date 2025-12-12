@@ -27,5 +27,3 @@ user: |-
   Your response should be formatted as follows:
   Reasoning: (Provide a concise explanation of your rating, comparing the reference answer with the model's response. "The reference answer is [XXX], while the model's answer is [YYY]. I think ...")
   Judgement: [Yes or No]
-
-

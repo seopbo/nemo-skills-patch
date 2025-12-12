@@ -309,7 +309,7 @@ class AudioMetrics(BaseMetrics):
         if self.compute_no_answer:
             base_metrics["no_answer"] = as_percentage
 
-        #AudioBench-style judge_score (0-100, not a percent)
+        # AudioBench-style judge_score (0-100, not a percent)
         if self.judge_ratings:
             base_metrics["judge_score"] = lambda _k, v, _all: f"{v:.2f}"
 

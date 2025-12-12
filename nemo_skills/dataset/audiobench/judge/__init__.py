@@ -38,5 +38,3 @@ JUDGE_PIPELINE_ARGS = {
     "server_args": "--max-model-len 8192 --gpu-memory-utilization 0.95",
 }
 JUDGE_ARGS = "++prompt_config=judge/audiobench ++generation_key=judgement"
-
-
