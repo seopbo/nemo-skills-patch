@@ -17,7 +17,6 @@ import json
 import logging
 import random
 import shutil
-import subprocess
 import sys
 import time
 from copy import deepcopy
@@ -53,7 +52,6 @@ from nemo_skills.utils import (
     chunk_data,
     get_help_message,
     get_logger_name,
-    get_server_wait_cmd,
     nested_dataclass,
     parse_reasoning,
     setup_logging,
@@ -196,6 +194,7 @@ class GenerateSolutionsConfig:
     start_server: bool = False  # If True, start a FastAPI server instead of batch generation
     generate_host: str = "0.0.0.0"  # Host to bind the FastAPI server to
     generate_port: int = 7000  # Port to bind the FastAPI server to
+    server_wait_timeout: int = 300  # Timeout in seconds to wait for backend server
 
     def __post_init__(self):
         self._post_init_validate_data()
@@ -750,16 +749,64 @@ class GenerationTask:
         uvicorn.run(app, host=self.cfg.generate_host, port=self.cfg.generate_port)
 
     def wait_for_server(self):
-        if not self.cfg.server.get("base_url") and not self.cfg.server.get("host") and not self.cfg.server.get("port"):
-            LOG.info("Skipping server wait as no server address is provided.")
-            return
-        server_address = self.cfg.server.get("base_url") or f"{self.cfg.server['host']}:{self.cfg.server['port']}"
-        # Hydra sets None parameters to "None" string
-        if server_address == "None":
-            LOG.info("Skipping server wait as no server address is provided.")
-            return
-        server_start_cmd = get_server_wait_cmd(server_address)
-        subprocess.run(server_start_cmd, shell=True, check=True)
+        """Wait for the backend model server to be ready.
+
+        Supports:
+        1. Explicit server.base_url or server.host:port configuration
+        2. Auto-discovery via NEMO_RL_VLLM_URL environment variable
+        3. Auto-discovery via NeMo-Gym head server
+
+        The wait timeout is configurable via server_wait_timeout (default: 300 seconds).
+        """
+        import requests
+
+        from nemo_skills.training.nemo_rl.utils import discover_vllm_server
+
+        timeout = getattr(self.cfg, "server_wait_timeout", 300)
+
+        # Try explicit config first
+        server_address = None
+        if self.cfg.server.get("base_url") and self.cfg.server.get("base_url") != "None":
+            server_address = self.cfg.server.get("base_url")
+        elif self.cfg.server.get("host") and self.cfg.server.get("port"):
+            host = self.cfg.server.get("host")
+            port = self.cfg.server.get("port")
+            if host != "None" and port != "None":
+                server_address = f"http://{host}:{port}"
+
+        # Try auto-discovery if no explicit config
+        if not server_address:
+            LOG.info("No explicit server config, attempting auto-discovery...")
+            config = discover_vllm_server()
+            if config:
+                server_address = config.base_url
+                LOG.info(f"Discovered server at {server_address} (via {config.source})")
+            else:
+                LOG.info("No server to wait for (no config and discovery failed)")
+                return
+
+        LOG.info(f"Waiting for server at {server_address} (timeout: {timeout}s)...")
+
+        # Poll until server is ready
+        start = time.time()
+        health_url = server_address.rstrip("/") + "/health"
+        models_url = server_address.rstrip("/").replace("/v1", "") + "/v1/models"
+
+        while time.time() - start < timeout:
+            for url in [health_url, models_url, server_address]:
+                try:
+                    resp = requests.get(url, timeout=5)
+                    if resp.status_code in [200, 404]:
+                        LOG.info(f"Server ready at {server_address}")
+                        return
+                except requests.exceptions.RequestException:
+                    pass
+            elapsed = int(time.time() - start)
+            if elapsed % 30 == 0:
+                LOG.info(f"Still waiting for server... ({elapsed}s elapsed)")
+            time.sleep(2)
+
+        raise RuntimeError(f"Server not ready after {timeout}s: {server_address}")
 
     def wait_for_sandbox(self):
         if self.cfg.wait_for_sandbox:
