@@ -888,11 +888,37 @@ class TestGenerateEnvironmentVariables:
                     # Debug: print what we captured
                     print(f"Captured env updates: {env_updates_captured}")
 
+                    # Verify both sandbox and client environment variables are captured
+                    assert len(env_updates_captured) >= 2, (
+                        f"Expected at least 2 environment updates (sandbox + client), got {len(env_updates_captured)}: {env_updates_captured}"
+                    )
+
+                    # Find the sandbox and client environment updates
+                    sandbox_env = None
+                    client_env = None
+                    for env_update in env_updates_captured:
+                        if "LISTEN_PORT" in env_update and "NGINX_PORT" in env_update:
+                            sandbox_env = env_update
+                        if "NEMO_SKILLS_SANDBOX_PORT" in env_update:
+                            client_env = env_update
+
+                    # Verify sandbox got LISTEN_PORT and NGINX_PORT
+                    assert sandbox_env is not None, (
+                        f"LISTEN_PORT/NGINX_PORT not set for sandbox command: {env_updates_captured}"
+                    )
+                    assert sandbox_env["LISTEN_PORT"] == sandbox_env["NGINX_PORT"], (
+                        f"LISTEN_PORT and NGINX_PORT should match: {sandbox_env}"
+                    )
+
                     # Verify client got NEMO_SKILLS_SANDBOX_PORT
-                    assert env_updates_captured, "No environment updates captured"
-                    client_env = env_updates_captured[0]
-                    assert "NEMO_SKILLS_SANDBOX_PORT" in client_env, (
+                    assert client_env is not None, (
                         f"NEMO_SKILLS_SANDBOX_PORT not set for client command: {env_updates_captured}"
+                    )
+
+                    # Verify the ports match between sandbox and client
+                    assert client_env["NEMO_SKILLS_SANDBOX_PORT"] == sandbox_env["LISTEN_PORT"], (
+                        f"Sandbox port mismatch: client has {client_env['NEMO_SKILLS_SANDBOX_PORT']}, "
+                        f"sandbox has {sandbox_env['LISTEN_PORT']}"
                     )
 
 
