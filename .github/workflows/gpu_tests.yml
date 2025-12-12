@@ -51,6 +51,10 @@ jobs:
       run: |
         cd ${{ github.run_id }}
         nvidia-smi
+        # Start a heartbeat process that prints timestamp every minute
+        (while true; do echo "[HEARTBEAT] $(date '+%Y-%m-%d %H:%M:%S') - still running..."; sleep 60; done) &
+        HEARTBEAT_PID=$!
+        trap "kill $HEARTBEAT_PID 2>/dev/null" EXIT
         set -o pipefail # this will make sure next line returns non-0 exit code if tests fail
         ./tests/gpu-tests/run_qwen.sh
     - name: Cleanup
