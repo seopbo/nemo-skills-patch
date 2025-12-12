@@ -44,6 +44,7 @@ EXCLUDED_DATASETS = {
     "mbpp",
     "mmau-pro",
     "aalcr",  # Has tokenization mismatch issues
+    "mrcr",
 }
 
 
