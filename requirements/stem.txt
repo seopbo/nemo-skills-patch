@@ -38,7 +38,6 @@ dipy
 dp_accounting
 duckduckgo_search
 easyocr
-ecdsa
 enchant
 ephem
 ete3
