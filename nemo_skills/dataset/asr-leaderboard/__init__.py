@@ -19,4 +19,3 @@
 DATASET_GROUP = "speechlm"
 METRICS_TYPE = "audio"
 GENERATION_ARGS = "++prompt_format=openai ++eval_type=audio"
-
