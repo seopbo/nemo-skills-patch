@@ -103,7 +103,6 @@ ocl
 open_tamil
 opencv-python
 openmc_data
-openmm
 openpyxl
 optopy
 ortools
