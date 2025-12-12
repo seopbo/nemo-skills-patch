@@ -27,7 +27,7 @@ from typing import Any
 import hydra
 import litellm
 import uvicorn
-from omegaconf import ListConfig
+from omegaconf import ListConfig, OmegaConf
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
@@ -411,13 +411,14 @@ class GenerationTask:
             LOG.info(f"vLLM is serving model: {vllm_config.model_name}")
 
         # Configure the server to use the discovered vLLM backend
-        # Set host/port and let the model construct the URL
-        self.cfg.server["server_type"] = "vllm"
-        self.cfg.server["host"] = vllm_config.host
-        self.cfg.server["port"] = vllm_config.port
-        # Use the discovered model name, or fall back to a placeholder
-        if "model" not in self.cfg.server:
-            self.cfg.server["model"] = vllm_config.model_name or "nemo-skills-proxy"
+        # Use OmegaConf.update to properly merge into the struct config
+        server_config = {
+            "server_type": "vllm",
+            "host": vllm_config.host,
+            "port": vllm_config.port,
+            "model": vllm_config.model_name or "nemo-skills-proxy",
+        }
+        OmegaConf.update(self.cfg, "server", server_config, merge=True)
 
     def setup_prompt(self):
         if self.cfg.prompt_format == "openai":
