@@ -15,11 +15,19 @@
 """
 NeMo-Skills Proxy Server Utilities for NeMo-RL/NeMo-Gym Integration.
 
-This module provides OpenAI-compatible API models and a factory function
-to create a FastAPI application that proxies requests through NeMo-Skills.
+This module provides:
+1. OpenAI-compatible API models for FastAPI endpoints
+2. A factory function to create proxy FastAPI applications
+3. Discovery utilities for finding vLLM servers in NeMo-RL environments
 
 Usage:
-    from nemo_skills.training.nemo_rl.utils.skills_proxy import create_skills_proxy_app
+    from nemo_skills.training.nemo_rl.utils.skills_proxy import (
+        create_skills_proxy_app,
+        discover_vllm_server,
+    )
+
+    # Discover the vLLM server address
+    server_url = discover_vllm_server()
 
     # In your generation task
     app = create_skills_proxy_app(generation_task)
@@ -35,8 +43,10 @@ The proxy server exposes:
 
 import json
 import logging
+import os
 import time
 import uuid
+from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Protocol
 
 from fastapi import FastAPI, HTTPException
@@ -46,6 +56,317 @@ from pydantic import BaseModel, Field
 from nemo_skills.utils import get_logger_name
 
 LOG = logging.getLogger(get_logger_name(__file__))
+
+
+# =============================================================================
+# vLLM Server Discovery
+# =============================================================================
+#
+# When NeMo-RL exposes its vLLM generation workers as HTTP servers
+# (via expose_http_server: true), this utility helps discover the server URL.
+#
+# Discovery methods (in order of precedence):
+# 1. Environment variables
+# 2. Ray named values (if connected to Ray cluster)
+# 3. NeMo-Gym head server query (if head server address is known)
+
+
+# Environment variables for vLLM server discovery
+VLLM_URL_ENV_VARS = [
+    "NEMO_RL_VLLM_URL",  # Set by NeMo-RL when expose_http_server=true
+    "NEMO_SKILLS_MODEL_SERVER_URL",  # General-purpose model server URL
+    "VLLM_BASE_URL",  # Common vLLM URL variable
+]
+
+# Environment variables for Ray cluster address
+RAY_ADDRESS_ENV_VARS = [
+    "RAY_ADDRESS",  # Standard Ray address variable
+    "RAY_HEAD_ADDRESS",  # Alternative Ray head address
+]
+
+# Environment variable for NeMo-Gym head server
+NEMO_GYM_HEAD_SERVER_ENV_VAR = "NEMO_GYM_HEAD_SERVER_URL"
+
+# Ray named value key for vLLM server URL
+RAY_VLLM_URL_KEY = "nemo_rl_vllm_http_url"
+
+
+@dataclass
+class VLLMServerConfig:
+    """Configuration for a discovered vLLM server."""
+
+    base_url: str  # Full base URL, e.g., "http://localhost:5000"
+    host: str
+    port: int
+    source: str  # How the server was discovered
+
+
+def discover_vllm_server(
+    ray_address: str | None = None,
+    head_server_url: str | None = None,
+    timeout: float = 5.0,
+) -> VLLMServerConfig | None:
+    """
+    Discover the vLLM HTTP server address using multiple methods.
+
+    This function attempts to find the vLLM server that NeMo-RL exposes when
+    running with `expose_http_server: true`. It tries the following methods
+    in order:
+
+    1. **Environment variables**: Checks NEMO_RL_VLLM_URL, NEMO_SKILLS_MODEL_SERVER_URL,
+       and VLLM_BASE_URL for a configured URL.
+
+    2. **Ray named values**: If connected to a Ray cluster, checks for the
+       server URL stored under a known key.
+
+    3. **NeMo-Gym head server**: If the head server URL is known, queries it
+       for the model server configuration.
+
+    Args:
+        ray_address: Optional Ray cluster address. If None, will try to get from
+                    environment or connect to an existing cluster.
+        head_server_url: Optional NeMo-Gym head server URL (e.g., "http://localhost:11000").
+                        If None, will try to get from NEMO_GYM_HEAD_SERVER_URL.
+        timeout: Timeout for HTTP requests in seconds.
+
+    Returns:
+        VLLMServerConfig if found, None otherwise.
+
+    Example:
+        # Simple discovery
+        config = discover_vllm_server()
+        if config:
+            print(f"Found vLLM server at {config.base_url} (via {config.source})")
+
+        # With explicit Ray address
+        config = discover_vllm_server(ray_address="ray://head-node:10001")
+
+        # With explicit head server URL
+        config = discover_vllm_server(head_server_url="http://localhost:11000")
+    """
+    # Method 1: Environment variables
+    config = _discover_from_env()
+    if config:
+        return config
+
+    # Method 2: Ray named values
+    config = _discover_from_ray(ray_address)
+    if config:
+        return config
+
+    # Method 3: NeMo-Gym head server
+    config = _discover_from_head_server(head_server_url, timeout)
+    if config:
+        return config
+
+    return None
+
+
+def _parse_url(url: str) -> tuple[str, int] | None:
+    """Parse a URL into (host, port)."""
+    try:
+        # Handle URLs with and without scheme
+        if "://" not in url:
+            url = f"http://{url}"
+
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        host = parsed.hostname or "localhost"
+        port = parsed.port or 5000  # Default vLLM port
+        return host, port
+    except Exception:
+        return None
+
+
+def _discover_from_env() -> VLLMServerConfig | None:
+    """Try to discover vLLM server from environment variables."""
+    for env_var in VLLM_URL_ENV_VARS:
+        url = os.environ.get(env_var)
+        if url:
+            parsed = _parse_url(url)
+            if parsed:
+                host, port = parsed
+                base_url = f"http://{host}:{port}"
+                LOG.info(f"Discovered vLLM server from {env_var}: {base_url}")
+                return VLLMServerConfig(
+                    base_url=base_url,
+                    host=host,
+                    port=port,
+                    source=f"env:{env_var}",
+                )
+    return None
+
+
+def _discover_from_ray(ray_address: str | None = None) -> VLLMServerConfig | None:
+    """Try to discover vLLM server from Ray named values."""
+    try:
+        import ray
+    except ImportError:
+        LOG.debug("Ray not available, skipping Ray discovery")
+        return None
+
+    # Try to connect to Ray if not already connected
+    try:
+        if not ray.is_initialized():
+            # Try to get Ray address from environment or use provided
+            address = ray_address
+            if not address:
+                for env_var in RAY_ADDRESS_ENV_VARS:
+                    address = os.environ.get(env_var)
+                    if address:
+                        break
+
+            if address:
+                ray.init(address=address, ignore_reinit_error=True)
+            else:
+                # Try to connect to local Ray cluster
+                ray.init(address="auto", ignore_reinit_error=True)
+
+        # Try to get the vLLM URL from Ray named values
+        try:
+            url = ray.get_actor(RAY_VLLM_URL_KEY).get_url.remote()
+            url = ray.get(url, timeout=5)
+            if url:
+                parsed = _parse_url(url)
+                if parsed:
+                    host, port = parsed
+                    base_url = f"http://{host}:{port}"
+                    LOG.info(f"Discovered vLLM server from Ray: {base_url}")
+                    return VLLMServerConfig(
+                        base_url=base_url,
+                        host=host,
+                        port=port,
+                        source="ray:named_actor",
+                    )
+        except Exception as e:
+            LOG.debug(f"Could not get vLLM URL from Ray named actor: {e}")
+
+        # Alternative: Check Ray runtime context for vLLM worker info
+        try:
+            ctx = ray.get_runtime_context()
+            # Check if we have vLLM HTTP info in job config
+            job_config = ctx.get_job_config()
+            if job_config and hasattr(job_config, "metadata"):
+                vllm_url = job_config.metadata.get("vllm_http_url")
+                if vllm_url:
+                    parsed = _parse_url(vllm_url)
+                    if parsed:
+                        host, port = parsed
+                        base_url = f"http://{host}:{port}"
+                        LOG.info(f"Discovered vLLM server from Ray job metadata: {base_url}")
+                        return VLLMServerConfig(
+                            base_url=base_url,
+                            host=host,
+                            port=port,
+                            source="ray:job_metadata",
+                        )
+        except Exception as e:
+            LOG.debug(f"Could not get vLLM URL from Ray context: {e}")
+
+    except Exception as e:
+        LOG.debug(f"Ray discovery failed: {e}")
+
+    return None
+
+
+def _discover_from_head_server(head_server_url: str | None = None, timeout: float = 5.0) -> VLLMServerConfig | None:
+    """Try to discover vLLM server from NeMo-Gym head server.
+
+    NeMo-Gym stores the vLLM server URL(s) in its global config as `policy_base_url`.
+    This is set by NeMo-RL when it passes `VllmGeneration.dp_openai_server_base_urls`
+    to the NemoGym config.
+    """
+    try:
+        import requests
+    except ImportError:
+        LOG.debug("requests not available, skipping head server discovery")
+        return None
+
+    # Get head server URL from environment if not provided
+    if not head_server_url:
+        head_server_url = os.environ.get(NEMO_GYM_HEAD_SERVER_ENV_VAR)
+
+    if not head_server_url:
+        LOG.debug("No NeMo-Gym head server URL available")
+        return None
+
+    try:
+        # Query the head server for global config
+        response = requests.get(
+            f"{head_server_url.rstrip('/')}/global_config_dict_yaml",
+            timeout=timeout,
+        )
+        response.raise_for_status()
+
+        # Parse the config (it's JSON-encoded YAML)
+        config_yaml = response.content.decode()
+        config = json.loads(config_yaml)
+
+        # NeMo-Gym stores the vLLM URL as "policy_base_url"
+        # This comes from VllmGeneration.dp_openai_server_base_urls
+        policy_base_url = config.get("policy_base_url")
+        if policy_base_url:
+            # Can be a single URL or a list of URLs (one per DP rank)
+            if isinstance(policy_base_url, list):
+                # Take the first one - they're all equivalent for our purposes
+                url = policy_base_url[0]
+            else:
+                url = policy_base_url
+
+            parsed = _parse_url(url)
+            if parsed:
+                host, port = parsed
+                # The URL already includes /v1 from NeMo-RL
+                base_url = url if url.startswith("http") else f"http://{url}"
+                LOG.info(f"Discovered vLLM server from head server (policy_base_url): {base_url}")
+                return VLLMServerConfig(
+                    base_url=base_url,
+                    host=host,
+                    port=port,
+                    source="head_server:policy_base_url",
+                )
+
+        # Fallback: Look for other server configurations
+        for key, value in config.items():
+            if isinstance(value, dict) and "host" in value and "port" in value:
+                # Check if this looks like a model/policy server
+                if any(term in key.lower() for term in ["model", "policy", "vllm", "generation"]):
+                    host = value["host"]
+                    port = value["port"]
+                    base_url = f"http://{host}:{port}"
+                    LOG.info(f"Discovered vLLM server from head server ({key}): {base_url}")
+                    return VLLMServerConfig(
+                        base_url=base_url,
+                        host=host,
+                        port=port,
+                        source=f"head_server:{key}",
+                    )
+
+    except Exception as e:
+        LOG.debug(f"Head server discovery failed: {e}")
+
+    return None
+
+
+def set_vllm_server_url(url: str, env_var: str = "NEMO_RL_VLLM_URL") -> None:
+    """
+    Set the vLLM server URL in the environment for discovery.
+
+    This is useful when starting NeMo-RL training to make the vLLM URL
+    discoverable by NeMo-Skills proxy servers.
+
+    Args:
+        url: The vLLM server URL (e.g., "http://localhost:5000")
+        env_var: The environment variable to set (default: NEMO_RL_VLLM_URL)
+
+    Example:
+        # In NeMo-RL training script
+        vllm_port = start_vllm_http_server()
+        set_vllm_server_url(f"http://localhost:{vllm_port}")
+    """
+    os.environ[env_var] = url
+    LOG.info(f"Set {env_var}={url}")
 
 
 # =============================================================================

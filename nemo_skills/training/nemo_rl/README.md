@@ -117,6 +117,68 @@ This starts a server that:
 - Uses the `generic/math` prompt template
 - Forwards to a vLLM server at `localhost:5000`
 
+### Automatic vLLM Discovery
+
+When running alongside NeMo-RL/NeMo-Gym, the proxy can automatically discover the vLLM server:
+
+```python
+from nemo_skills.training.nemo_rl.utils import discover_vllm_server
+
+# Auto-discover vLLM server
+config = discover_vllm_server()
+if config:
+    print(f"Found vLLM at {config.base_url} (via {config.source})")
+    # Use config.host and config.port in your server configuration
+```
+
+#### How NeMo-RL/NeMo-Gym Discovery Works
+
+When `expose_http_server: true` is enabled in NeMo-RL's vLLM config:
+
+1. **`VllmAsyncGenerationWorker`** starts an HTTP server on a random port and stores `self.base_url`
+2. **`VllmGeneration.dp_openai_server_base_urls`** collects URLs from all workers via `report_dp_openai_server_base_url()`
+3. **`NemoGym`** receives these URLs and exposes them as `policy_base_url` in the global config
+4. The global config is available via the head server at `/global_config_dict_yaml`
+
+#### Discovery Methods (in order of precedence)
+
+1. **Environment variables** (fastest, most explicit):
+   - `NEMO_RL_VLLM_URL`
+   - `NEMO_SKILLS_MODEL_SERVER_URL`
+   - `VLLM_BASE_URL`
+
+2. **Ray cluster** (if connected):
+   - Checks for named actors or job metadata with vLLM URL
+
+3. **NeMo-Gym head server** (recommended when using NeMo-Gym):
+   - Queries `policy_base_url` from `/global_config_dict_yaml`
+   - Set `NEMO_GYM_HEAD_SERVER_URL` environment variable
+
+#### Example: Using with NeMo-Gym Head Server
+
+```bash
+# NeMo-Gym head server is running on port 11000
+export NEMO_GYM_HEAD_SERVER_URL="http://localhost:11000"
+
+# NeMo-Skills proxy will auto-discover vLLM URL from head server
+python -m nemo_skills.inference.generate \
+    ++start_server=True \
+    ++generate_port=7000 \
+    ++prompt_config=generic/math
+```
+
+#### Example: Using Environment Variable
+
+```bash
+# Manually set the vLLM URL (useful for testing or when head server isn't available)
+export NEMO_RL_VLLM_URL="http://192.168.1.10:54321/v1"
+
+python -m nemo_skills.inference.generate \
+    ++start_server=True \
+    ++generate_port=7000 \
+    ++prompt_config=generic/math
+```
+
 ### 2. Start GRPO Training
 
 ```bash
@@ -364,7 +426,7 @@ The `skills_proxy` module can be used independently to create OpenAI-compatible
 proxy servers:
 
 ```python
-from nemo_skills.training.nemo_rl.utils.skills_proxy import create_skills_proxy_app
+from nemo_skills.training.nemo_rl.utils import create_skills_proxy_app, discover_vllm_server
 import uvicorn
 
 # Option 1: Use with a GenerationTask
@@ -387,6 +449,42 @@ app = create_skills_proxy_app(
 )
 uvicorn.run(app, host="0.0.0.0", port=7000)
 ```
+
+### vLLM Server Discovery
+
+The module provides utilities for discovering vLLM servers:
+
+```python
+from nemo_skills.training.nemo_rl.utils import (
+    discover_vllm_server,
+    set_vllm_server_url,
+    VLLMServerConfig,
+)
+
+# Discover vLLM server (tries env vars, Ray, head server)
+config = discover_vllm_server()
+if config:
+    print(f"Found: {config.base_url}")
+    print(f"Host: {config.host}, Port: {config.port}")
+    print(f"Source: {config.source}")  # e.g., "env:NEMO_RL_VLLM_URL"
+
+# Discover with explicit Ray address
+config = discover_vllm_server(ray_address="ray://head:10001")
+
+# Discover with explicit NeMo-Gym head server
+config = discover_vllm_server(head_server_url="http://localhost:11000")
+
+# Set the vLLM URL for other processes to discover
+set_vllm_server_url("http://localhost:5000")
+```
+
+The discovery order is:
+1. **Environment variables** (fastest, most explicit)
+   - `NEMO_RL_VLLM_URL`
+   - `NEMO_SKILLS_MODEL_SERVER_URL`
+   - `VLLM_BASE_URL`
+2. **Ray named values** (if connected to Ray cluster)
+3. **NeMo-Gym head server** (queries `/global_config_dict_yaml`)
 
 ## Troubleshooting
 
