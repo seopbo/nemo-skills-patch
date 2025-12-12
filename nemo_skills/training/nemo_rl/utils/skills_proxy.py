@@ -642,9 +642,13 @@ def create_skills_proxy_app(
                             if isinstance(user_data, dict):
                                 data_point.update(user_data)
                             else:
+                                # Set both question and problem for compatibility with different prompt templates
                                 data_point["question"] = msg.content
+                                data_point["problem"] = msg.content
                         except json.JSONDecodeError:
+                            # Set both question and problem for compatibility with different prompt templates
                             data_point["question"] = msg.content
+                            data_point["problem"] = msg.content
                         break
 
             # Process through NeMo-Skills pipeline
@@ -692,8 +696,8 @@ def create_skills_proxy_app(
             total_completion_tokens = 0
 
             for idx, prompt in enumerate(prompts):
-                # Build data point
-                data_point = {"question": prompt}
+                # Build data point - set both question and problem for prompt template compatibility
+                data_point = {"question": prompt, "problem": prompt}
                 if request.extra_data:
                     data_point.update(request.extra_data)
 
