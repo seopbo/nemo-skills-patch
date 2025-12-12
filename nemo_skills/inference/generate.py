@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from copy import deepcopy
 from dataclasses import asdict, field, is_dataclass
 from pathlib import Path
@@ -27,7 +28,11 @@ from typing import Any
 
 import hydra
 import litellm
+import uvicorn
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
 from omegaconf import ListConfig
+from pydantic import BaseModel, Field
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
@@ -60,6 +65,101 @@ from nemo_skills.utils import (
 LOG = logging.getLogger(get_logger_name(__file__))
 
 
+# =============================================================================
+# OpenAI-Compatible API Models (for NeMo-Gym/NeMo-RL integration)
+# =============================================================================
+
+
+class ChatMessage(BaseModel):
+    """OpenAI-compatible chat message."""
+
+    role: str
+    content: str
+    name: str | None = None
+
+
+class ChatCompletionRequest(BaseModel):
+    """OpenAI-compatible chat completion request."""
+
+    model: str = "nemo-skills"
+    messages: list[ChatMessage]
+    temperature: float | None = None
+    top_p: float | None = None
+    n: int = 1
+    stream: bool = False
+    stop: str | list[str] | None = None
+    max_tokens: int | None = None
+    presence_penalty: float = 0.0
+    frequency_penalty: float = 0.0
+    user: str | None = None
+    # NeMo-Skills specific fields (passed through)
+    extra_data: dict | None = Field(default=None, description="Extra data for NeMo-Skills prompt filling")
+
+
+class CompletionRequest(BaseModel):
+    """OpenAI-compatible text completion request."""
+
+    model: str = "nemo-skills"
+    prompt: str | list[str]
+    temperature: float | None = None
+    top_p: float | None = None
+    n: int = 1
+    stream: bool = False
+    stop: str | list[str] | None = None
+    max_tokens: int | None = None
+    presence_penalty: float = 0.0
+    frequency_penalty: float = 0.0
+    user: str | None = None
+    # NeMo-Skills specific fields (passed through)
+    extra_data: dict | None = Field(default=None, description="Extra data for NeMo-Skills prompt filling")
+
+
+class ChatCompletionChoice(BaseModel):
+    """OpenAI-compatible chat completion choice."""
+
+    index: int
+    message: ChatMessage
+    finish_reason: str | None = "stop"
+
+
+class CompletionChoice(BaseModel):
+    """OpenAI-compatible text completion choice."""
+
+    index: int
+    text: str
+    finish_reason: str | None = "stop"
+
+
+class Usage(BaseModel):
+    """OpenAI-compatible usage statistics."""
+
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class ChatCompletionResponse(BaseModel):
+    """OpenAI-compatible chat completion response."""
+
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: list[ChatCompletionChoice]
+    usage: Usage
+
+
+class CompletionResponse(BaseModel):
+    """OpenAI-compatible text completion response."""
+
+    id: str
+    object: str = "text_completion"
+    created: int
+    model: str
+    choices: list[CompletionChoice]
+    usage: Usage
+
+
 @nested_dataclass(kw_only=True)
 class InferenceConfig:
     # Type of completion to generate when using OpenAI
@@ -87,8 +187,8 @@ class InferenceConfig:
 class GenerateSolutionsConfig:
     """Generation parameters."""
 
-    input_file: str  # Path to the input file with data
-    output_file: str  # Where to save the generations
+    input_file: str | None = None  # Path to the input file with data
+    output_file: str | None = None  # Where to save the generations
     prompt_config: str | None = None  # How to format the data into prompts
 
     # Deprecated, please use endpoint_type in the InferenceConfig instead
@@ -190,10 +290,16 @@ class GenerateSolutionsConfig:
     eval_type: str | None = None  # "lean4-proof", "math", etc.
     eval_config: dict = field(default_factory=dict)  # Config for the evaluator
 
+    # FastAPI server mode configuration
+    start_server: bool = False  # If True, start a FastAPI server instead of batch generation
+    generate_host: str = "0.0.0.0"  # Host to bind the FastAPI server to
+    generate_port: int = 7000  # Port to bind the FastAPI server to
+
     def __post_init__(self):
         self._post_init_validate_data()
         self._post_init_validate_server()
         self._post_init_validate_params()
+        self._post_init_validate_server_mode()
         self._post_init_deprecated_params()
 
     def _post_init_validate_data(self):
@@ -224,6 +330,20 @@ class GenerateSolutionsConfig:
         for param, default_value in self._get_disallowed_params():
             if getattr(self, param) != default_value:
                 raise ValueError(f"{param} must be {default_value}")
+
+    def _post_init_validate_server_mode(self):
+        """Validate input_file and output_file based on start_server mode."""
+        if self.start_server:
+            if self.input_file is not None or self.output_file is not None:
+                raise ValueError(
+                    "When start_server=True, input_file and output_file must be None. "
+                    "The server processes individual data points via API requests."
+                )
+        else:
+            if self.input_file is None:
+                raise ValueError("input_file is required when start_server=False")
+            if self.output_file is None:
+                raise ValueError("output_file is required when start_server=False")
 
     def _post_init_deprecated_params(self):
         if self.use_completions_api:
@@ -607,8 +727,11 @@ class GenerationTask:
         data_point.update(eval_results)
         return data_point
 
-    async def _generate_and_save_datapoint(self, data_point, all_data, fout, pbar):
-        """Starts generation, evaluation and saves the output for a single data point."""
+    async def _process_single_datapoint_core(self, data_point, all_data):
+        """Core logic for processing a single data point: generation, stats, postprocessing, and evaluation.
+
+        Returns the processed output dictionary.
+        """
         # Generate output for this single data point
         start_time = time.time()
         output = await self.process_single_datapoint(data_point, all_data)
@@ -624,6 +747,12 @@ class GenerationTask:
         # evaluate single-data point if requested and evaluator supports that
         if self.should_run_evaluation and self.evaluator:
             output = await self.evaluate_single_datapoint({**data_point, **output})
+
+        return output
+
+    async def _generate_and_save_datapoint(self, data_point, all_data, fout, pbar):
+        """Starts generation, evaluation and saves the output for a single data point."""
+        output = await self._process_single_datapoint_core(data_point, all_data)
 
         # Thread-safe output writing
         async with self.output_lock:
@@ -694,6 +823,195 @@ class GenerationTask:
         Path(self.cfg.output_file + "-async").unlink()
         self.cleanup_litellm_cache()
 
+    def start_fastapi_server(self):
+        """Start a FastAPI server that exposes generation endpoints.
+
+        Exposes:
+        - /generate: NeMo-Skills native endpoint for data point generation
+        - /v1/chat/completions: OpenAI-compatible chat completions (for NeMo-Gym/NeMo-RL)
+        - /v1/completions: OpenAI-compatible text completions (for NeMo-Gym/NeMo-RL)
+        """
+        app = FastAPI(
+            title="NeMo Skills Generation Server",
+            description="Proxy server that adds NeMo-Skills prompting logic to model generations. "
+            "Compatible with OpenAI API for seamless integration with NeMo-Gym/NeMo-RL.",
+        )
+
+        # Keep reference to self for use in endpoints
+        generation_task = self
+
+        @app.post("/generate")
+        async def generate_endpoint(data_point: dict):
+            """Generate output for a single data point (NeMo-Skills native format).
+
+            Request body should be the data point dictionary directly (not wrapped in a 'data_point' key).
+            The body is parsed as JSON and passed directly to the generation logic.
+            """
+            try:
+                output = await generation_task._process_single_datapoint_core(data_point, [])
+                return JSONResponse(content=output)
+            except Exception as e:
+                LOG.exception("Error processing generation request")
+                raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
+        @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
+        async def chat_completions(request: ChatCompletionRequest):
+            """OpenAI-compatible chat completions endpoint.
+
+            This endpoint allows NeMo-Gym/NeMo-RL to use this server as a drop-in
+            replacement for any OpenAI-compatible model server. The NeMo-Skills
+            prompting logic is applied transparently.
+
+            Usage with NeMo-RL:
+                Configure policy.generation to point to this server as an OpenAI endpoint.
+
+            Usage with NeMo-Gym SimpleResponsesAPIModel:
+                Set the base_url to point to this server.
+            """
+            try:
+                # Build data point from the request
+                # The messages can be used directly or we can extract user content
+                data_point = {}
+
+                # If extra_data is provided, use it as the base for prompt filling
+                if request.extra_data:
+                    data_point.update(request.extra_data)
+
+                # Add messages for prompt filling (if using openai prompt_format)
+                # or extract the last user message for ns format
+                messages = [{"role": m.role, "content": m.content} for m in request.messages]
+
+                if generation_task.cfg.prompt_format == "openai":
+                    data_point["messages"] = messages
+                else:
+                    # For NeMo-Skills format, extract content from the last user message
+                    # and use it along with extra_data for prompt filling
+                    for msg in reversed(request.messages):
+                        if msg.role == "user":
+                            # If the user content looks like JSON, try to parse it
+                            try:
+                                user_data = json.loads(msg.content)
+                                if isinstance(user_data, dict):
+                                    data_point.update(user_data)
+                                else:
+                                    data_point["question"] = msg.content
+                            except json.JSONDecodeError:
+                                data_point["question"] = msg.content
+                            break
+
+                # Process through NeMo-Skills pipeline
+                output = await generation_task._process_single_datapoint_core(data_point, [])
+
+                # Build OpenAI-compatible response
+                generation_text = output.get(generation_task.cfg.generation_key, output.get("generation", ""))
+                num_tokens = output.get("num_generated_tokens", 0)
+
+                response = ChatCompletionResponse(
+                    id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
+                    created=int(time.time()),
+                    model=request.model,
+                    choices=[
+                        ChatCompletionChoice(
+                            index=0,
+                            message=ChatMessage(role="assistant", content=generation_text),
+                            finish_reason=output.get("finish_reason", "stop"),
+                        )
+                    ],
+                    usage=Usage(
+                        prompt_tokens=output.get("num_input_tokens", 0),
+                        completion_tokens=num_tokens,
+                        total_tokens=output.get("num_input_tokens", 0) + num_tokens,
+                    ),
+                )
+
+                return response
+
+            except Exception as e:
+                LOG.exception("Error processing chat completion request")
+                raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
+        @app.post("/v1/completions", response_model=CompletionResponse)
+        async def completions(request: CompletionRequest):
+            """OpenAI-compatible text completions endpoint.
+
+            Similar to chat completions but for raw text prompts.
+            """
+            try:
+                # Handle single prompt or list of prompts
+                prompts = [request.prompt] if isinstance(request.prompt, str) else request.prompt
+
+                choices = []
+                total_completion_tokens = 0
+
+                for idx, prompt in enumerate(prompts):
+                    # Build data point
+                    data_point = {"question": prompt}
+                    if request.extra_data:
+                        data_point.update(request.extra_data)
+
+                    # Process through NeMo-Skills pipeline
+                    output = await generation_task._process_single_datapoint_core(data_point, [])
+
+                    generation_text = output.get(generation_task.cfg.generation_key, output.get("generation", ""))
+                    num_tokens = output.get("num_generated_tokens", 0)
+                    total_completion_tokens += num_tokens
+
+                    choices.append(
+                        CompletionChoice(
+                            index=idx,
+                            text=generation_text,
+                            finish_reason=output.get("finish_reason", "stop"),
+                        )
+                    )
+
+                response = CompletionResponse(
+                    id=f"cmpl-{uuid.uuid4().hex[:8]}",
+                    created=int(time.time()),
+                    model=request.model,
+                    choices=choices,
+                    usage=Usage(
+                        prompt_tokens=0,  # Not tracked for text completions
+                        completion_tokens=total_completion_tokens,
+                        total_tokens=total_completion_tokens,
+                    ),
+                )
+
+                return response
+
+            except Exception as e:
+                LOG.exception("Error processing completion request")
+                raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
+        @app.get("/v1/models")
+        async def list_models():
+            """List available models (OpenAI-compatible)."""
+            return {
+                "object": "list",
+                "data": [
+                    {
+                        "id": "nemo-skills",
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": "nvidia",
+                    }
+                ],
+            }
+
+        @app.get("/health")
+        async def health_check():
+            """Health check endpoint."""
+            return {"status": "healthy"}
+
+        LOG.info(
+            f"Starting FastAPI server on {self.cfg.generate_host}:{self.cfg.generate_port}. "
+            f"Endpoints available:\n"
+            f"  - /generate (NeMo-Skills native)\n"
+            f"  - /v1/chat/completions (OpenAI-compatible)\n"
+            f"  - /v1/completions (OpenAI-compatible)\n"
+            f"  - /v1/models (OpenAI-compatible)"
+        )
+        uvicorn.run(app, host=self.cfg.generate_host, port=self.cfg.generate_port)
+
     def wait_for_server(self):
         if not self.cfg.server.get("base_url") and not self.cfg.server.get("host") and not self.cfg.server.get("port"):
             LOG.info("Skipping server wait as no server address is provided.")
@@ -713,10 +1031,18 @@ class GenerationTask:
     def setup_litellm_cache(self):
         if self.cfg.enable_litellm_cache:
             # One cache per (output_file_name, chunk_id) pair
-            output_file_name = Path(self.cfg.output_file).name
-            self.litellm_cache_dir = (
-                Path(self.cfg.output_file).parent / "litellm_cache" / f"{output_file_name}_{self.cfg.chunk_id or 0}"
-            )
+            # In server mode, use a default cache directory
+            if self.cfg.output_file is None:
+                cache_name = "server_cache"
+            else:
+                output_file_name = Path(self.cfg.output_file).name
+                cache_name = f"{output_file_name}_{self.cfg.chunk_id or 0}"
+
+            if self.cfg.output_file is None:
+                # Use a default cache directory in server mode
+                self.litellm_cache_dir = Path.cwd() / "litellm_cache" / cache_name
+            else:
+                self.litellm_cache_dir = Path(self.cfg.output_file).parent / "litellm_cache" / cache_name
             litellm.cache = litellm.Cache(type="disk", disk_cache_dir=self.litellm_cache_dir)
 
     def cleanup_litellm_cache(self):
@@ -724,6 +1050,14 @@ class GenerationTask:
             shutil.rmtree(self.litellm_cache_dir)
 
     def generate(self):
+        if self.cfg.start_server:
+            # Server mode: start FastAPI server
+            self.wait_for_server()
+            self.wait_for_sandbox()
+            self.start_fastapi_server()
+            return
+
+        # Normal batch generation mode
         Path(self.cfg.output_file).absolute().parent.mkdir(parents=True, exist_ok=True)
 
         data = self.load_data()
