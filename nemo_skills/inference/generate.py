@@ -47,7 +47,7 @@ from nemo_skills.inference.model import (
 )
 from nemo_skills.inference.model.base import EndpointType
 from nemo_skills.prompt.utils import get_prompt, get_token_count
-from nemo_skills.training.nemo_rl.utils.skills_proxy import create_skills_proxy_app
+from nemo_skills.training.nemo_rl.utils.skills_proxy import create_skills_proxy_app, discover_vllm_server
 from nemo_skills.utils import (
     chunk_data,
     get_help_message,
@@ -336,6 +336,10 @@ class GenerationTask:
         if self.cfg.inference.endpoint_type == EndpointType.text and self.cfg.inference.tokens_to_generate is None:
             raise ValueError("When using completions API, tokens_to_generate must be specified!")
 
+        # In server mode, configure the server to point to the discovered vLLM backend
+        if self.cfg.start_server:
+            self._configure_server_for_proxy_mode()
+
         # Setup prompt formatter and LLM
         self.prompt = self.setup_prompt()
         self.llm = self.setup_llm()
@@ -385,6 +389,35 @@ class GenerationTask:
 
         # output_lock will be initialized when async_loop is called
         self.output_lock = None
+
+    def _configure_server_for_proxy_mode(self):
+        """Configure the server to point to the discovered vLLM backend in proxy mode."""
+        # If server is already configured with a server_type, use it as-is
+        if self.cfg.server.get("server_type"):
+            LOG.info(f"Server already configured with type: {self.cfg.server['server_type']}")
+            return
+
+        # Discover the vLLM server URL
+        vllm_config = discover_vllm_server()
+        if vllm_config is None:
+            raise ValueError(
+                "start_server=True requires a vLLM backend. "
+                "Either configure server.server_type and server.base_url, "
+                "or set NEMO_RL_VLLM_URL environment variable."
+            )
+
+        LOG.info(f"Discovered vLLM backend at {vllm_config.base_url} (via {vllm_config.source})")
+        if vllm_config.model_name:
+            LOG.info(f"vLLM is serving model: {vllm_config.model_name}")
+
+        # Configure the server to use the discovered vLLM backend
+        # Set host/port and let the model construct the URL
+        self.cfg.server["server_type"] = "vllm"
+        self.cfg.server["host"] = vllm_config.host
+        self.cfg.server["port"] = vllm_config.port
+        # Use the discovered model name, or fall back to a placeholder
+        if "model" not in self.cfg.server:
+            self.cfg.server["model"] = vllm_config.model_name or "nemo-skills-proxy"
 
     def setup_prompt(self):
         if self.cfg.prompt_format == "openai":

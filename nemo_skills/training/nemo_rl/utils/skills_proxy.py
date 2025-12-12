@@ -49,6 +49,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Protocol
 
+import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -99,6 +100,39 @@ class VLLMServerConfig:
     host: str
     port: int
     source: str  # How the server was discovered
+    model_name: str | None = None  # The model name served by vLLM
+
+
+def get_vllm_model_name(base_url: str, timeout: float = 5.0) -> str | None:
+    """Query the vLLM server to get the model name being served.
+
+    Args:
+        base_url: The vLLM server base URL (e.g., "http://localhost:5000/v1")
+        timeout: Request timeout in seconds
+
+    Returns:
+        The model name if found, None otherwise
+    """
+    try:
+        # Remove /v1 suffix if present, then add /v1/models
+        url = base_url.rstrip("/")
+        if url.endswith("/v1"):
+            models_url = f"{url}/models"
+        else:
+            models_url = f"{url}/v1/models"
+
+        response = requests.get(models_url, timeout=timeout)
+        if response.status_code == 200:
+            data = response.json()
+            if "data" in data and len(data["data"]) > 0:
+                model_name = data["data"][0].get("id")
+                if model_name:
+                    LOG.info(f"Discovered model name from vLLM: {model_name}")
+                    return model_name
+    except Exception as e:
+        LOG.debug(f"Failed to get model name from vLLM: {e}")
+
+    return None
 
 
 def discover_vllm_server(
@@ -147,16 +181,19 @@ def discover_vllm_server(
     # Method 1: Environment variables
     config = _discover_from_env()
     if config:
+        config.model_name = get_vllm_model_name(config.base_url, timeout)
         return config
 
     # Method 2: Ray named values
     config = _discover_from_ray(ray_address)
     if config:
+        config.model_name = get_vllm_model_name(config.base_url, timeout)
         return config
 
     # Method 3: NeMo-Gym head server
     config = _discover_from_head_server(head_server_url, timeout)
     if config:
+        config.model_name = get_vllm_model_name(config.base_url, timeout)
         return config
 
     return None
