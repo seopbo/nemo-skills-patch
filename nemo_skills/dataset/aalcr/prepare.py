@@ -91,10 +91,10 @@ def find_optimal_documents(documents, all_documents, documents_keys, question_te
         tokenizer_name: Name of tokenizer to use
     
     Returns:
-        Tuple of (optimized_documents, optimized_prompt, new_token_count)
+        Tuple of (optimized_prompt, new_token_count)
     """
     documents_keys_extra = list(set(all_documents.keys()) - set(documents_keys))
-    if max_aalcr_tokens <= max_context_window:
+    if max_aalcr_tokens < max_context_window:
         documents_keys_extra = documents_keys_extra * ((max_context_window - current_tokens) // (max_aalcr_tokens - current_tokens) + 1)
 
     random.shuffle(documents_keys_extra)
