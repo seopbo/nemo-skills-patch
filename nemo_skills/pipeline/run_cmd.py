@@ -34,7 +34,7 @@ LOG = logging.getLogger(get_logger_name(__file__))
 def get_cmd(command):
     cmd = (
         f"export HYDRA_FULL_ERROR=1 && "
-        f"export PYTHONPATH=$PYTHONPATH:/nemo_run/code && "
+        f"export PYTHONPATH=/nemo_run/code:$PYTHONPATH && "
         f"cd /nemo_run/code && "
         f"{command.strip()} "
     )

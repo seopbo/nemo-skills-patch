@@ -548,7 +548,15 @@ class GenerationTask:
     # TODO: data will not include any samples skipped after restart
     def fill_prompt(self, data_point, data):
         """Passing in full data in case it's needed to fill the prompt in subclasses."""
-        if self.cfg.prompt_format == "openai":
+        LOG.debug(
+            f"fill_prompt called with prompt_format={self.cfg.prompt_format}, data_point keys={list(data_point.keys())}"
+        )
+
+        # Handle openai format or data that has messages (e.g., from proxy endpoint)
+        # TODO the second clause here is definitely a hack and should be removed
+        if self.cfg.prompt_format == "openai" or ("messages" in data_point and self.prompt is None):
+            if "messages" not in data_point:
+                raise ValueError("prompt_format='openai' requires 'messages' in data_point")
             if self.cfg.prompt_suffix:
                 data_point["messages"][-1]["content"] += self.cfg.prompt_suffix
             if self.cfg.system_message:
@@ -558,6 +566,13 @@ class GenerationTask:
                     data_point["messages"][0]["content"] = self.cfg.system_message
             return data_point["messages"]
 
+        # For ns format, we need a prompt template
+        if self.prompt is None:
+            raise ValueError(
+                f"prompt_format='{self.cfg.prompt_format}' requires a prompt template, but none was configured. "
+                f"Either set prompt_format='openai' or provide a prompt_config."
+            )
+
         total_code_executions_in_prompt = self.cfg.total_code_executions_in_prompt
         if total_code_executions_in_prompt is not None:
             if isinstance(total_code_executions_in_prompt, (list, tuple)):
@@ -565,12 +580,19 @@ class GenerationTask:
                 total_code_executions_in_prompt = random.randint(min_val, max_val)
             data_point["total_code_executions"] = total_code_executions_in_prompt
         data_point = deepcopy(data_point)
-        filled_prompt = self.prompt.fill(
-            data_point,
-            start_assistant_response_key=self.cfg.start_assistant_response_key,
-            chat_template_kwargs=self.cfg.chat_template_kwargs,
-            format_as_string=(self.cfg.inference.endpoint_type == EndpointType.text),
-        )
+
+        try:
+            filled_prompt = self.prompt.fill(
+                data_point,
+                start_assistant_response_key=self.cfg.start_assistant_response_key,
+                chat_template_kwargs=self.cfg.chat_template_kwargs,
+                format_as_string=(self.cfg.inference.endpoint_type == EndpointType.text),
+            )
+        except KeyError as e:
+            raise KeyError(
+                f"Prompt template requires key {e} but data_point only has: {list(data_point.keys())}. "
+                f"If passing OpenAI-style messages, use prompt_format='openai'."
+            ) from e
         if self.cfg.prompt_suffix:
             if isinstance(filled_prompt, list):
                 filled_prompt[-1]["content"] += self.cfg.prompt_suffix
@@ -772,6 +794,7 @@ class GenerationTask:
 
         Uses the skills_proxy module for OpenAI-compatible API implementation.
         """
+        LOG.info(f"Server mode config: prompt_format={self.cfg.prompt_format}, prompt_config={self.cfg.prompt_config}")
         app = create_skills_proxy_app(generation_task=self)
 
         LOG.info(
