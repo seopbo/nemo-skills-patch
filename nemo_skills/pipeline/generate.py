@@ -59,6 +59,7 @@ def _create_job_unified(
     task_name: str,
     log_dir: str,
     sbatch_kwargs: Optional[Dict] = None,
+    sandbox_env_overrides: Optional[List[str]] = None,
 ) -> List[CommandGroup]:
     """
     Create CommandGroups for n models (unified for n=1 and n>1).
@@ -141,6 +142,7 @@ def _create_job_unified(
                     cluster_config=cluster_config,
                     keep_mounts=keep_mounts_for_sandbox,
                     allocate_port=True,  # Always allocate port for sandbox
+                    env_overrides=sandbox_env_overrides,
                 )
 
                 sandbox_cmd = Command(
@@ -197,7 +199,6 @@ def _create_job_unified(
                 log_dir=log_dir,
             )
             groups.append(group)
-            # TODO: reintegrate sandbox_env_overrides
 
     return groups
 

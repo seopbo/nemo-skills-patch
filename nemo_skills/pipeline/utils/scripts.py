@@ -247,6 +247,7 @@ class SandboxScript(BaseJobScript):
     port: Optional[int] = None
     keep_mounts: bool = False
     allocate_port: bool = True
+    env_overrides: Optional[List[str]] = None  # Extra env vars in KEY=VALUE form
     log_prefix: str = field(default="sandbox", init=False)
 
     def __post_init__(self):
@@ -271,7 +272,13 @@ class SandboxScript(BaseJobScript):
         # Use a callable to return both command and environment variables
         # This ensures the sandbox's LISTEN_PORT and NGINX_PORT are properly set
         def build_cmd() -> Tuple[str, Dict]:
-            return cmd, {"environment": metadata.get("environment", {})}
+            env = dict(metadata.get("environment", {}))
+            # Apply user-specified environment overrides
+            if self.env_overrides:
+                for override in self.env_overrides:
+                    key, value = override.split("=", 1)
+                    env[key] = value
+            return cmd, {"environment": env}
 
         self.set_inline(build_cmd)
         super().__post_init__()
