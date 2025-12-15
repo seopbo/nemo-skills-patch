@@ -152,7 +152,6 @@ python-snappy
 qiskit
 quote
 quotes
-qutip
 ragas
 rdflib
 rdkit
