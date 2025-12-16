@@ -404,6 +404,10 @@ class GenerationTask:
             "chunk_audio_threshold_sec": self.cfg.chunk_audio_threshold_sec,
         }
 
+        # Only pass audio_chunking_config to models that support it (VLLM-based servers)
+        audio_supported_servers = {"vllm"}
+        server_type = self.cfg.server.get("server_type", "").lower()
+
         if self.cfg.code_execution:
             llm = get_code_execution_model(**self.cfg.server, tokenizer=self.tokenizer, sandbox=self.sandbox)
         elif self.cfg.tool_modules is not None:
@@ -414,8 +418,10 @@ class GenerationTask:
                 tokenizer=self.tokenizer,
                 additional_config={"sandbox": self.cfg.sandbox},
             )
-        else:
+        elif server_type in audio_supported_servers:
             llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, **audio_chunking_config)
+        else:
+            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
 
         if self.cfg.parallel_thinking.mode is not None:
             # We don't want to override these key variables which overlap with self.cfg
