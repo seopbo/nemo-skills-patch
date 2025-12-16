@@ -37,11 +37,11 @@ def test_vllm_audio_generation():
     with tempfile.NamedTemporaryFile(mode="w", suffix=".jsonl", delete=False) as f:
         test_data = [
             {
-                "problem": "Transcribe this audio",
+                "question": "Transcribe this audio",
                 "audio": {"path": "/nemo_run/code/tests/slurm-tests/asr_nim/wavs/t2_16.wav"},
             },
             {
-                "problem": "What is in this audio?",
+                "question": "What is in this audio?",
                 "audio": {"path": "/nemo_run/code/tests/slurm-tests/asr_nim/wavs/t3_16.wav"},
             },
         ]
@@ -60,7 +60,7 @@ def test_vllm_audio_generation():
             f"    --server_nodes 1 "
             f"    --server_args '--enforce-eager' "
             f"    --input_file={input_file} "
-            f"    ++prompt_config=openai "
+            f"    ++prompt_config=generic/default "
             f"    ++skip_filled=False "
         )
         subprocess.run(cmd, shell=True, check=True)

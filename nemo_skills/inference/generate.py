@@ -549,6 +549,15 @@ class GenerationTask:
                 filled_prompt[-1]["content"] += self.cfg.prompt_suffix
             else:
                 filled_prompt += self.cfg.prompt_suffix
+
+        # Copy audio fields from data_point to the user message for audio models
+        if isinstance(filled_prompt, list):
+            for msg in filled_prompt:
+                if msg.get("role") == "user":
+                    if "audio" in data_point:
+                        msg["audio"] = data_point["audio"]
+                    break
+
         return filled_prompt
 
     def preprocess_prompt(self, prompt: str | list[dict]) -> str | list[dict]:
