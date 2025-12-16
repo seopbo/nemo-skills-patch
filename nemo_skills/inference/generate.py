@@ -557,8 +557,7 @@ class GenerationTask:
         Override this method to add custom preprocessing logic.
         Audio conversion is now handled by the model (e.g., VLLMModel).
         """
-        if not isinstance(prompt, list):
-            return prompt
+        return prompt
 
     def dump_outputs(self, outputs, data_points, fout):
         for output in outputs:
