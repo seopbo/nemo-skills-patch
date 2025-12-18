@@ -13,6 +13,7 @@
 # limitations under the License.
 
 executor: local
+check_uncommitted_changes: false
 
 containers:
   trtllm: nvcr.io/nvidia/tensorrt-llm/release:1.0.0

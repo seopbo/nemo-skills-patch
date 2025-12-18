@@ -42,6 +42,17 @@ from transformers import PreTrainedTokenizerBase
 from nemo_skills.prompt.utils import get_prompt
 from nemo_skills.utils import setup_make_sequence_length_divisible_by
 
+# NeMo-Gym imports (optional - only needed when using NeMo-Gym)
+_NEMO_GYM_IMPORT_ERROR = None
+try:
+    from nemo_rl.environments.nemo_gym import NemoGym
+
+    NEMO_GYM_AVAILABLE = True
+except ImportError as e:
+    NEMO_GYM_AVAILABLE = False
+    _NEMO_GYM_IMPORT_ERROR = str(e)
+    NemoGym = None  # type: ignore
+
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
     """Parse command line arguments."""
@@ -197,6 +208,8 @@ def setup_data(
     tokenizer: TokenizerType,
     data_config: DataConfig,
     env_configs: dict[str, Any],
+    nemo_gym_config: Optional[dict[str, Any]] = None,
+    policy_config: Optional[dict[str, Any]] = None,
 ) -> tuple[
     AllTaskProcessedDataset,
     Optional[AllTaskProcessedDataset],
@@ -220,28 +233,81 @@ def setup_data(
     )
     task_data_processors["math"] = (math_task_spec, ns_data_processor)
 
-    # Allow overriding the environment class via the Hydra/YAML config.
-    # If `env_cls` is provided inside env_configs["math"], we dynamically
-    # import and instantiate that environment instead of the default
-    # `MathEnvironment`.  This lets users plug in custom reward functions
-    # without modifying the rest of the code.
+    # Check if we should use NeMo-Gym for rollouts
+    should_use_nemo_gym = env_configs.get("should_use_nemo_gym", False)
 
-    env_cls_path = env_configs["math"].get(
-        "env_cls",
-        "nemo_skills.training.nemo_rl.environments.math_environment.MathEnvironment",
-    )
-    ACTOR_ENVIRONMENT_REGISTRY[env_cls_path] = PY_EXECUTABLES.SYSTEM
+    if should_use_nemo_gym:
+        if not NEMO_GYM_AVAILABLE:
+            error_msg = f"NeMo-Gym is not available: {_NEMO_GYM_IMPORT_ERROR}"
+            raise ImportError(error_msg)
 
-    module_name, class_name = env_cls_path.rsplit(".", 1)
-    env_module = importlib.import_module(module_name)
-    env_cls = getattr(env_module, class_name)
+        print("  ⚙️  Using NeMo-Gym for rollouts")
 
-    math_env = env_cls.options(  # type: ignore  # ray.remote wrapper
-        runtime_env={
-            "py_executable": get_actor_python_env(env_cls_path),
-            "env_vars": dict(os.environ),  # Pass through all env vars
+        # Get the proxy URL from nemo_gym config
+        policy_base_url = nemo_gym_config.get("policy_base_url") if nemo_gym_config else None
+        if not policy_base_url:
+            raise ValueError(
+                "nemo_gym.policy_base_url is required when env.should_use_nemo_gym=true. "
+                "This should point to your NeMo-Skills proxy URL."
+            )
+
+        # Build NeMo-Gym config
+        model_name = policy_config.get("model_name", "unknown") if policy_config else "unknown"
+
+        # NeMo-Gym expects base_urls as a list
+        base_urls = [policy_base_url] if isinstance(policy_base_url, str) else policy_base_url
+
+        nemo_gym_env_config = {
+            "model_name": model_name,
+            "base_urls": base_urls,
+            "initial_global_config_dict": nemo_gym_config.get("initial_global_config_dict", {}),
         }
-    ).remote(env_configs["math"])
+
+        # Register NeMo-Gym environment
+        nemo_gym_cls_path = "nemo_rl.environments.nemo_gym.NemoGym"
+        ACTOR_ENVIRONMENT_REGISTRY[nemo_gym_cls_path] = PY_EXECUTABLES.SYSTEM
+
+        nemo_gym_env = NemoGym.options(
+            runtime_env={
+                "py_executable": get_actor_python_env(nemo_gym_cls_path),
+                "env_vars": dict(os.environ),
+            }
+        ).remote(nemo_gym_env_config)
+
+        print(f"  ✓ NeMo-Gym environment created with base_urls={base_urls}")
+
+        # Use NeMo-Gym for all tasks
+        task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: nemo_gym_env)
+        task_to_env["math"] = nemo_gym_env
+
+    else:
+        # Standard MathEnvironment setup
+        # Allow overriding the environment class via the Hydra/YAML config.
+        # If `env_cls` is provided inside env_configs["math"], we dynamically
+        # import and instantiate that environment instead of the default
+        # `MathEnvironment`.  This lets users plug in custom reward functions
+        # without modifying the rest of the code.
+
+        env_cls_path = env_configs["math"].get(
+            "env_cls",
+            "nemo_skills.training.nemo_rl.environments.math_environment.MathEnvironment",
+        )
+        ACTOR_ENVIRONMENT_REGISTRY[env_cls_path] = PY_EXECUTABLES.SYSTEM
+
+        module_name, class_name = env_cls_path.rsplit(".", 1)
+        env_module = importlib.import_module(module_name)
+        env_cls = getattr(env_module, class_name)
+
+        math_env = env_cls.options(  # type: ignore  # ray.remote wrapper
+            runtime_env={
+                "py_executable": get_actor_python_env(env_cls_path),
+                "env_vars": dict(os.environ),  # Pass through all env vars
+            }
+        ).remote(env_configs["math"])
+
+        task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
+        task_to_env["math"] = math_env
+
     dataset = AllTaskProcessedDataset(
         data.formatted_ds["train"],
         tokenizer,
@@ -262,8 +328,6 @@ def setup_data(
     else:
         val_dataset = None
 
-    task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
-    task_to_env["math"] = math_env
     return dataset, val_dataset, task_to_env, task_to_env
 
 
@@ -307,13 +371,35 @@ def main() -> None:
     assert config["policy"]["generation"] is not None, "A generation config is required for GRPO"
     config["policy"]["generation"] = configure_generation_config(config["policy"]["generation"], tokenizer)
 
+    # Apply NeMo-Gym config if enabled (ensures vLLM HTTP server is exposed)
+    if config["env"].get("should_use_nemo_gym", False):
+        if not NEMO_GYM_AVAILABLE:
+            print(f"  ⚠️  Warning: NeMo-Gym import failed: {_NEMO_GYM_IMPORT_ERROR}")
+            print("     Will fall back to MathEnvironment")
+        else:
+            # Ensure vLLM HTTP server is exposed for NeMo-Gym to connect
+            vllm_cfg = config["policy"]["generation"].get("vllm_cfg", {})
+            vllm_cfg["expose_http_server"] = True
+            vllm_cfg["async_engine"] = True
+            config["policy"]["generation"]["vllm_cfg"] = vllm_cfg
+            # NeMo-Gym doesn't support stop_token_ids/stop_strings - clear them
+            config["policy"]["generation"]["stop_token_ids"] = None
+            config["policy"]["generation"]["stop_strings"] = None
+            print("  ✓ NeMo-Gym config applied (vLLM HTTP server exposed, stop tokens cleared)")
+
     # setup data
     (
         dataset,
         val_dataset,
         task_to_env,
         val_task_to_env,
-    ) = setup_data(tokenizer, config["data"], config["env"])
+    ) = setup_data(
+        tokenizer,
+        config["data"],
+        config["env"],
+        nemo_gym_config=config.get("nemo_gym"),
+        policy_config=config.get("policy"),
+    )
 
     (
         policy,

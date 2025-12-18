@@ -267,9 +267,18 @@ data:
   num_workers: 10
 
 env:
+  # Set to true to use NeMo-Gym for rollouts (requires nemo_gym.policy_base_url)
+  should_use_nemo_gym: false
   math:
     env_cls: nemo_skills.training.nemo_rl.environments.math_environment.MathEnvironment
     num_workers: 8
+
+# NeMo-Gym configuration (only used when env.should_use_nemo_gym=true)
+nemo_gym:
+  # URL of the NeMo-Skills proxy (e.g., http://localhost:7000/v1)
+  policy_base_url: null
+  # Additional NeMo-Gym global config options
+  initial_global_config_dict: {}
 
 logger:
   log_dir: "logs"  # Base directory for all logs
