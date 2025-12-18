@@ -193,6 +193,13 @@ def ns_data_processor(
             chat_message["token_ids"] = chat_message["token_ids"][: min(4, max_seq_length // len(message_log))]
         loss_multiplier = 0.0
 
+    # Build responses_create_params for NeMo-Gym (OpenAI Responses API format)
+    # This is used when env.should_use_nemo_gym=true
+    responses_create_params = {
+        "input": [{"role": "user", "content": user_message}],
+        "tools": [],  # No tools for basic math
+    }
+
     output: DatumSpec = {
         "message_log": message_log,
         "length": length,
@@ -200,6 +207,7 @@ def ns_data_processor(
         "loss_multiplier": loss_multiplier,
         "idx": idx,
         "task_name": datum_dict["task_name"],
+        "responses_create_params": responses_create_params,
     }
     return output
 
