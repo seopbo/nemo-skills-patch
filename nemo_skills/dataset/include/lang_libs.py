@@ -13,7 +13,6 @@
 # limitations under the License.
 
 from collections import namedtuple
-from functools import lru_cache
 
 MCQFormat = namedtuple(
     "MCQFormat", ["q_label", "opt_label", "answer_prefix", "task", "placeholder"]
@@ -337,7 +336,6 @@ MCQ_FORMATS = {
 }
 
 
-@lru_cache(maxsize=len(MCQ_FORMATS))
 def get_mcq_format(language, il_prompts):
 
     # In-Language Prompts
