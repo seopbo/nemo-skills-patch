@@ -17,8 +17,12 @@ set -e
 MODEL="${NEMO_SKILLS_TEST_HF_MODEL:-Qwen/Qwen3-0.6B}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_FILE="/tmp/nemo-rl-test-data.jsonl"
-PROXY_PORT=7110
+# Use a random port to avoid conflicts with previous runs
+PROXY_PORT=$((7200 + RANDOM % 100))
 PROXY_URL="http://localhost:${PROXY_PORT}/v1"
+
+# Kill any leftover processes on the port
+fuser -k ${PROXY_PORT}/tcp 2>/dev/null || true
 
 echo '{"problem": "What is 2+2?", "expected_answer": "4"}' > "$DATA_FILE"
 
@@ -56,14 +60,14 @@ NEMO_RL_PID=$!
 # ============================================================================
 echo "Waiting for vLLM to start..."
 VLLM_URL=""
-for i in {1..180}; do
+for i in {1..360}; do
     VLLM_URL=$(grep -oP 'Starting server on \K(http://[0-9.]+:[0-9]+/v1)' /tmp/nemo-rl.log 2>/dev/null | head -1 || true)
     if [ -n "$VLLM_URL" ]; then
         echo "Found vLLM at: $VLLM_URL"
         break
     fi
     if [ $((i % 10)) -eq 0 ]; then
-        echo "  ... waiting for vLLM ($i/180)"
+        echo "  ... waiting for vLLM ($i/360)"
     fi
     sleep 2
 done

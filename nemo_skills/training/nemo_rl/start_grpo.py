@@ -195,7 +195,8 @@ def ns_data_processor(
 
     # Build responses_create_params for NeMo-Gym (OpenAI Responses API format)
     # This is used when env.should_use_nemo_gym=true
-    responses_create_params = {
+    # NeMo-Gym's rollouts.py expects this INSIDE extra_env_info
+    extra_env_info["responses_create_params"] = {
         "input": [{"role": "user", "content": user_message}],
         "tools": [],  # No tools for basic math
     }
@@ -207,7 +208,6 @@ def ns_data_processor(
         "loss_multiplier": loss_multiplier,
         "idx": idx,
         "task_name": datum_dict["task_name"],
-        "responses_create_params": responses_create_params,
     }
     return output
 
