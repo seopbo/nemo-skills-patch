@@ -1,14 +1,14 @@
 # syntax=docker/dockerfile:1
-# copied and edited from https://github.com/NVIDIA/NeMo-RL/blob/main/docker/Dockerfile
-# TODO: from next update try to re-use their dockerfile as is as they support specifying the commit
+# Usage:
+# Self-contained build (default: builds from main): docker buildx build -f docker/Dockerfile --tag <registry>/nemo-rl:latest --push .
+# Self-contained build (specific git ref): docker buildx build -f docker/Dockerfile --build-arg NRL_GIT_REF=r0.3.0 --tag <registry>/nemo-rl:r0.3.0 --push .
+# Self-contained build (remote NeMo RL source; no need for a local clone of NeMo RL): docker buildx build -f docker/Dockerfile --build-arg NRL_GIT_REF=r0.3.0 --tag <registry>/nemo-rl:r0.3.0 --push https://github.com/NVIDIA-NeMo/RL.git
+# Local NeMo RL source override: docker buildx build --build-context nemo-rl=. -f docker/Dockerfile --tag <registry>/nemo-rl:latest --push .
 
 ARG BASE_IMAGE=nvcr.io/nvidia/cuda-dl-base:25.05-cuda12.9-devel-ubuntu24.04
-
 FROM scratch AS nemo-rl
-
-ARG NEMO_RL_COMMIT=${NEMO_RL_COMMIT:-09476838c92c27a7488afbe6febb6339d3d79be9}
-ADD --keep-git-dir=true https://github.com/NVIDIA-NeMo/RL.git#${NEMO_RL_COMMIT} /
-
+ARG NRL_GIT_REF=main
+ADD --keep-git-dir=true https://github.com/NVIDIA-NeMo/RL.git#${NRL_GIT_REF} /
 
 FROM ${BASE_IMAGE} AS base
 # An environment variable to indicate that we are in a container.
@@ -62,7 +62,7 @@ ENV NEMO_RL_VENV_DIR=/opt/ray_venvs
 
 FROM base AS hermetic
 
-WORKDIR /opt/NeMo-RL
+WORKDIR /opt/nemo-rl
 
 # Variables to control the build of TE. If there are issues with parallelization, consider
 # setting these to 1.
@@ -85,7 +85,7 @@ COPY --from=nemo-rl tools/build-custom-vllm.sh ./tools/build-custom-vllm.sh
 COPY --from=nemo-rl --link research/ ./research/
 COPY --from=nemo-rl --link 3rdparty/ ./3rdparty/
 
-RUN <<"EOF" bash -exu
+RUN --mount=type=ssh <<"EOF" bash -exu
 uv venv --seed
 if [[ -n "${BUILD_CUSTOM_VLLM:-}" ]]; then
     bash tools/build-custom-vllm.sh
@@ -108,14 +108,16 @@ EOF
 ENV PATH="/opt/nemo_rl_venv/bin:$PATH"
 ENV NEMO_RL_VENV_DIR=/opt/ray_venvs
 
-WORKDIR /opt/NeMo-RL
+WORKDIR /opt/nemo-rl
 
 FROM hermetic AS release
 
+ARG NEMO_RL_COMMIT
 ARG NVIDIA_BUILD_ID
 ARG NVIDIA_BUILD_REF
 ARG RC_DATE=00.00
 ARG TARGETARCH
+ENV NEMO_RL_COMMIT=${NEMO_RL_COMMIT:-<unknown>}
 ENV NVIDIA_BUILD_ID=${NVIDIA_BUILD_ID:-<unknown>}
 ENV NVIDIA_BUILD_REF=${NVIDIA_BUILD_REF:-<unknown>}
 LABEL com.nvidia.build.id="${NVIDIA_BUILD_ID}"
@@ -125,7 +127,7 @@ ENV NEMO_RL_VENV_DIR=/opt/ray_venvs
 
 # Copy in source from build context (defaults to cloned repo, can be overridden)
 # Exclude pyproject.toml and uv.lock since those may be altered by build-custom-vllm.sh
-COPY --from=nemo-rl --exclude=pyproject.toml --exclude=uv.lock . /opt/NeMo-RL
+COPY --from=nemo-rl --exclude=pyproject.toml --exclude=uv.lock . /opt/nemo-rl
 # Unshallow the repo to get the full history (in the case it was from the scratch layer).
 # Potentially not necessary if the repo is passed in as a complete repository (w/ full git history),
 # so do a quick check before trying to unshallow.
@@ -133,7 +135,7 @@ RUN git rev-parse --is-shallow-repository | grep -q true && git fetch --unshallo
 RUN UV_LINK_MODE=symlink uv run nemo_rl/utils/prefetch_venvs.py
 
 # Generate container fingerprint for frozen environment support
-# Store outside /opt/NeMo-RL to avoid being overwritten by user mounts
+# Store outside /opt/nemo-rl to avoid being overwritten by user mounts
 RUN python tools/generate_fingerprint.py > /opt/nemo_rl_container_fingerprint
 
 # NOTICES.txt file points to where the OSS source code is archived
