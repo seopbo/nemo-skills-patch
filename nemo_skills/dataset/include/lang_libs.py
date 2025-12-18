@@ -349,4 +349,7 @@ def get_mcq_format(language, il_prompts):
 
 
 def supported_languages():
-    return sorted(list(MCQ_FORMATS.keys()))
+    # Exclude English;
+    languages = sorted(list(MCQ_FORMATS.keys()))
+    languages.remove("English")
+    return languages
