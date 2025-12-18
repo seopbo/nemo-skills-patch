@@ -735,4 +735,30 @@ def create_skills_proxy_app(
         """Health check endpoint."""
         return {"status": "healthy"}
 
+    @app.get("/global_config_dict_yaml")
+    async def global_config_dict_yaml():
+        """NeMo-Gym compatibility endpoint.
+
+        NeMo-Gym's ServerClient.load_from_global_config() calls this endpoint
+        to get the global configuration. It expects a JSON-encoded config dict.
+
+        For the NeMo-Skills proxy, we return a minimal config that tells NeMo-Gym
+        to use this proxy as the model server.
+        """
+        # Return a minimal config that NeMo-Gym can use
+        # The key fields are:
+        # - responses_api_models: tells NeMo-Gym how to create API models
+        # - Any other fields NeMo-Gym needs for rollouts
+        config = {
+            "responses_api_models": {
+                "nemo-skills": {
+                    "type": "openai",
+                    "model": "nemo-skills",
+                }
+            },
+            # Tell NeMo-Gym this is the policy server
+            "is_skills_proxy": True,
+        }
+        return json.dumps(config)
+
     return app

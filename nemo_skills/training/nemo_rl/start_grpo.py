@@ -265,10 +265,29 @@ def setup_data(
         # NeMo-Gym expects base_urls as a list
         base_urls = [policy_base_url] if isinstance(policy_base_url, str) else policy_base_url
 
+        # Build the initial global config dict that NemoGym's head server will serve
+        # This is returned by /global_config_dict_yaml and used by ServerClient.load_from_global_config
+        initial_config = nemo_gym_config.get("initial_global_config_dict", {}).copy()
+
+        # Add responses_api_models configuration that NemoGym needs
+        # This tells NemoGym how to create API models for making generation requests
+        if "responses_api_models" not in initial_config:
+            initial_config["responses_api_models"] = {
+                model_name: {
+                    "type": "simple",
+                    "base_url": base_urls[0] if base_urls else policy_base_url,
+                    "model_name": model_name,
+                }
+            }
+
+        # Also add policy_base_url for discovery
+        if "policy_base_url" not in initial_config:
+            initial_config["policy_base_url"] = base_urls
+
         nemo_gym_env_config = {
             "model_name": model_name,
             "base_urls": base_urls,
-            "initial_global_config_dict": nemo_gym_config.get("initial_global_config_dict", {}),
+            "initial_global_config_dict": initial_config,
         }
 
         # Register NeMo-Gym environment
