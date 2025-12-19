@@ -415,9 +415,16 @@ def setup_nemo_gym_environment(
     base_urls = policy_generation.dp_openai_server_base_urls
     model_name = policy_generation.cfg["model_name"]
 
+    # Get proxy URL from config - this is the NeMo-Skills proxy that handles /run
+    proxy_url = nemo_gym_config.get("policy_base_url") or nemo_gym_config.get("proxy_url")
+
     print(f"  ⚙️  Setting up NeMo-Gym with {len(base_urls)} vLLM server(s)")
     print(f"      Model: {model_name}")
-    print(f"      Base URLs: {base_urls}")
+    print(f"      vLLM Base URLs: {base_urls}")
+    if proxy_url:
+        print(f"      Proxy URL: {proxy_url}")
+    else:
+        print("      ⚠️  No proxy_url/policy_base_url configured - agent calls may fail!")
 
     # The initial_global_config_dict is passed to NemoGym
     # NemoGym.__init__ will add: policy_model_name, policy_api_key, policy_base_url
@@ -426,7 +433,8 @@ def setup_nemo_gym_environment(
 
     # Add inline server configs if not already present from config_paths
     # This ensures the agent and model server are always defined
-    _add_inline_nemo_gym_configs(initial_global_config_dict, base_urls, model_name, agent_name)
+    # Pass proxy_url explicitly so the agent server points to the proxy, not vLLM
+    _add_inline_nemo_gym_configs(initial_global_config_dict, base_urls, model_name, agent_name, proxy_url=proxy_url)
 
     # Validate that config_paths are provided for NeMo-Gym server startup
     config_paths = initial_global_config_dict.get("config_paths", [])
@@ -464,6 +472,36 @@ def setup_nemo_gym_environment(
     return task_to_env
 
 
+def get_nemo_gym_config(config: dict[str, Any]) -> dict[str, Any]:
+    """
+    Get the NeMo-Gym configuration from the config dict.
+
+    Checks both `config["nemo_gym"]` and `config["env"]["nemo_gym"]` locations,
+    since CLI overrides like `nemo_gym.policy_base_url=...` go to the former
+    while YAML config might have it under the latter.
+
+    Returns a merged dict with the env.nemo_gym config taking precedence,
+    but nemo_gym (top-level) values filling in as fallbacks.
+    """
+    # Get from both locations
+    top_level = config.get("nemo_gym", {}) or {}
+    env_level = config.get("env", {}).get("nemo_gym", {}) or {}
+
+    # Merge: env_level takes precedence, top_level as fallback
+    merged = {**top_level, **env_level}
+
+    # Debug print to help troubleshoot config issues
+    if merged:
+        print("  📋 NeMo-Gym config sources:")
+        if top_level:
+            print(f"      From config.nemo_gym: {list(top_level.keys())}")
+        if env_level:
+            print(f"      From config.env.nemo_gym: {list(env_level.keys())}")
+        print(f"      Merged keys: {list(merged.keys())}")
+
+    return merged
+
+
 def get_nemo_gym_agent_name(nemo_gym_config: dict[str, Any]) -> str:
     """
     Get the agent name to use for NeMo-Gym rollouts.
@@ -483,6 +521,7 @@ def _add_inline_nemo_gym_configs(
     base_urls: list[str],
     model_name: str,
     agent_name: str,
+    proxy_url: str | None = None,
 ) -> None:
     """
     Add inline server configs for NeMo-Gym if not already present.
@@ -495,13 +534,15 @@ def _add_inline_nemo_gym_configs(
     Without these, NeMo-Gym's get_first_server_config_dict will fail with
     "Missing key" errors.
 
-    If nemo_gym.proxy_url is set, all servers point to the proxy which handles
+    If proxy_url is provided, all servers point to the proxy which handles
     the /run, /v1/responses, and verification endpoints.
     """
     from urllib.parse import urlparse
 
     # Check if a proxy URL is configured - if so, use it for all servers
-    proxy_url = initial_global_config_dict.get("proxy_url") or initial_global_config_dict.get("policy_base_url")
+    # Priority: explicit proxy_url arg > dict keys
+    if not proxy_url:
+        proxy_url = initial_global_config_dict.get("proxy_url") or initial_global_config_dict.get("policy_base_url")
 
     # Get the first vLLM URL (used for the model server if no proxy)
     vllm_base_url = base_urls[0] if base_urls else "http://localhost:8000/v1"
@@ -512,11 +553,19 @@ def _add_inline_nemo_gym_configs(
         if isinstance(proxy_url, list):
             proxy_url = proxy_url[0]
         parsed = urlparse(proxy_url)
-        server_host = parsed.hostname or "localhost"
-        server_port = parsed.port or 8000
-        print(f"      Using proxy URL for servers: {proxy_url}")
+        server_host = parsed.hostname
+        server_port = parsed.port
+        if not server_host or not server_port:
+            raise ValueError(
+                f"Could not parse host/port from proxy_url: {proxy_url}. "
+                "Expected format: http://host:port or http://host:port/v1"
+            )
+        print(f"      Using proxy URL for servers: {proxy_url} -> {server_host}:{server_port}")
     else:
-        # Use vLLM URL directly
+        # Use vLLM URL directly - this means NO proxy is configured
+        # Agent /run calls will fail since vLLM doesn't have a /run endpoint
+        print("      WARNING: No proxy_url configured, using vLLM URL directly.")
+        print("      Agent /run calls may fail if vLLM doesn't have a /run endpoint.")
         parsed = urlparse(vllm_base_url)
         server_host = parsed.hostname or "localhost"
         server_port = parsed.port or 8000
@@ -632,6 +681,7 @@ def main() -> None:
     # Apply NeMo-Gym specific config if enabled
     # This is done BEFORE setup() so vLLM is configured to expose HTTP server
     nemo_gym_agent_name = None
+    nemo_gym_config = None
     if should_use_nemo_gym:
         # Use the canonical setup_nemo_gym_config function from nemo_rl
         # This sets: vllm_cfg.async_engine=True, vllm_cfg.expose_http_server=True
@@ -639,8 +689,8 @@ def main() -> None:
         setup_nemo_gym_config(config, tokenizer)
         print("  ✓ NeMo-Gym config applied (vLLM HTTP server exposed)")
 
-        # Get the agent name to use from the config
-        nemo_gym_config = config["env"].get("nemo_gym", {})
+        # Get nemo_gym config from both config.nemo_gym and config.env.nemo_gym
+        nemo_gym_config = get_nemo_gym_config(config)
         nemo_gym_agent_name = get_nemo_gym_agent_name(nemo_gym_config)
         print(f"  Agent name for rollouts: {nemo_gym_agent_name}")
 
@@ -669,8 +719,7 @@ def main() -> None:
 
     # NOW set up the environment - after setup() so we have policy_generation
     if should_use_nemo_gym:
-        # Get nemo_gym config from env.nemo_gym
-        nemo_gym_config = config["env"].get("nemo_gym", {})
+        # nemo_gym_config was already fetched above using get_nemo_gym_config()
         task_to_env = setup_nemo_gym_environment(
             policy_generation,
             nemo_gym_config,
