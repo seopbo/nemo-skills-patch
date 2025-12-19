@@ -488,51 +488,66 @@ def _add_inline_nemo_gym_configs(
     Add inline server configs for NeMo-Gym if not already present.
 
     This creates the minimal configs needed for NeMo-Gym to find:
-    1. The model server (policy_model) - points to vLLM
-    2. The resources server (math_with_judge) - for verification
-    3. The agent server - orchestrates rollouts
+    1. The model server (policy_model) - points to vLLM or proxy
+    2. The resources server (math_with_judge) - points to proxy for minimal setup
+    3. The agent server - points to proxy which handles /run endpoint
 
     Without these, NeMo-Gym's get_first_server_config_dict will fail with
     "Missing key" errors.
-    """
-    # Get the first vLLM URL (used for the model server)
-    vllm_base_url = base_urls[0] if base_urls else "http://localhost:8000/v1"
 
-    # Parse the vLLM URL to get host and port for the model server config
+    If nemo_gym.proxy_url is set, all servers point to the proxy which handles
+    the /run, /v1/responses, and verification endpoints.
+    """
     from urllib.parse import urlparse
 
-    parsed = urlparse(vllm_base_url)
-    vllm_host = parsed.hostname or "localhost"
-    vllm_port = parsed.port or 8000
+    # Check if a proxy URL is configured - if so, use it for all servers
+    proxy_url = initial_global_config_dict.get("proxy_url") or initial_global_config_dict.get("policy_base_url")
+
+    # Get the first vLLM URL (used for the model server if no proxy)
+    vllm_base_url = base_urls[0] if base_urls else "http://localhost:8000/v1"
+
+    # Determine which URL to use for servers
+    if proxy_url:
+        # Use proxy for all server calls
+        if isinstance(proxy_url, list):
+            proxy_url = proxy_url[0]
+        parsed = urlparse(proxy_url)
+        server_host = parsed.hostname or "localhost"
+        server_port = parsed.port or 8000
+        print(f"      Using proxy URL for servers: {proxy_url}")
+    else:
+        # Use vLLM URL directly
+        parsed = urlparse(vllm_base_url)
+        server_host = parsed.hostname or "localhost"
+        server_port = parsed.port or 8000
 
     # Add model server config (policy_model) if not present
-    # This is the vLLM server that NeMo-RL started
+    # This is the vLLM server that NeMo-RL started (or proxy)
     if "policy_model" not in initial_global_config_dict:
         initial_global_config_dict["policy_model"] = {
             "responses_api_models": {
                 "vllm_model": {
-                    # No entrypoint - vLLM is already running via NeMo-RL
-                    "host": vllm_host,
-                    "port": vllm_port,
-                    "base_url": vllm_base_url,
+                    # No entrypoint - server is already running
+                    "host": server_host,
+                    "port": server_port,
+                    "base_url": proxy_url or vllm_base_url,
                     "model": model_name,
                     "return_token_id_information": True,
                 }
             }
         }
-        print(f"      Added inline policy_model config -> {vllm_base_url}")
+        print(f"      Added inline policy_model config -> {proxy_url or vllm_base_url}")
 
     # Add resources server config (math_with_judge) if not present
-    # This handles verification - we set should_use_judge=false for minimal setup
+    # When using proxy, it handles /verify endpoint; otherwise placeholder
     resources_server_name = "math_with_judge"
     if resources_server_name not in initial_global_config_dict:
         initial_global_config_dict[resources_server_name] = {
             "resources_servers": {
                 resources_server_name: {
-                    # No entrypoint - we need this server running separately
-                    # OR we can point to an existing server
-                    "host": vllm_host,  # Placeholder - will fail if server not running
-                    "port": vllm_port + 1000,  # Offset port
+                    # Point to proxy if available, which handles verification
+                    "host": server_host,
+                    "port": server_port,
                     "should_use_judge": False,
                     "judge_model_server": {
                         "type": "responses_api_models",
@@ -541,17 +556,17 @@ def _add_inline_nemo_gym_configs(
                 }
             }
         }
-        print(f"      Added inline {resources_server_name} config")
+        print(f"      Added inline {resources_server_name} config -> {server_host}:{server_port}")
 
     # Add agent server config if not present
-    # The agent_name should match what's used in agent_ref in the data
+    # When using proxy, point to proxy which has /run endpoint
     if agent_name not in initial_global_config_dict:
         initial_global_config_dict[agent_name] = {
             "responses_api_agents": {
                 "simple_agent": {
-                    # No entrypoint - we need this server running separately
-                    "host": vllm_host,  # Placeholder
-                    "port": vllm_port + 2000,  # Offset port
+                    # Point to proxy if available, which handles /run
+                    "host": server_host,
+                    "port": server_port,
                     "resources_server": {
                         "type": "resources_servers",
                         "name": resources_server_name,
@@ -563,7 +578,7 @@ def _add_inline_nemo_gym_configs(
                 }
             }
         }
-        print(f"      Added inline {agent_name} config")
+        print(f"      Added inline {agent_name} config -> {server_host}:{server_port}")
 
 
 def main() -> None:

@@ -761,4 +761,170 @@ def create_skills_proxy_app(
         }
         return json.dumps(config)
 
+    @app.post("/run")
+    async def run_agent(request_body: dict):
+        """NeMo-Gym agent /run endpoint for rollout collection.
+
+        This endpoint handles NeMo-Gym's agent rollout requests. It acts as a
+        minimal agent that:
+        1. Extracts the prompt from responses_create_params
+        2. Calls the generation pipeline
+        3. Returns a minimal verification response with reward=0.0
+
+        For proper reward calculation, use MathEnvironment or configure
+        a full NeMo-Gym resources server.
+
+        Request format (from NeMo-Gym rollout_collection.py):
+            {
+                "responses_create_params": {
+                    "input": [{"role": "user", "content": "..."}],
+                    "tools": []
+                },
+                "agent_ref": {"name": "..."},
+                "_rowidx": 0,
+                # ... other fields from data
+            }
+
+        Response format (SimpleAgentVerifyResponse):
+            {
+                "reward": 0.0,
+                "response": {
+                    "output": [...],
+                    ...
+                },
+                # ... other fields
+            }
+        """
+        try:
+            # Extract the prompt from responses_create_params
+            responses_create_params = request_body.get("responses_create_params", {})
+            input_messages = responses_create_params.get("input", [])
+
+            # Convert to our message format
+            messages = []
+            for msg in input_messages:
+                if isinstance(msg, dict):
+                    messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+                elif isinstance(msg, str):
+                    messages.append({"role": "user", "content": msg})
+
+            if not messages:
+                # Fallback: try to get question from the request body directly
+                question = request_body.get("question", "")
+                if question:
+                    messages = [{"role": "user", "content": question}]
+                else:
+                    messages = [{"role": "user", "content": ""}]
+
+            # Process through NeMo-Skills pipeline
+            data_point = {"messages": messages}
+            # Pass through extra fields that might be needed (like expected_answer)
+            for key in ["question", "expected_answer", "problem"]:
+                if key in request_body:
+                    data_point[key] = request_body[key]
+
+            output = await _process_fn(data_point, [])
+
+            generation_text = output.get(_generation_key, output.get("generation", ""))
+
+            # Build NeMo-Gym compatible response
+            # This matches the format expected by NemoGym._postprocess_nemo_gym_to_nemo_rl_result
+            nemo_gym_response = {
+                "reward": 0.0,  # Reward will be calculated by MathEnvironment or set to 0
+                "response": {
+                    "id": f"resp-{uuid.uuid4().hex[:8]}",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [
+                                {
+                                    "type": "output_text",
+                                    "text": generation_text,
+                                }
+                            ],
+                            # Token IDs for NeMo-RL training
+                            "prompt_token_ids": output.get("prompt_token_ids", []),
+                            "generation_token_ids": output.get("generation_token_ids", []),
+                            "generation_log_probs": output.get("generation_log_probs", []),
+                        }
+                    ],
+                },
+                # Pass through the original request fields
+                **{k: v for k, v in request_body.items() if k not in ["responses_create_params"]},
+            }
+
+            return JSONResponse(content=nemo_gym_response)
+
+        except Exception as e:
+            LOG.exception("Error processing /run request")
+            raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
+    @app.post("/v1/responses")
+    async def responses_api(request_body: dict):
+        """OpenAI Responses API endpoint for NeMo-Gym model server calls.
+
+        This endpoint handles the OpenAI Responses API format that NeMo-Gym uses
+        for model generation. It's similar to chat completions but with a different
+        format.
+
+        Request format:
+            {
+                "input": [{"role": "user", "content": "..."}],
+                "model": "...",
+                "tools": [],
+                ...
+            }
+        """
+        try:
+            input_messages = request_body.get("input", [])
+
+            # Convert to our message format
+            messages = []
+            for msg in input_messages:
+                if isinstance(msg, dict):
+                    messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
+                elif isinstance(msg, str):
+                    messages.append({"role": "user", "content": msg})
+
+            # Process through NeMo-Skills pipeline
+            data_point = {"messages": messages}
+            output = await _process_fn(data_point, [])
+
+            generation_text = output.get(_generation_key, output.get("generation", ""))
+
+            # Build OpenAI Responses API compatible response
+            response = {
+                "id": f"resp-{uuid.uuid4().hex[:8]}",
+                "object": "response",
+                "created_at": int(time.time()),
+                "model": request_body.get("model", "nemo-skills"),
+                "output": [
+                    {
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": generation_text,
+                            }
+                        ],
+                        "prompt_token_ids": output.get("prompt_token_ids", []),
+                        "generation_token_ids": output.get("generation_token_ids", []),
+                        "generation_log_probs": output.get("generation_log_probs", []),
+                    }
+                ],
+                "usage": {
+                    "input_tokens": output.get("num_input_tokens", 0),
+                    "output_tokens": output.get("num_generated_tokens", 0),
+                    "total_tokens": output.get("num_input_tokens", 0) + output.get("num_generated_tokens", 0),
+                },
+            }
+
+            return JSONResponse(content=response)
+
+        except Exception as e:
+            LOG.exception("Error processing /v1/responses request")
+            raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
     return app
