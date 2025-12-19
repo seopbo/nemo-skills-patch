@@ -388,6 +388,7 @@ def setup_math_environment(
 def setup_nemo_gym_environment(
     policy_generation,
     nemo_gym_config: dict[str, Any],
+    agent_name: str = "math_with_judge_simple_agent",
 ) -> dict[str, EnvironmentInterface]:
     """
     Set up NeMo-Gym environment using policy_generation's vLLM server URLs.
@@ -423,15 +424,15 @@ def setup_nemo_gym_environment(
     # See nemo_rl/environments/nemo_gym.py lines 51-59
     initial_global_config_dict = nemo_gym_config.copy() if nemo_gym_config else {}
 
+    # Add inline server configs if not already present from config_paths
+    # This ensures the agent and model server are always defined
+    _add_inline_nemo_gym_configs(initial_global_config_dict, base_urls, model_name, agent_name)
+
     # Validate that config_paths are provided for NeMo-Gym server startup
     config_paths = initial_global_config_dict.get("config_paths", [])
     if not config_paths:
-        print("  ⚠️  Warning: No config_paths provided in nemo_gym config.")
-        print("     NeMo-Gym requires config_paths pointing to server config files.")
-        print("     Example config_paths:")
-        print("       - responses_api_models/vllm_model/configs/vllm_model_for_training.yaml")
-        print("       - resources_servers/math_with_judge/configs/math_with_judge.yaml")
-        print("     Without these, no agent/resources servers will be started.")
+        print("  ℹ️  No config_paths provided - using inline server configs.")
+        print("     For full NeMo-Gym features (LLM judge, etc), provide config_paths.")
     else:
         print(f"      Config paths: {config_paths}")
 
@@ -475,6 +476,94 @@ def get_nemo_gym_agent_name(nemo_gym_config: dict[str, Any]) -> str:
     # Default to math_with_judge_simple_agent which is defined in
     # resources_servers/math_with_judge/configs/math_with_judge.yaml
     return nemo_gym_config.get("agent_name", "math_with_judge_simple_agent")
+
+
+def _add_inline_nemo_gym_configs(
+    initial_global_config_dict: dict[str, Any],
+    base_urls: list[str],
+    model_name: str,
+    agent_name: str,
+) -> None:
+    """
+    Add inline server configs for NeMo-Gym if not already present.
+
+    This creates the minimal configs needed for NeMo-Gym to find:
+    1. The model server (policy_model) - points to vLLM
+    2. The resources server (math_with_judge) - for verification
+    3. The agent server - orchestrates rollouts
+
+    Without these, NeMo-Gym's get_first_server_config_dict will fail with
+    "Missing key" errors.
+    """
+    # Get the first vLLM URL (used for the model server)
+    vllm_base_url = base_urls[0] if base_urls else "http://localhost:8000/v1"
+
+    # Parse the vLLM URL to get host and port for the model server config
+    from urllib.parse import urlparse
+
+    parsed = urlparse(vllm_base_url)
+    vllm_host = parsed.hostname or "localhost"
+    vllm_port = parsed.port or 8000
+
+    # Add model server config (policy_model) if not present
+    # This is the vLLM server that NeMo-RL started
+    if "policy_model" not in initial_global_config_dict:
+        initial_global_config_dict["policy_model"] = {
+            "responses_api_models": {
+                "vllm_model": {
+                    # No entrypoint - vLLM is already running via NeMo-RL
+                    "host": vllm_host,
+                    "port": vllm_port,
+                    "base_url": vllm_base_url,
+                    "model": model_name,
+                    "return_token_id_information": True,
+                }
+            }
+        }
+        print(f"      Added inline policy_model config -> {vllm_base_url}")
+
+    # Add resources server config (math_with_judge) if not present
+    # This handles verification - we set should_use_judge=false for minimal setup
+    resources_server_name = "math_with_judge"
+    if resources_server_name not in initial_global_config_dict:
+        initial_global_config_dict[resources_server_name] = {
+            "resources_servers": {
+                resources_server_name: {
+                    # No entrypoint - we need this server running separately
+                    # OR we can point to an existing server
+                    "host": vllm_host,  # Placeholder - will fail if server not running
+                    "port": vllm_port + 1000,  # Offset port
+                    "should_use_judge": False,
+                    "judge_model_server": {
+                        "type": "responses_api_models",
+                        "name": "policy_model",
+                    },
+                }
+            }
+        }
+        print(f"      Added inline {resources_server_name} config")
+
+    # Add agent server config if not present
+    # The agent_name should match what's used in agent_ref in the data
+    if agent_name not in initial_global_config_dict:
+        initial_global_config_dict[agent_name] = {
+            "responses_api_agents": {
+                "simple_agent": {
+                    # No entrypoint - we need this server running separately
+                    "host": vllm_host,  # Placeholder
+                    "port": vllm_port + 2000,  # Offset port
+                    "resources_server": {
+                        "type": "resources_servers",
+                        "name": resources_server_name,
+                    },
+                    "model_server": {
+                        "type": "responses_api_models",
+                        "name": "policy_model",
+                    },
+                }
+            }
+        }
+        print(f"      Added inline {agent_name} config")
 
 
 def main() -> None:
@@ -567,7 +656,11 @@ def main() -> None:
     if should_use_nemo_gym:
         # Get nemo_gym config from env.nemo_gym
         nemo_gym_config = config["env"].get("nemo_gym", {})
-        task_to_env = setup_nemo_gym_environment(policy_generation, nemo_gym_config)
+        task_to_env = setup_nemo_gym_environment(
+            policy_generation,
+            nemo_gym_config,
+            agent_name=nemo_gym_agent_name,
+        )
         val_task_to_env = task_to_env
     else:
         task_to_env = setup_math_environment(config["env"])
