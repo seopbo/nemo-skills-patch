@@ -69,9 +69,13 @@ class InferenceConfig:
     # You can override tokenizer with tokenizer parameter.
     # "responses": for responses api format.
     endpoint_type: EndpointType = EndpointType.chat
-    temperature: float = 0.0  # Temperature of 0 means greedy decoding
+    # Temperature for sampling. 0.0 = greedy decoding.
+    # Set to None to use the server's configured default (useful for NeMo-RL integration
+    # where the vLLM server is configured with a specific temperature).
+    temperature: float | None = 0.0
     top_k: int = -1
-    top_p: float = 0.95
+    # Top-p nucleus sampling. Set to None to use server's configured default.
+    top_p: float | None = 0.95
     min_p: float = 0.0
     random_seed: int = 0
     tokens_to_generate: int | None = None

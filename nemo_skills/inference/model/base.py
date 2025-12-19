@@ -215,8 +215,8 @@ class BaseModel:
         prompt: str | list[dict],
         endpoint_type: EndpointType = None,
         tokens_to_generate: int | None = None,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
+        temperature: float | None = 0.0,  # temporarily allow None for NeMo-RL integration
+        top_p: float | None = 0.95,  # temporarily allow None for NeMo-RL integration
         top_k: int = -1,
         min_p: float = 0.0,
         repetition_penalty: float = 1.0,

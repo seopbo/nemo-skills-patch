@@ -64,8 +64,8 @@ class VLLMModel(BaseModel):
         self,
         prompt: str,
         tokens_to_generate: int = 512,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
+        temperature: float | None = 0.0,  # setting to default so NeMo-RL can use its configured defaults
+        top_p: float | None = 0.95,  # setting to default so NeMo-RL can use its configured defaults
         top_k: int = -1,
         min_p: float = 0.0,
         repetition_penalty: float = 1.0,
@@ -80,11 +80,9 @@ class VLLMModel(BaseModel):
     ) -> dict:
         assert reasoning_effort is None, "reasoning_effort is not supported for text completion requests"
         assert tools is None, "tools are not supported for text completion requests"
-        return {
+        params = {
             "prompt": prompt,
             "max_tokens": tokens_to_generate,
-            "temperature": temperature,
-            "top_p": top_p,
             "seed": random_seed,
             "stop": stop_phrases or None,
             "logprobs": top_logprobs,
@@ -98,14 +96,21 @@ class VLLMModel(BaseModel):
             "timeout": timeout,
             "extra_body": self._build_request_body(top_k, min_p, repetition_penalty, extra_body=extra_body),
         }
+        # Only send temperature/top_p if explicitly set (not None)
+        # This allows the server to use its configured defaults (important for NeMo-RL integration)
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+        return params
 
     def _build_chat_request_params(
         self,
         messages: list[dict],
         stream: bool,
         tokens_to_generate: int = 512,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
+        temperature: float | None = 0.0,
+        top_p: float | None = 0.95,
         top_k: int = -1,
         min_p: float = 0.0,
         repetition_penalty: float = 1.0,
@@ -120,8 +125,6 @@ class VLLMModel(BaseModel):
         request = {
             "messages": messages,
             "max_tokens": tokens_to_generate,
-            "temperature": temperature,
-            "top_p": top_p,
             "seed": random_seed,
             "stop": stop_phrases or None,
             "logprobs": top_logprobs is not None,
@@ -134,6 +137,12 @@ class VLLMModel(BaseModel):
             "extra_body": self._build_request_body(top_k, min_p, repetition_penalty, extra_body=extra_body),
             "tools": tools,
         }
+        # Only send temperature/top_p if explicitly set (not None)
+        # This allows the server to use its configured defaults (important for NeMo-RL integration)
+        if temperature is not None:
+            request["temperature"] = temperature
+        if top_p is not None:
+            request["top_p"] = top_p
         if reasoning_effort:
             request["allowed_openai_params"] = ["reasoning_effort"]
             request["reasoning_effort"] = reasoning_effort

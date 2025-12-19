@@ -87,6 +87,8 @@ echo "Starting NeMo-Skills proxy (connecting to $VLLM_URL)..."
 ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-skills --num_gpus 0 \
     "NEMO_RL_VLLM_URL=$VLLM_URL python -m nemo_skills.inference.generate \
         ++start_server=True \
+        ++temperature=None \
+        ++top_p=None \
         ++generate_port=$PROXY_PORT \
         ++prompt_format=openai" \
     2>&1 | tee /tmp/nemo-skills.log &
