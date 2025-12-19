@@ -294,10 +294,19 @@ def setup_data(
         nemo_gym_cls_path = "nemo_rl.environments.nemo_gym.NemoGym"
         ACTOR_ENVIRONMENT_REGISTRY[nemo_gym_cls_path] = PY_EXECUTABLES.SYSTEM
 
+        # Build env vars for the NemoGym actor
+        # IMPORTANT: Set NEMO_GYM_CONFIG_DICT so the HeadServer can find the config
+        # even if there are race conditions with the global variable
+        import json as json_module
+
+        nemo_gym_actor_env_vars = dict(os.environ)
+        # Use JSON format - NemoGym's client parses with json.loads()
+        nemo_gym_actor_env_vars["NEMO_GYM_CONFIG_DICT"] = json_module.dumps(initial_config)
+
         nemo_gym_env = NemoGym.options(
             runtime_env={
                 "py_executable": get_actor_python_env(nemo_gym_cls_path),
-                "env_vars": dict(os.environ),
+                "env_vars": nemo_gym_actor_env_vars,
             }
         ).remote(nemo_gym_env_config)
 
