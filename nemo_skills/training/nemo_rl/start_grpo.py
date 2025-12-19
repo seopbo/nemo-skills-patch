@@ -270,7 +270,7 @@ def ns_data_processor_for_nemo_gym(
         "extra_env_info": extra_env_info,
         "loss_multiplier": loss_multiplier,
         "idx": idx,
-        "task_name": "nemo_gym",  # Use nemo_gym task name for NeMo-Gym
+        "task_name": datum_dict["task_name"],  # Keep original task_name ("math")
     }
     return output
 
@@ -287,8 +287,9 @@ def setup_data_only(
     print("\n▶ Setting up data...")
     prompt_config = data_config["prompt"]
 
-    # Choose task name based on environment type
-    task_name = "nemo_gym" if use_nemo_gym else "math"
+    # The data comes with task_name="math" from format_passthrough
+    # We always use "math" as the task name key, but choose the processor based on env type
+    task_name = "math"
 
     math_task_spec = NSTaskDataSpec(
         task_name=task_name,
@@ -301,15 +302,19 @@ def setup_data_only(
     )
 
     # Choose processor based on environment type
+    # Both processors handle "math" task name, but nemo_gym processor adds extra fields
     if use_nemo_gym:
         processor = ns_data_processor_for_nemo_gym
+        print("  Using NeMo-Gym data processor")
     else:
         processor = ns_data_processor
+        print("  Using standard MathEnvironment data processor")
 
     task_data_processors: dict[str, tuple[TaskDataSpec, TaskDataProcessFnCallable]] = defaultdict(
         lambda: (math_task_spec, processor)
     )
-    task_data_processors[task_name] = (math_task_spec, processor)
+    # Register for "math" task name since that's what the data has
+    task_data_processors["math"] = (math_task_spec, processor)
 
     dataset = AllTaskProcessedDataset(
         data.formatted_ds["train"],
@@ -409,7 +414,9 @@ def setup_nemo_gym_environment(
     ray.get(nemo_gym_env.health_check.remote())
     print("  ✓ NeMo-Gym environment ready")
 
-    task_to_env: dict[str, EnvironmentInterface] = {"nemo_gym": nemo_gym_env}
+    # Map "math" task to NeMo-Gym environment since data has task_name="math"
+    task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: nemo_gym_env)
+    task_to_env["math"] = nemo_gym_env
     return task_to_env
 
 
