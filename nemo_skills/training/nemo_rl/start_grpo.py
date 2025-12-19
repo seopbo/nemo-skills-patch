@@ -429,7 +429,13 @@ def setup_nemo_gym_environment(
     # The initial_global_config_dict is passed to NemoGym
     # NemoGym.__init__ will add: policy_model_name, policy_api_key, policy_base_url
     # See nemo_rl/environments/nemo_gym.py lines 51-59
-    initial_global_config_dict = nemo_gym_config.copy() if nemo_gym_config else {}
+    #
+    # IMPORTANT: We extract only the nested initial_global_config_dict from nemo_gym_config
+    # We can't use nemo_gym_config.copy() directly because it contains keys like
+    # "policy_base_url" (a string) and "initial_global_config_dict" (possibly empty)
+    # that NemoGym's cli.py would try to process as server configs and fail.
+    user_provided_config = nemo_gym_config.get("initial_global_config_dict", {}) if nemo_gym_config else {}
+    initial_global_config_dict = user_provided_config.copy() if user_provided_config else {}
 
     # Add inline server configs if not already present from config_paths
     # This ensures the agent and model server are always defined

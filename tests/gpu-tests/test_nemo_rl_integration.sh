@@ -141,7 +141,6 @@ echo "Proxy received approximately $PROXY_REQUESTS requests"
 
 if [ "$PROXY_REQUESTS" -gt 0 ]; then
     echo ""
-    echo "✅ Integration test PASSED!"
     echo "  - NeMo-RL started vLLM with HTTP exposed"
     echo "  - Proxy connected to vLLM"
     echo "  - NeMo-Gym used proxy for rollouts ($PROXY_REQUESTS requests)"
