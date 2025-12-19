@@ -271,24 +271,30 @@ def setup_data(
         # This is returned by /global_config_dict_yaml and used by ServerClient.load_from_global_config
         initial_config = nemo_gym_config.get("initial_global_config_dict", {}).copy()
 
-        # Add responses_api_models configuration that NemoGym needs
-        # This tells NemoGym how to create API models for making generation requests
-        if "responses_api_models" not in initial_config:
-            initial_config["responses_api_models"] = {
-                model_name: {
-                    "type": "simple",
-                    "base_url": base_urls[0] if base_urls else policy_base_url,
-                    "model_name": model_name,
+        # NemoGym config structure requires 3 levels: top_level -> type -> name -> config
+        # See get_first_server_config_dict in nemo_gym/global_config.py
+
+        # Add model server config (policy_model)
+        if "policy_model" not in initial_config:
+            initial_config["policy_model"] = {
+                "responses_api_models": {
+                    "policy_model": {
+                        "base_url": base_urls[0] if base_urls else policy_base_url,
+                        "model_name": model_name,
+                    }
                 }
             }
 
-        # Add responses_api_agents configuration - NemoGym requires an agent to orchestrate rollouts
-        # The agent_ref in each datum points to this agent
-        if "responses_api_agents" not in initial_config:
-            initial_config["responses_api_agents"] = {
-                "simple_agent": {
-                    "type": "simple",
-                    "model_server_ref": f"responses_api_models/{model_name}",
+        # Add agent config (simple_agent) - this is what agent_ref points to
+        if "simple_agent" not in initial_config:
+            initial_config["simple_agent"] = {
+                "responses_api_agents": {
+                    "simple_agent": {
+                        "model_server": {
+                            "type": "responses_api_models",
+                            "name": "policy_model",
+                        }
+                    }
                 }
             }
 
@@ -301,6 +307,10 @@ def setup_data(
             "base_urls": base_urls,
             "initial_global_config_dict": initial_config,
         }
+
+        # Debug: print the config being passed to NemoGym
+        print(f"  [DEBUG] NemoGym initial_config keys: {list(initial_config.keys())}")
+        print(f"  [DEBUG] simple_agent config: {initial_config.get('simple_agent', 'NOT FOUND')}")
 
         # Register NeMo-Gym environment
         nemo_gym_cls_path = "nemo_rl.environments.nemo_gym.NemoGym"
