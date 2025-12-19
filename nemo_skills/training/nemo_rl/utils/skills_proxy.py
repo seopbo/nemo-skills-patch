@@ -93,6 +93,16 @@ RAY_VLLM_URL_KEY = "nemo_rl_vllm_http_url"
 
 
 @dataclass
+class VLLMGenerationConfig:
+    """Generation configuration from a vLLM server."""
+
+    temperature: float | None = None
+    top_p: float | None = None
+    top_k: int | None = None
+    max_tokens: int | None = None
+
+
+@dataclass
 class VLLMServerConfig:
     """Configuration for a discovered vLLM server."""
 
@@ -101,6 +111,7 @@ class VLLMServerConfig:
     port: int
     source: str  # How the server was discovered
     model_name: str | None = None  # The model name served by vLLM
+    generation_config: VLLMGenerationConfig | None = None  # Generation parameters from server
 
 
 def get_vllm_model_name(base_url: str, timeout: float = 5.0) -> str | None:
@@ -131,6 +142,83 @@ def get_vllm_model_name(base_url: str, timeout: float = 5.0) -> str | None:
                     return model_name
     except Exception as e:
         LOG.debug(f"Failed to get model name from vLLM: {e}")
+
+    return None
+
+
+def get_vllm_generation_config(
+    head_server_url: str | None = None,
+    timeout: float = 5.0,
+) -> VLLMGenerationConfig | None:
+    """Query the NeMo-Gym head server for generation config.
+
+    The NeMo-RL vLLM server expects requests to have matching temperature/top_p values.
+    This function discovers those values from the head server's global config.
+
+    Args:
+        head_server_url: Optional NeMo-Gym head server URL (e.g., "http://localhost:11000").
+                        If None, will try to get from NEMO_GYM_HEAD_SERVER_URL.
+        timeout: Request timeout in seconds
+
+    Returns:
+        VLLMGenerationConfig if found, None otherwise
+    """
+    # Get head server URL from environment if not provided
+    if not head_server_url:
+        head_server_url = os.environ.get(NEMO_GYM_HEAD_SERVER_ENV_VAR)
+
+    if not head_server_url:
+        LOG.debug("No NeMo-Gym head server URL available for generation config discovery")
+        return None
+
+    try:
+        # Query the head server for global config
+        response = requests.get(
+            f"{head_server_url.rstrip('/')}/global_config_dict_yaml",
+            timeout=timeout,
+        )
+        response.raise_for_status()
+
+        # Parse the config (it's JSON-encoded YAML)
+        config_yaml = response.content.decode()
+        config = json.loads(config_yaml)
+
+        # Look for generation parameters in the config
+        # NeMo-RL may store these in various locations
+        gen_config = VLLMGenerationConfig()
+
+        # Check for sampling parameters at various locations
+        for key_path in [
+            "generation",
+            "policy_generation",
+            "model_config",
+            "sampling",
+            "responses_api_models",
+        ]:
+            if key_path in config:
+                sub_config = config[key_path]
+                if isinstance(sub_config, dict):
+                    if "temperature" in sub_config:
+                        gen_config.temperature = sub_config["temperature"]
+                    if "top_p" in sub_config:
+                        gen_config.top_p = sub_config["top_p"]
+                    if "top_k" in sub_config:
+                        gen_config.top_k = sub_config["top_k"]
+                    if "max_tokens" in sub_config:
+                        gen_config.max_tokens = sub_config["max_tokens"]
+
+        # Also check top-level keys
+        if "temperature" in config:
+            gen_config.temperature = config["temperature"]
+        if "top_p" in config:
+            gen_config.top_p = config["top_p"]
+
+        if gen_config.temperature is not None or gen_config.top_p is not None:
+            LOG.info(f"Discovered generation config from head server: {gen_config}")
+            return gen_config
+
+    except Exception as e:
+        LOG.debug(f"Failed to get generation config from head server: {e}")
 
     return None
 
@@ -182,18 +270,21 @@ def discover_vllm_server(
     config = _discover_from_env()
     if config:
         config.model_name = get_vllm_model_name(config.base_url, timeout)
+        config.generation_config = get_vllm_generation_config(head_server_url, timeout)
         return config
 
     # Method 2: Ray named values
     config = _discover_from_ray(ray_address)
     if config:
         config.model_name = get_vllm_model_name(config.base_url, timeout)
+        config.generation_config = get_vllm_generation_config(head_server_url, timeout)
         return config
 
     # Method 3: NeMo-Gym head server
     config = _discover_from_head_server(head_server_url, timeout)
     if config:
         config.model_name = get_vllm_model_name(config.base_url, timeout)
+        config.generation_config = get_vllm_generation_config(head_server_url, timeout)
         return config
 
     return None
@@ -628,6 +719,17 @@ def create_skills_proxy_app(
             messages = [{"role": m.role, "content": m.content} for m in request.messages]
             data_point = {"messages": messages}
 
+            # Pass through sampling parameters from the request
+            # This is critical for NeMo-RL integration where vLLM asserts temperature matches
+            if request.temperature is not None:
+                data_point["_request_temperature"] = request.temperature
+            if request.top_p is not None:
+                data_point["_request_top_p"] = request.top_p
+            if request.max_tokens is not None:
+                data_point["_request_max_tokens"] = request.max_tokens
+            if request.stop is not None:
+                data_point["_request_stop"] = request.stop
+
             # If extra_data is provided, merge it (for metadata like expected_answer)
             if request.extra_data:
                 data_point.update(request.extra_data)
@@ -681,6 +783,16 @@ def create_skills_proxy_app(
                 data_point = {"messages": [{"role": "user", "content": prompt}]}
                 if request.extra_data:
                     data_point.update(request.extra_data)
+
+                # Pass through sampling parameters from the request
+                if request.temperature is not None:
+                    data_point["_request_temperature"] = request.temperature
+                if request.top_p is not None:
+                    data_point["_request_top_p"] = request.top_p
+                if request.max_tokens is not None:
+                    data_point["_request_max_tokens"] = request.max_tokens
+                if request.stop is not None:
+                    data_point["_request_stop"] = request.stop
 
                 # Process through NeMo-Skills pipeline
                 output = await _process_fn(data_point, [])
@@ -823,6 +935,25 @@ def create_skills_proxy_app(
                 if key in request_body:
                     data_point[key] = request_body[key]
 
+            # Pass through sampling parameters from responses_create_params
+            # This is critical for NeMo-RL integration where vLLM asserts temperature matches
+            if "temperature" in responses_create_params:
+                data_point["_request_temperature"] = responses_create_params["temperature"]
+            if "top_p" in responses_create_params:
+                data_point["_request_top_p"] = responses_create_params["top_p"]
+            if "max_tokens" in responses_create_params:
+                data_point["_request_max_tokens"] = responses_create_params["max_tokens"]
+            if "max_output_tokens" in responses_create_params:
+                data_point["_request_max_tokens"] = responses_create_params["max_output_tokens"]
+            if "stop" in responses_create_params:
+                data_point["_request_stop"] = responses_create_params["stop"]
+
+            LOG.debug(
+                f"/run request params: temperature={data_point.get('_request_temperature')}, "
+                f"top_p={data_point.get('_request_top_p')}, "
+                f"max_tokens={data_point.get('_request_max_tokens')}"
+            )
+
             output = await _process_fn(data_point, [])
 
             generation_text = output.get(_generation_key, output.get("generation", ""))
@@ -889,6 +1020,19 @@ def create_skills_proxy_app(
 
             # Process through NeMo-Skills pipeline
             data_point = {"messages": messages}
+
+            # Pass through sampling parameters from the request
+            if "temperature" in request_body:
+                data_point["_request_temperature"] = request_body["temperature"]
+            if "top_p" in request_body:
+                data_point["_request_top_p"] = request_body["top_p"]
+            if "max_tokens" in request_body:
+                data_point["_request_max_tokens"] = request_body["max_tokens"]
+            if "max_output_tokens" in request_body:
+                data_point["_request_max_tokens"] = request_body["max_output_tokens"]
+            if "stop" in request_body:
+                data_point["_request_stop"] = request_body["stop"]
+
             output = await _process_fn(data_point, [])
 
             generation_text = output.get(_generation_key, output.get("generation", ""))

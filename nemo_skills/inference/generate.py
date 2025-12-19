@@ -423,6 +423,21 @@ class GenerationTask:
         self.cfg.server["model"] = vllm_config.model_name or "nemo-skills-proxy"
         OmegaConf.set_struct(self.cfg.server, True)
 
+        # Apply discovered generation config to inference defaults
+        # This ensures we use the same temperature/top_p as vLLM expects
+        if vllm_config.generation_config:
+            gen_cfg = vllm_config.generation_config
+            LOG.info(f"Discovered vLLM generation config: {gen_cfg}")
+            if gen_cfg.temperature is not None and self.cfg.inference.temperature == 0.0:
+                LOG.info(f"Setting inference.temperature to {gen_cfg.temperature} (from vLLM)")
+                self.cfg.inference.temperature = gen_cfg.temperature
+            if gen_cfg.top_p is not None and self.cfg.inference.top_p == 0.95:
+                LOG.info(f"Setting inference.top_p to {gen_cfg.top_p} (from vLLM)")
+                self.cfg.inference.top_p = gen_cfg.top_p
+            if gen_cfg.max_tokens is not None and self.cfg.inference.tokens_to_generate is None:
+                LOG.info(f"Setting inference.tokens_to_generate to {gen_cfg.max_tokens} (from vLLM)")
+                self.cfg.inference.tokens_to_generate = gen_cfg.max_tokens
+
     def setup_prompt(self):
         if self.cfg.prompt_format == "openai":
             return None
@@ -620,6 +635,11 @@ class GenerationTask:
             output.pop("num_generated_tokens", None)
             output.pop("num_input_tokens", None)
 
+        # Remove internal request-level override keys (used by proxy mode)
+        for key in list(original_data_point.keys()):
+            if key.startswith("_request_"):
+                original_data_point.pop(key)
+
         for key in output:
             original_data_point.pop(key, None)
         output.update(original_data_point)
@@ -659,6 +679,21 @@ class GenerationTask:
             "prompt": self.fill_prompt(data_point, all_data),
             "stop_phrases": [self.cfg.stop_phrase] if self.cfg.stop_phrase else None,
         }
+
+        # Apply request-level overrides from proxy endpoints
+        # These are passed in the data_point with _request_ prefix (e.g., _request_temperature)
+        # This is critical for NeMo-RL integration where vLLM asserts temperature matches its config
+        if "_request_temperature" in data_point:
+            generation_params["temperature"] = data_point["_request_temperature"]
+        if "_request_top_p" in data_point:
+            generation_params["top_p"] = data_point["_request_top_p"]
+        if "_request_max_tokens" in data_point:
+            generation_params["tokens_to_generate"] = data_point["_request_max_tokens"]
+        if "_request_stop" in data_point:
+            stop = data_point["_request_stop"]
+            if isinstance(stop, str):
+                stop = [stop]
+            generation_params["stop_phrases"] = stop
 
         if self.cfg.code_execution:
             if self.cfg.override_max_code_executions and self.cfg.total_code_executions_in_prompt is not None:

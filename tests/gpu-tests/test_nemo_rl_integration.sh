@@ -17,7 +17,12 @@ set -e
 KILL_DOCKER_CONTAINERS=${KILL_DOCKER_CONTAINERS:-false}
 if [ "$KILL_DOCKER_CONTAINERS" = true ]; then
     echo "Killing all docker containers..."
-    docker kill $(docker ps -q)
+    CONTAINERS=$(docker ps -q)
+    if [ -n "$CONTAINERS" ]; then
+        docker kill $CONTAINERS
+    else
+        echo "No running docker containers to kill."
+    fi
 fi
 MODEL="${NEMO_SKILLS_TEST_HF_MODEL:-Qwen/Qwen3-0.6B}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
