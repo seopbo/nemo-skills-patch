@@ -24,6 +24,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Optional
 
+import ray
 from datasets import Dataset, load_dataset
 from nemo_rl.algorithms.grpo import MasterConfig, grpo_train, setup
 from nemo_rl.algorithms.utils import get_tokenizer
@@ -45,13 +46,19 @@ from nemo_skills.utils import setup_make_sequence_length_divisible_by
 # NeMo-Gym imports (optional - only needed when using NeMo-Gym)
 _NEMO_GYM_IMPORT_ERROR = None
 try:
-    from nemo_rl.environments.nemo_gym import NemoGym
+    from nemo_rl.environments.nemo_gym import (
+        NemoGym,
+        NemoGymConfig,
+        setup_nemo_gym_config,
+    )
 
     NEMO_GYM_AVAILABLE = True
 except ImportError as e:
     NEMO_GYM_AVAILABLE = False
     _NEMO_GYM_IMPORT_ERROR = str(e)
     NemoGym = None  # type: ignore
+    NemoGymConfig = None  # type: ignore
+    setup_nemo_gym_config = None  # type: ignore
 
 
 def parse_args() -> tuple[argparse.Namespace, list[str]]:
@@ -155,7 +162,6 @@ class NSTaskDataSpec(TaskDataSpec):
     prompt_spec: dict[str, Any] | None = None
 
 
-# TaskDataProcessFnCallable
 def ns_data_processor(
     datum_dict: dict[str, Any],
     task_data_spec: NSTaskDataSpec,
@@ -163,6 +169,7 @@ def ns_data_processor(
     max_seq_length: int,
     idx: int,
 ) -> DatumSpec:
+    """Standard NeMo-Skills data processor for MathEnvironment."""
     prompt_spec = task_data_spec.prompt_spec
     extra_env_info = copy.deepcopy(datum_dict)
 
@@ -193,16 +200,6 @@ def ns_data_processor(
             chat_message["token_ids"] = chat_message["token_ids"][: min(4, max_seq_length // len(message_log))]
         loss_multiplier = 0.0
 
-    # Build responses_create_params for NeMo-Gym (OpenAI Responses API format)
-    # This is used when env.should_use_nemo_gym=true
-    # NeMo-Gym's rollouts.py expects this INSIDE extra_env_info
-    extra_env_info["responses_create_params"] = {
-        "input": [{"role": "user", "content": user_message}],
-        "tools": [],  # No tools for basic math
-    }
-    # NeMo-Gym requires agent_ref to know which agent server to call
-    extra_env_info["agent_ref"] = {"name": "simple_agent"}
-
     output: DatumSpec = {
         "message_log": message_log,
         "length": length,
@@ -214,22 +211,87 @@ def ns_data_processor(
     return output
 
 
-def setup_data(
+def ns_data_processor_for_nemo_gym(
+    datum_dict: dict[str, Any],
+    task_data_spec: NSTaskDataSpec,
+    tokenizer: TokenizerType,
+    max_seq_length: int,
+    idx: int,
+) -> DatumSpec:
+    """
+    NeMo-Skills data processor for NeMo-Gym integration.
+
+    This differs from the standard processor by:
+    1. Adding responses_create_params for OpenAI Responses API format
+    2. Adding agent_ref to specify which agent server to call
+    3. Adding _rowidx for result ordering
+    """
+    prompt_spec = task_data_spec.prompt_spec
+    extra_env_info = copy.deepcopy(datum_dict)
+
+    prompt = get_prompt(
+        prompt_config=prompt_spec["prompt_config"],
+        tokenizer=tokenizer,
+        examples_type=prompt_spec["examples_type"],
+        config_dir=prompt_spec["config_dir"],
+    )
+    user_message = prompt.fill(datum_dict, format_as_string=True)
+    message_log = [
+        {
+            "role": "user",
+            "content": user_message,
+            "token_ids": tokenizer([user_message], return_tensors="pt", add_special_tokens=False)["input_ids"][0],
+        }
+    ]
+
+    length = sum(len(m["token_ids"]) for m in message_log)
+
+    loss_multiplier = 1.0
+    if length > max_seq_length:
+        for chat_message in message_log:
+            chat_message["token_ids"] = chat_message["token_ids"][: min(4, max_seq_length // len(message_log))]
+        loss_multiplier = 0.0
+
+    # NeMo-Gym specific fields (required by rollout_collection.py)
+    # These fields are used by NemoGym.run_rollouts() to make agent calls
+    extra_env_info["responses_create_params"] = {
+        "input": [{"role": "user", "content": user_message}],
+        "tools": [],  # No tools for basic math
+    }
+    # Agent ref tells NeMo-Gym which agent server to call
+    # Must match an agent defined in the nemo_gym config
+    extra_env_info["agent_ref"] = {"name": "simple_agent"}
+    # Row index for result ordering after async processing
+    extra_env_info["_rowidx"] = idx
+
+    output: DatumSpec = {
+        "message_log": message_log,
+        "length": length,
+        "extra_env_info": extra_env_info,
+        "loss_multiplier": loss_multiplier,
+        "idx": idx,
+        "task_name": "nemo_gym",  # Use nemo_gym task name for NeMo-Gym
+    }
+    return output
+
+
+def setup_data_only(
     tokenizer: TokenizerType,
     data_config: DataConfig,
-    env_configs: dict[str, Any],
-    nemo_gym_config: Optional[dict[str, Any]] = None,
-    policy_config: Optional[dict[str, Any]] = None,
-) -> tuple[
-    AllTaskProcessedDataset,
-    Optional[AllTaskProcessedDataset],
-    dict[str, EnvironmentInterface],
-    dict[str, EnvironmentInterface],
-]:
+    use_nemo_gym: bool = False,
+) -> tuple[AllTaskProcessedDataset, Optional[AllTaskProcessedDataset]]:
+    """
+    Set up datasets without creating environments.
+    Environments are created separately after policy_generation is available.
+    """
     print("\n▶ Setting up data...")
     prompt_config = data_config["prompt"]
+
+    # Choose task name based on environment type
+    task_name = "nemo_gym" if use_nemo_gym else "math"
+
     math_task_spec = NSTaskDataSpec(
-        task_name="math",
+        task_name=task_name,
         prompt_spec=prompt_config,
     )
 
@@ -238,124 +300,16 @@ def setup_data(
         data_config["val_data_path"],
     )
 
-    task_data_processors: dict[str, tuple[TaskDataSpec, TaskDataProcessFnCallable]] = defaultdict(
-        lambda: (math_task_spec, ns_data_processor)
-    )
-    task_data_processors["math"] = (math_task_spec, ns_data_processor)
-
-    # Check if we should use NeMo-Gym for rollouts
-    should_use_nemo_gym = env_configs.get("should_use_nemo_gym", False)
-
-    if should_use_nemo_gym:
-        if not NEMO_GYM_AVAILABLE:
-            error_msg = f"NeMo-Gym is not available: {_NEMO_GYM_IMPORT_ERROR}"
-            raise ImportError(error_msg)
-
-        print("  ⚙️  Using NeMo-Gym for rollouts")
-
-        # Get the proxy URL from nemo_gym config
-        policy_base_url = nemo_gym_config.get("policy_base_url") if nemo_gym_config else None
-        if not policy_base_url:
-            raise ValueError(
-                "nemo_gym.policy_base_url is required when env.should_use_nemo_gym=true. "
-                "This should point to your NeMo-Skills proxy URL."
-            )
-
-        # Build NeMo-Gym config
-        model_name = policy_config.get("model_name", "unknown") if policy_config else "unknown"
-
-        # NeMo-Gym expects base_urls as a list
-        base_urls = [policy_base_url] if isinstance(policy_base_url, str) else policy_base_url
-
-        # Build the initial global config dict that NemoGym's head server will serve
-        # This is returned by /global_config_dict_yaml and used by ServerClient.load_from_global_config
-        initial_config = nemo_gym_config.get("initial_global_config_dict", {}).copy()
-
-        # NemoGym config structure requires 3 levels: top_level -> type -> name -> config
-        # See get_first_server_config_dict in nemo_gym/global_config.py
-
-        # Add model server config (policy_model)
-        if "policy_model" not in initial_config:
-            initial_config["policy_model"] = {
-                "responses_api_models": {
-                    "policy_model": {
-                        "base_url": base_urls[0] if base_urls else policy_base_url,
-                        "model_name": model_name,
-                    }
-                }
-            }
-
-        # Add agent config (simple_agent) - this is what agent_ref points to
-        if "simple_agent" not in initial_config:
-            initial_config["simple_agent"] = {
-                "responses_api_agents": {
-                    "simple_agent": {
-                        "model_server": {
-                            "type": "responses_api_models",
-                            "name": "policy_model",
-                        }
-                    }
-                }
-            }
-
-        # Also add policy_base_url for discovery
-        if "policy_base_url" not in initial_config:
-            initial_config["policy_base_url"] = base_urls
-
-        nemo_gym_env_config = {
-            "model_name": model_name,
-            "base_urls": base_urls,
-            "initial_global_config_dict": initial_config,
-        }
-
-        # Debug: print the config being passed to NemoGym
-        print(f"  [DEBUG] NemoGym initial_config keys: {list(initial_config.keys())}")
-        print(f"  [DEBUG] simple_agent config: {initial_config.get('simple_agent', 'NOT FOUND')}")
-
-        # Register NeMo-Gym environment
-        nemo_gym_cls_path = "nemo_rl.environments.nemo_gym.NemoGym"
-        ACTOR_ENVIRONMENT_REGISTRY[nemo_gym_cls_path] = PY_EXECUTABLES.SYSTEM
-
-        nemo_gym_env = NemoGym.options(
-            runtime_env={
-                "py_executable": get_actor_python_env(nemo_gym_cls_path),
-                "env_vars": dict(os.environ),
-            }
-        ).remote(nemo_gym_env_config)
-
-        print(f"  ✓ NeMo-Gym environment created with base_urls={base_urls}")
-
-        # Use NeMo-Gym for all tasks
-        task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: nemo_gym_env)
-        task_to_env["math"] = nemo_gym_env
-
+    # Choose processor based on environment type
+    if use_nemo_gym:
+        processor = ns_data_processor_for_nemo_gym
     else:
-        # Standard MathEnvironment setup
-        # Allow overriding the environment class via the Hydra/YAML config.
-        # If `env_cls` is provided inside env_configs["math"], we dynamically
-        # import and instantiate that environment instead of the default
-        # `MathEnvironment`.  This lets users plug in custom reward functions
-        # without modifying the rest of the code.
+        processor = ns_data_processor
 
-        env_cls_path = env_configs["math"].get(
-            "env_cls",
-            "nemo_skills.training.nemo_rl.environments.math_environment.MathEnvironment",
-        )
-        ACTOR_ENVIRONMENT_REGISTRY[env_cls_path] = PY_EXECUTABLES.SYSTEM
-
-        module_name, class_name = env_cls_path.rsplit(".", 1)
-        env_module = importlib.import_module(module_name)
-        env_cls = getattr(env_module, class_name)
-
-        math_env = env_cls.options(  # type: ignore  # ray.remote wrapper
-            runtime_env={
-                "py_executable": get_actor_python_env(env_cls_path),
-                "env_vars": dict(os.environ),  # Pass through all env vars
-            }
-        ).remote(env_configs["math"])
-
-        task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
-        task_to_env["math"] = math_env
+    task_data_processors: dict[str, tuple[TaskDataSpec, TaskDataProcessFnCallable]] = defaultdict(
+        lambda: (math_task_spec, processor)
+    )
+    task_data_processors[task_name] = (math_task_spec, processor)
 
     dataset = AllTaskProcessedDataset(
         data.formatted_ds["train"],
@@ -374,10 +328,89 @@ def setup_data(
             task_data_processors,
             max_seq_length=data_config["max_input_seq_length"],
         )
-    else:
-        val_dataset = None
 
-    return dataset, val_dataset, task_to_env, task_to_env
+    return dataset, val_dataset
+
+
+def setup_math_environment(
+    env_configs: dict[str, Any],
+) -> dict[str, EnvironmentInterface]:
+    """Set up the standard MathEnvironment."""
+    env_cls_path = env_configs["math"].get(
+        "env_cls",
+        "nemo_skills.training.nemo_rl.environments.math_environment.MathEnvironment",
+    )
+    ACTOR_ENVIRONMENT_REGISTRY[env_cls_path] = PY_EXECUTABLES.SYSTEM
+
+    module_name, class_name = env_cls_path.rsplit(".", 1)
+    env_module = importlib.import_module(module_name)
+    env_cls = getattr(env_module, class_name)
+
+    math_env = env_cls.options(
+        runtime_env={
+            "py_executable": get_actor_python_env(env_cls_path),
+            "env_vars": dict(os.environ),
+        }
+    ).remote(env_configs["math"])
+
+    task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: math_env)
+    task_to_env["math"] = math_env
+    return task_to_env
+
+
+def setup_nemo_gym_environment(
+    policy_generation,
+    nemo_gym_config: dict[str, Any],
+) -> dict[str, EnvironmentInterface]:
+    """
+    Set up NeMo-Gym environment using policy_generation's vLLM server URLs.
+
+    This follows the canonical approach from run_grpo_nemo_gym.py:
+    1. Use policy_generation.dp_openai_server_base_urls for the vLLM server URLs
+    2. Pass the nemo_gym config as initial_global_config_dict
+    3. The NemoGym class adds flat keys (policy_model_name, policy_base_url, etc.)
+    """
+    if not NEMO_GYM_AVAILABLE:
+        raise ImportError(f"NeMo-Gym is not available: {_NEMO_GYM_IMPORT_ERROR}")
+
+    # Get the vLLM server URLs from policy_generation
+    # These are the actual OpenAI-compatible endpoints exposed by vLLM
+    base_urls = policy_generation.dp_openai_server_base_urls
+    model_name = policy_generation.cfg["model_name"]
+
+    print(f"  ⚙️  Setting up NeMo-Gym with {len(base_urls)} vLLM server(s)")
+    print(f"      Model: {model_name}")
+    print(f"      Base URLs: {base_urls}")
+
+    # The initial_global_config_dict is passed to NemoGym
+    # NemoGym.__init__ will add: policy_model_name, policy_api_key, policy_base_url
+    # See nemo_rl/environments/nemo_gym.py lines 51-59
+    initial_global_config_dict = nemo_gym_config.copy() if nemo_gym_config else {}
+
+    # Create NemoGymConfig (TypedDict with model_name, base_urls, initial_global_config_dict)
+    nemo_gym_env_config: NemoGymConfig = {
+        "model_name": model_name,
+        "base_urls": base_urls,
+        "initial_global_config_dict": initial_global_config_dict,
+    }
+
+    # Register NeMo-Gym environment
+    nemo_gym_cls_path = "nemo_rl.environments.nemo_gym.NemoGym"
+    ACTOR_ENVIRONMENT_REGISTRY[nemo_gym_cls_path] = PY_EXECUTABLES.SYSTEM
+
+    nemo_gym_env = NemoGym.options(
+        runtime_env={
+            "py_executable": get_actor_python_env(nemo_gym_cls_path),
+        }
+    ).remote(nemo_gym_env_config)
+
+    # Blocking wait for NeMo-Gym to spin up (like in run_grpo_nemo_gym.py)
+    print("  ⏳ Waiting for NeMo-Gym environment to initialize...")
+    ray.get(nemo_gym_env.health_check.remote())
+    print("  ✓ NeMo-Gym environment ready")
+
+    task_to_env: dict[str, EnvironmentInterface] = {"nemo_gym": nemo_gym_env}
+    return task_to_env
 
 
 def main() -> None:
@@ -403,6 +436,14 @@ def main() -> None:
     config: MasterConfig = OmegaConf.to_container(config, resolve=True)
     print("Applied CLI overrides")
 
+    # Check if we should use NeMo-Gym
+    should_use_nemo_gym = config["env"].get("should_use_nemo_gym", False)
+
+    if should_use_nemo_gym and not NEMO_GYM_AVAILABLE:
+        print(f"  ⚠️  Warning: NeMo-Gym requested but import failed: {_NEMO_GYM_IMPORT_ERROR}")
+        print("     Falling back to MathEnvironment")
+        should_use_nemo_gym = False
+
     # Print config
     print("Final config:")
     pprint.pprint(config)
@@ -420,36 +461,24 @@ def main() -> None:
     assert config["policy"]["generation"] is not None, "A generation config is required for GRPO"
     config["policy"]["generation"] = configure_generation_config(config["policy"]["generation"], tokenizer)
 
-    # Apply NeMo-Gym config if enabled (ensures vLLM HTTP server is exposed)
-    if config["env"].get("should_use_nemo_gym", False):
-        if not NEMO_GYM_AVAILABLE:
-            print(f"  ⚠️  Warning: NeMo-Gym import failed: {_NEMO_GYM_IMPORT_ERROR}")
-            print("     Will fall back to MathEnvironment")
-        else:
-            # Ensure vLLM HTTP server is exposed for NeMo-Gym to connect
-            vllm_cfg = config["policy"]["generation"].get("vllm_cfg", {})
-            vllm_cfg["expose_http_server"] = True
-            vllm_cfg["async_engine"] = True
-            config["policy"]["generation"]["vllm_cfg"] = vllm_cfg
-            # NeMo-Gym doesn't support stop_token_ids/stop_strings - clear them
-            config["policy"]["generation"]["stop_token_ids"] = None
-            config["policy"]["generation"]["stop_strings"] = None
-            print("  ✓ NeMo-Gym config applied (vLLM HTTP server exposed, stop tokens cleared)")
+    # Apply NeMo-Gym specific config if enabled
+    # This is done BEFORE setup() so vLLM is configured to expose HTTP server
+    if should_use_nemo_gym:
+        # Use the canonical setup_nemo_gym_config function from nemo_rl
+        # This sets: vllm_cfg.async_engine=True, vllm_cfg.expose_http_server=True
+        # And clears stop_strings/stop_token_ids
+        setup_nemo_gym_config(config, tokenizer)
+        print("  ✓ NeMo-Gym config applied (vLLM HTTP server exposed)")
 
-    # setup data
-    (
-        dataset,
-        val_dataset,
-        task_to_env,
-        val_task_to_env,
-    ) = setup_data(
+    # Setup data (without environments - those come after setup())
+    dataset, val_dataset = setup_data_only(
         tokenizer,
         config["data"],
-        config["env"],
-        nemo_gym_config=config.get("nemo_gym"),
-        policy_config=config.get("policy"),
+        use_nemo_gym=should_use_nemo_gym,
     )
 
+    # Run setup() to create policy, policy_generation, etc.
+    # policy_generation.dp_openai_server_base_urls is only available after this
     (
         policy,
         policy_generation,
@@ -462,6 +491,16 @@ def main() -> None:
         grpo_state,
         master_config,
     ) = setup(config, tokenizer, dataset, val_dataset)
+
+    # NOW set up the environment - after setup() so we have policy_generation
+    if should_use_nemo_gym:
+        # Get nemo_gym config from env.nemo_gym
+        nemo_gym_config = config["env"].get("nemo_gym", {})
+        task_to_env = setup_nemo_gym_environment(policy_generation, nemo_gym_config)
+        val_task_to_env = task_to_env
+    else:
+        task_to_env = setup_math_environment(config["env"])
+        val_task_to_env = task_to_env
 
     # Check if async mode is enabled
     if "async_grpo" in config["grpo"] and config["grpo"]["async_grpo"]["enabled"]:
