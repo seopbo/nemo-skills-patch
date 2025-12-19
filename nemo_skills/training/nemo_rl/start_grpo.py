@@ -211,78 +211,100 @@ def ns_data_processor(
     return output
 
 
-def ns_data_processor_for_nemo_gym(
-    datum_dict: dict[str, Any],
-    task_data_spec: NSTaskDataSpec,
-    tokenizer: TokenizerType,
-    max_seq_length: int,
-    idx: int,
-) -> DatumSpec:
+def create_nemo_gym_data_processor(agent_name: str = "math_with_judge_simple_agent"):
     """
-    NeMo-Skills data processor for NeMo-Gym integration.
+    Create a NeMo-Skills data processor for NeMo-Gym integration.
 
-    This differs from the standard processor by:
-    1. Adding responses_create_params for OpenAI Responses API format
-    2. Adding agent_ref to specify which agent server to call
-    3. Adding _rowidx for result ordering
+    Args:
+        agent_name: The name of the agent server to call (must match a top-level key
+                    in the NeMo-Gym config, e.g., "math_with_judge_simple_agent")
+
+    Returns:
+        A data processor function configured for the specified agent.
     """
-    prompt_spec = task_data_spec.prompt_spec
-    extra_env_info = copy.deepcopy(datum_dict)
 
-    prompt = get_prompt(
-        prompt_config=prompt_spec["prompt_config"],
-        tokenizer=tokenizer,
-        examples_type=prompt_spec["examples_type"],
-        config_dir=prompt_spec["config_dir"],
-    )
-    user_message = prompt.fill(datum_dict, format_as_string=True)
-    message_log = [
-        {
-            "role": "user",
-            "content": user_message,
-            "token_ids": tokenizer([user_message], return_tensors="pt", add_special_tokens=False)["input_ids"][0],
+    def ns_data_processor_for_nemo_gym(
+        datum_dict: dict[str, Any],
+        task_data_spec: NSTaskDataSpec,
+        tokenizer: TokenizerType,
+        max_seq_length: int,
+        idx: int,
+    ) -> DatumSpec:
+        """
+        NeMo-Skills data processor for NeMo-Gym integration.
+
+        This differs from the standard processor by:
+        1. Adding responses_create_params for OpenAI Responses API format
+        2. Adding agent_ref to specify which agent server to call
+        3. Adding _rowidx for result ordering
+        """
+        prompt_spec = task_data_spec.prompt_spec
+        extra_env_info = copy.deepcopy(datum_dict)
+
+        prompt = get_prompt(
+            prompt_config=prompt_spec["prompt_config"],
+            tokenizer=tokenizer,
+            examples_type=prompt_spec["examples_type"],
+            config_dir=prompt_spec["config_dir"],
+        )
+        user_message = prompt.fill(datum_dict, format_as_string=True)
+        message_log = [
+            {
+                "role": "user",
+                "content": user_message,
+                "token_ids": tokenizer([user_message], return_tensors="pt", add_special_tokens=False)["input_ids"][0],
+            }
+        ]
+
+        length = sum(len(m["token_ids"]) for m in message_log)
+
+        loss_multiplier = 1.0
+        if length > max_seq_length:
+            for chat_message in message_log:
+                chat_message["token_ids"] = chat_message["token_ids"][: min(4, max_seq_length // len(message_log))]
+            loss_multiplier = 0.0
+
+        # NeMo-Gym specific fields (required by rollout_collection.py)
+        # These fields are used by NemoGym.run_rollouts() to make agent calls
+        extra_env_info["responses_create_params"] = {
+            "input": [{"role": "user", "content": user_message}],
+            "tools": [],  # No tools for basic math
         }
-    ]
+        # Agent ref tells NeMo-Gym which agent server to call
+        # Must match a top-level key in the nemo_gym config (e.g., "math_with_judge_simple_agent")
+        extra_env_info["agent_ref"] = {"name": agent_name}
+        # Row index for result ordering after async processing
+        extra_env_info["_rowidx"] = idx
 
-    length = sum(len(m["token_ids"]) for m in message_log)
+        output: DatumSpec = {
+            "message_log": message_log,
+            "length": length,
+            "extra_env_info": extra_env_info,
+            "loss_multiplier": loss_multiplier,
+            "idx": idx,
+            "task_name": datum_dict["task_name"],  # Keep original task_name ("math")
+        }
+        return output
 
-    loss_multiplier = 1.0
-    if length > max_seq_length:
-        for chat_message in message_log:
-            chat_message["token_ids"] = chat_message["token_ids"][: min(4, max_seq_length // len(message_log))]
-        loss_multiplier = 0.0
-
-    # NeMo-Gym specific fields (required by rollout_collection.py)
-    # These fields are used by NemoGym.run_rollouts() to make agent calls
-    extra_env_info["responses_create_params"] = {
-        "input": [{"role": "user", "content": user_message}],
-        "tools": [],  # No tools for basic math
-    }
-    # Agent ref tells NeMo-Gym which agent server to call
-    # Must match an agent defined in the nemo_gym config
-    extra_env_info["agent_ref"] = {"name": "simple_agent"}
-    # Row index for result ordering after async processing
-    extra_env_info["_rowidx"] = idx
-
-    output: DatumSpec = {
-        "message_log": message_log,
-        "length": length,
-        "extra_env_info": extra_env_info,
-        "loss_multiplier": loss_multiplier,
-        "idx": idx,
-        "task_name": datum_dict["task_name"],  # Keep original task_name ("math")
-    }
-    return output
+    return ns_data_processor_for_nemo_gym
 
 
 def setup_data_only(
     tokenizer: TokenizerType,
     data_config: DataConfig,
     use_nemo_gym: bool = False,
+    nemo_gym_agent_name: str = "math_with_judge_simple_agent",
 ) -> tuple[AllTaskProcessedDataset, Optional[AllTaskProcessedDataset]]:
     """
     Set up datasets without creating environments.
     Environments are created separately after policy_generation is available.
+
+    Args:
+        tokenizer: The tokenizer to use for encoding.
+        data_config: Data configuration dict.
+        use_nemo_gym: Whether to use NeMo-Gym for rollouts.
+        nemo_gym_agent_name: The agent name to use in NeMo-Gym (must match a
+            top-level key in the nemo_gym config, like "math_with_judge_simple_agent").
     """
     print("\n▶ Setting up data...")
     prompt_config = data_config["prompt"]
@@ -304,8 +326,8 @@ def setup_data_only(
     # Choose processor based on environment type
     # Both processors handle "math" task name, but nemo_gym processor adds extra fields
     if use_nemo_gym:
-        processor = ns_data_processor_for_nemo_gym
-        print("  Using NeMo-Gym data processor")
+        processor = create_nemo_gym_data_processor(agent_name=nemo_gym_agent_name)
+        print(f"  Using NeMo-Gym data processor with agent: {nemo_gym_agent_name}")
     else:
         processor = ns_data_processor
         print("  Using standard MathEnvironment data processor")
@@ -374,6 +396,15 @@ def setup_nemo_gym_environment(
     1. Use policy_generation.dp_openai_server_base_urls for the vLLM server URLs
     2. Pass the nemo_gym config as initial_global_config_dict
     3. The NemoGym class adds flat keys (policy_model_name, policy_base_url, etc.)
+
+    IMPORTANT: The nemo_gym config should contain:
+    - config_paths: List of paths to Gym server config files (relative to Gym repo)
+      Example: ["responses_api_models/vllm_model/configs/vllm_model_for_training.yaml",
+                "resources_servers/math_with_judge/configs/math_with_judge.yaml"]
+    - Any inline overrides for server configs
+
+    The agent_ref in the data must match a top-level key in the resolved config
+    (e.g., "math_with_judge_simple_agent" from math_with_judge.yaml).
     """
     if not NEMO_GYM_AVAILABLE:
         raise ImportError(f"NeMo-Gym is not available: {_NEMO_GYM_IMPORT_ERROR}")
@@ -391,6 +422,18 @@ def setup_nemo_gym_environment(
     # NemoGym.__init__ will add: policy_model_name, policy_api_key, policy_base_url
     # See nemo_rl/environments/nemo_gym.py lines 51-59
     initial_global_config_dict = nemo_gym_config.copy() if nemo_gym_config else {}
+
+    # Validate that config_paths are provided for NeMo-Gym server startup
+    config_paths = initial_global_config_dict.get("config_paths", [])
+    if not config_paths:
+        print("  ⚠️  Warning: No config_paths provided in nemo_gym config.")
+        print("     NeMo-Gym requires config_paths pointing to server config files.")
+        print("     Example config_paths:")
+        print("       - responses_api_models/vllm_model/configs/vllm_model_for_training.yaml")
+        print("       - resources_servers/math_with_judge/configs/math_with_judge.yaml")
+        print("     Without these, no agent/resources servers will be started.")
+    else:
+        print(f"      Config paths: {config_paths}")
 
     # Create NemoGymConfig (TypedDict with model_name, base_urls, initial_global_config_dict)
     nemo_gym_env_config: NemoGymConfig = {
@@ -418,6 +461,20 @@ def setup_nemo_gym_environment(
     task_to_env: dict[str, EnvironmentInterface] = defaultdict(lambda: nemo_gym_env)
     task_to_env["math"] = nemo_gym_env
     return task_to_env
+
+
+def get_nemo_gym_agent_name(nemo_gym_config: dict[str, Any]) -> str:
+    """
+    Get the agent name to use for NeMo-Gym rollouts.
+
+    This should match a top-level key in the NeMo-Gym config that defines
+    an agent server (e.g., "math_with_judge_simple_agent").
+
+    Can be configured via nemo_gym.agent_name in the config.
+    """
+    # Default to math_with_judge_simple_agent which is defined in
+    # resources_servers/math_with_judge/configs/math_with_judge.yaml
+    return nemo_gym_config.get("agent_name", "math_with_judge_simple_agent")
 
 
 def main() -> None:
@@ -470,6 +527,7 @@ def main() -> None:
 
     # Apply NeMo-Gym specific config if enabled
     # This is done BEFORE setup() so vLLM is configured to expose HTTP server
+    nemo_gym_agent_name = None
     if should_use_nemo_gym:
         # Use the canonical setup_nemo_gym_config function from nemo_rl
         # This sets: vllm_cfg.async_engine=True, vllm_cfg.expose_http_server=True
@@ -477,11 +535,17 @@ def main() -> None:
         setup_nemo_gym_config(config, tokenizer)
         print("  ✓ NeMo-Gym config applied (vLLM HTTP server exposed)")
 
+        # Get the agent name to use from the config
+        nemo_gym_config = config["env"].get("nemo_gym", {})
+        nemo_gym_agent_name = get_nemo_gym_agent_name(nemo_gym_config)
+        print(f"  Agent name for rollouts: {nemo_gym_agent_name}")
+
     # Setup data (without environments - those come after setup())
     dataset, val_dataset = setup_data_only(
         tokenizer,
         config["data"],
         use_nemo_gym=should_use_nemo_gym,
+        nemo_gym_agent_name=nemo_gym_agent_name or "math_with_judge_simple_agent",
     )
 
     # Run setup() to create policy, policy_generation, etc.
