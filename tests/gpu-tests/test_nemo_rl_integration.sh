@@ -14,6 +14,11 @@
 
 set -e
 
+KILL_DOCKER_CONTAINERS=${KILL_DOCKER_CONTAINERS:-false}
+if [ "$KILL_DOCKER_CONTAINERS" = true ]; then
+    echo "Killing all docker containers..."
+    docker kill $(docker ps -q)
+fi
 MODEL="${NEMO_SKILLS_TEST_HF_MODEL:-Qwen/Qwen3-0.6B}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DATA_FILE="/tmp/nemo-rl-test-data.jsonl"
@@ -87,8 +92,8 @@ echo "Starting NeMo-Skills proxy (connecting to $VLLM_URL)..."
 ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-skills --num_gpus 0 \
     "NEMO_RL_VLLM_URL=$VLLM_URL python -m nemo_skills.inference.generate \
         ++start_server=True \
-        ++temperature=None \
-        ++top_p=None \
+        ++inference.temperature=-1 \
+        ++inference.top_p=-1 \
         ++generate_port=$PROXY_PORT \
         ++prompt_format=openai" \
     2>&1 | tee /tmp/nemo-skills.log &

@@ -64,8 +64,8 @@ class VLLMModel(BaseModel):
         self,
         prompt: str,
         tokens_to_generate: int = 512,
-        temperature: float | None = 0.0,  # setting to default so NeMo-RL can use its configured defaults
-        top_p: float | None = 0.95,  # setting to default so NeMo-RL can use its configured defaults
+        temperature: float = 0.0,
+        top_p: float = 0.95,
         top_k: int = -1,
         min_p: float = 0.0,
         repetition_penalty: float = 1.0,
@@ -96,11 +96,11 @@ class VLLMModel(BaseModel):
             "timeout": timeout,
             "extra_body": self._build_request_body(top_k, min_p, repetition_penalty, extra_body=extra_body),
         }
-        # Only send temperature/top_p if explicitly set (not None)
+        # Only send temperature/top_p if not -1.0 (sentinel for "use server default")
         # This allows the server to use its configured defaults (important for NeMo-RL integration)
-        if temperature is not None:
+        if temperature >= 0:
             params["temperature"] = temperature
-        if top_p is not None:
+        if top_p >= 0:
             params["top_p"] = top_p
         return params
 
@@ -109,8 +109,8 @@ class VLLMModel(BaseModel):
         messages: list[dict],
         stream: bool,
         tokens_to_generate: int = 512,
-        temperature: float | None = 0.0,
-        top_p: float | None = 0.95,
+        temperature: float = 0.0,
+        top_p: float = 0.95,
         top_k: int = -1,
         min_p: float = 0.0,
         repetition_penalty: float = 1.0,
@@ -137,11 +137,11 @@ class VLLMModel(BaseModel):
             "extra_body": self._build_request_body(top_k, min_p, repetition_penalty, extra_body=extra_body),
             "tools": tools,
         }
-        # Only send temperature/top_p if explicitly set (not None)
+        # Only send temperature/top_p if not -1.0 (sentinel for "use server default")
         # This allows the server to use its configured defaults (important for NeMo-RL integration)
-        if temperature is not None:
+        if temperature >= 0:
             request["temperature"] = temperature
-        if top_p is not None:
+        if top_p >= 0:
             request["top_p"] = top_p
         if reasoning_effort:
             request["allowed_openai_params"] = ["reasoning_effort"]
