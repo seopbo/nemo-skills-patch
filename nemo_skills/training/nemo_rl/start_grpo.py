@@ -200,6 +200,8 @@ def ns_data_processor(
         "input": [{"role": "user", "content": user_message}],
         "tools": [],  # No tools for basic math
     }
+    # NeMo-Gym requires agent_ref to know which agent server to call
+    extra_env_info["agent_ref"] = {"name": "simple_agent"}
 
     output: DatumSpec = {
         "message_log": message_log,
@@ -277,6 +279,16 @@ def setup_data(
                     "type": "simple",
                     "base_url": base_urls[0] if base_urls else policy_base_url,
                     "model_name": model_name,
+                }
+            }
+
+        # Add responses_api_agents configuration - NemoGym requires an agent to orchestrate rollouts
+        # The agent_ref in each datum points to this agent
+        if "responses_api_agents" not in initial_config:
+            initial_config["responses_api_agents"] = {
+                "simple_agent": {
+                    "type": "simple",
+                    "model_server_ref": f"responses_api_models/{model_name}",
                 }
             }
 

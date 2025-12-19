@@ -38,8 +38,10 @@ trap cleanup EXIT
 # Note: NemoGym is configured to call PROXY_URL for rollouts
 # ============================================================================
 echo "Starting NeMo-RL with NeMo-Gym integration..."
+# Patch NemoGym bug: global_config_dict_yaml returns YAML but client expects JSON
+NEMO_GYM_PATCH='sed -i "s/return OmegaConf.to_yaml(get_global_config_dict())/import json; return json.dumps(OmegaConf.to_container(get_global_config_dict()))/" /opt/nemo_rl_venv/lib/python3.12/site-packages/nemo_gym/server_utils.py'
 ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-rl --num_gpus 1 \
-    "python -u -m nemo_skills.training.nemo_rl.start_grpo \
+    "$NEMO_GYM_PATCH && python -u -m nemo_skills.training.nemo_rl.start_grpo \
         ++policy.model_name=$MODEL \
         ++data.train_data_path=$DATA_FILE \
         ++data.prompt.prompt_config=generic/math \
