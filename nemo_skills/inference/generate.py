@@ -395,14 +395,19 @@ class GenerationTask:
         self.output_lock = None
 
     def _configure_server_for_proxy_mode(self):
-        """Configure the server to point to the discovered vLLM backend in proxy mode."""
+        """Configure the server to point to the discovered vLLM backend in proxy mode.
+
+        Note: This only discovers the server URL. Model name discovery is deferred
+        to _discover_model_name_from_vllm() which is called after wait_for_server().
+        """
         # If server is already configured with a server_type, use it as-is
         if self.cfg.server.get("server_type"):
             LOG.info(f"Server already configured with type: {self.cfg.server['server_type']}")
             return
 
-        # Discover the vLLM server URL
-        vllm_config = discover_vllm_server()
+        # Discover the vLLM server URL (skip model discovery - server may not be ready)
+        vllm_config = discover_vllm_server(skip_model_discovery=True)
+
         if vllm_config is None:
             raise ValueError(
                 "start_server=True requires a vLLM backend. "
@@ -411,22 +416,58 @@ class GenerationTask:
             )
 
         LOG.info(f"Discovered vLLM backend at {vllm_config.base_url} (via {vllm_config.source})")
-        if vllm_config.model_name:
-            LOG.info(f"vLLM is serving model: {vllm_config.model_name}")
 
         # Configure the server to use the discovered vLLM backend
-        # Disable struct mode to allow adding new keys, then update
+        # Model name will be discovered later after wait_for_server()
         OmegaConf.set_struct(self.cfg.server, False)
         self.cfg.server["server_type"] = "vllm"
         self.cfg.server["host"] = vllm_config.host
         self.cfg.server["port"] = vllm_config.port
-        self.cfg.server["model"] = vllm_config.model_name or "nemo-skills-proxy"
+        # Use a placeholder - will be updated in _discover_model_name_from_vllm()
+        self.cfg.server["model"] = "__pending_discovery__"
         OmegaConf.set_struct(self.cfg.server, True)
 
-        # Apply discovered generation config to inference defaults
-        # This ensures we use the same temperature/top_p as vLLM expects
-        if vllm_config.generation_config:
-            gen_cfg = vllm_config.generation_config
+        # Store the base_url for later model name discovery
+        self._vllm_base_url = vllm_config.base_url
+
+    def _discover_model_name_from_vllm(self):
+        """Discover the model name from vLLM after the server is ready.
+
+        This is called after wait_for_server() to ensure vLLM is available.
+        """
+        from nemo_skills.training.nemo_rl.utils.skills_proxy import (
+            get_vllm_generation_config,
+            get_vllm_model_name,
+        )
+
+        base_url = getattr(self, "_vllm_base_url", None)
+        if not base_url:
+            # Server was configured explicitly, not discovered
+            return
+
+        # Now that server is ready, discover the model name
+        model_name = get_vllm_model_name(base_url, timeout=30.0)
+        if model_name:
+            LOG.info(f"Discovered vLLM model name: {model_name}")
+            OmegaConf.set_struct(self.cfg.server, False)
+            self.cfg.server["model"] = model_name
+            OmegaConf.set_struct(self.cfg.server, True)
+
+            # Also update the LLM instance's model name
+            if hasattr(self, "llm") and hasattr(self.llm, "litellm_kwargs"):
+                self.llm.litellm_kwargs["model"] = f"openai/{model_name}"
+                self.llm.model_name_or_path = model_name
+                LOG.info(f"Updated LLM model name to: {model_name}")
+        else:
+            raise ValueError(
+                f"Failed to discover model name from vLLM at {base_url}. "
+                "Ensure vLLM is running and serving a model. "
+                "You can also set server.model explicitly."
+            )
+
+        # Also try to discover generation config now
+        gen_cfg = get_vllm_generation_config(timeout=5.0)
+        if gen_cfg:
             LOG.info(f"Discovered vLLM generation config: {gen_cfg}")
             if gen_cfg.temperature is not None and self.cfg.inference.temperature == 0.0:
                 LOG.info(f"Setting inference.temperature to {gen_cfg.temperature} (from vLLM)")
@@ -935,6 +976,9 @@ class GenerationTask:
         if self.cfg.start_server:
             # Server mode: start FastAPI server
             self.wait_for_server()
+            # Discover model name after server is ready
+            if hasattr(self, "_vllm_base_url"):
+                self._discover_model_name_from_vllm()
             self.wait_for_sandbox()
             self.start_fastapi_server()
             return

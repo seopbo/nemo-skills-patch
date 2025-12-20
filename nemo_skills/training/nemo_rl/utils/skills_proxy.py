@@ -227,6 +227,7 @@ def discover_vllm_server(
     ray_address: str | None = None,
     head_server_url: str | None = None,
     timeout: float = 5.0,
+    skip_model_discovery: bool = False,
 ) -> VLLMServerConfig | None:
     """
     Discover the vLLM HTTP server address using multiple methods.
@@ -250,6 +251,8 @@ def discover_vllm_server(
         head_server_url: Optional NeMo-Gym head server URL (e.g., "http://localhost:11000").
                         If None, will try to get from NEMO_GYM_HEAD_SERVER_URL.
         timeout: Timeout for HTTP requests in seconds.
+        skip_model_discovery: If True, skip querying for model name and generation config.
+                             Useful when the server might not be ready yet.
 
     Returns:
         VLLMServerConfig if found, None otherwise.
@@ -265,26 +268,32 @@ def discover_vllm_server(
 
         # With explicit head server URL
         config = discover_vllm_server(head_server_url="http://localhost:11000")
+
+        # URL discovery only (when server might not be ready)
+        config = discover_vllm_server(skip_model_discovery=True)
     """
     # Method 1: Environment variables
     config = _discover_from_env()
     if config:
-        config.model_name = get_vllm_model_name(config.base_url, timeout)
-        config.generation_config = get_vllm_generation_config(head_server_url, timeout)
+        if not skip_model_discovery:
+            config.model_name = get_vllm_model_name(config.base_url, timeout)
+            config.generation_config = get_vllm_generation_config(head_server_url, timeout)
         return config
 
     # Method 2: Ray named values
     config = _discover_from_ray(ray_address)
     if config:
-        config.model_name = get_vllm_model_name(config.base_url, timeout)
-        config.generation_config = get_vllm_generation_config(head_server_url, timeout)
+        if not skip_model_discovery:
+            config.model_name = get_vllm_model_name(config.base_url, timeout)
+            config.generation_config = get_vllm_generation_config(head_server_url, timeout)
         return config
 
     # Method 3: NeMo-Gym head server
     config = _discover_from_head_server(head_server_url, timeout)
     if config:
-        config.model_name = get_vllm_model_name(config.base_url, timeout)
-        config.generation_config = get_vllm_generation_config(head_server_url, timeout)
+        if not skip_model_discovery:
+            config.model_name = get_vllm_model_name(config.base_url, timeout)
+            config.generation_config = get_vllm_generation_config(head_server_url, timeout)
         return config
 
     return None
