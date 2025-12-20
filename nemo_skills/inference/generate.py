@@ -764,6 +764,16 @@ class GenerationTask:
                 stop = [stop]
             generation_params["stop_phrases"] = stop
 
+        # Request logprobs for NeMo-RL training (token ID extraction)
+        if data_point.get("_request_logprobs"):
+            generation_params["top_logprobs"] = 1  # Request logprobs
+            # Add vLLM-specific option to get token IDs instead of strings
+            if data_point.get("_request_return_tokens_as_token_ids"):
+                extra_body = generation_params.get("extra_body", {}) or {}
+                extra_body["return_tokens_as_token_ids"] = True
+                generation_params["extra_body"] = extra_body
+            LOG.info(f"Requesting logprobs: top_logprobs=1, extra_body={generation_params.get('extra_body')}")
+
         if self.cfg.code_execution:
             if self.cfg.override_max_code_executions and self.cfg.total_code_executions_in_prompt is not None:
                 generation_params["max_code_executions"] = data_point["total_code_executions"]

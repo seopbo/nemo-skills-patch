@@ -223,6 +223,101 @@ def get_vllm_generation_config(
     return None
 
 
+async def tokenize_messages(
+    base_url: str,
+    model: str,
+    messages: list[dict],
+    tools: list[dict] | None = None,
+    timeout: float = 30.0,
+) -> list[int] | None:
+    """Call the vLLM /tokenize endpoint to get prompt token IDs.
+
+    This is needed for NeMo-RL training which requires the exact token IDs
+    used to generate the prompt.
+
+    Args:
+        base_url: The vLLM server base URL (e.g., "http://localhost:5000/v1")
+        model: The model name
+        messages: List of chat messages
+        tools: Optional list of tools
+        timeout: Request timeout in seconds
+
+    Returns:
+        List of token IDs if successful, None otherwise
+    """
+    import aiohttp
+
+    try:
+        # The tokenize endpoint is at /tokenize (not /v1/tokenize)
+        url = base_url.rstrip("/")
+        if url.endswith("/v1"):
+            url = url[:-3]  # Remove /v1
+        tokenize_url = f"{url}/tokenize"
+
+        body = {
+            "model": model,
+            "messages": messages,
+        }
+        if tools:
+            body["tools"] = tools
+
+        async with aiohttp.ClientSession() as session:
+            async with session.post(tokenize_url, json=body, timeout=aiohttp.ClientTimeout(total=timeout)) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    tokens = data.get("tokens", [])
+                    LOG.debug(f"Tokenize returned {len(tokens)} tokens")
+                    return tokens
+                else:
+                    LOG.warning(f"Tokenize endpoint returned status {response.status}")
+                    return None
+    except Exception as e:
+        LOG.warning(f"Failed to call tokenize endpoint: {e}")
+        return None
+
+
+def extract_token_ids_from_logprobs(logprobs_content: list[dict]) -> tuple[list[int], list[float]]:
+    """Extract generation token IDs and log probs from logprobs content.
+
+    vLLM returns tokens in logprobs content either as:
+    - Direct token strings (need tokenizer to convert)
+    - Token IDs prefixed with "token_id:" when return_tokens_as_token_ids=True
+
+    Args:
+        logprobs_content: The logprobs.content from a chat completion response
+
+    Returns:
+        Tuple of (generation_token_ids, generation_log_probs)
+    """
+    generation_token_ids = []
+    generation_log_probs = []
+
+    for entry in logprobs_content:
+        # Get the log probability
+        logprob = entry.get("logprob", 0.0)
+        generation_log_probs.append(logprob)
+
+        # Get the token - may be "token_id:12345" format or actual token string
+        token = entry.get("token", "")
+        if isinstance(token, str) and token.startswith("token_id:"):
+            # vLLM with return_tokens_as_token_ids=True
+            try:
+                token_id = int(token.removeprefix("token_id:"))
+                generation_token_ids.append(token_id)
+            except ValueError:
+                LOG.warning(f"Failed to parse token_id from: {token}")
+                generation_token_ids.append(0)
+        elif isinstance(token, int):
+            generation_token_ids.append(token)
+        else:
+            # Token is a string - we'd need the tokenizer to get the ID
+            # For now, use -1 as a placeholder
+            LOG.debug(f"Token is string, not ID: {token[:20] if token else 'empty'}...")
+            generation_token_ids.append(-1)
+
+    return generation_token_ids, generation_log_probs
+
+
 def discover_vllm_server(
     ray_address: str | None = None,
     head_server_url: str | None = None,
@@ -638,6 +733,9 @@ def create_skills_proxy_app(
     process_fn: ProcessFn | None = None,
     generation_key: str = "generation",
     title: str = "NeMo Skills Generation Server",
+    return_token_id_information: bool = True,
+    vllm_base_url: str | None = None,
+    model_name: str | None = None,
 ) -> FastAPI:
     """
     Create a FastAPI application that serves as an OpenAI-compatible proxy.
@@ -657,6 +755,12 @@ def create_skills_proxy_app(
         generation_key: The key in the output dict that contains the generation.
                        Only used if process_fn is provided.
         title: Title for the FastAPI application.
+        return_token_id_information: If True (default), request logprobs from vLLM and
+                                    return prompt_token_ids, generation_token_ids, and
+                                    generation_log_probs in responses. Required for NeMo-RL training.
+        vllm_base_url: The vLLM server base URL for tokenize calls. If None, will be
+                      auto-discovered from generation_task or environment.
+        model_name: The model name for tokenize calls. If None, will be auto-discovered.
 
     Returns:
         FastAPI application with OpenAI-compatible endpoints.
@@ -683,6 +787,33 @@ def create_skills_proxy_app(
     else:
         _generation_key = generation_key
         _process_fn = process_fn
+
+    # Get vLLM base URL and model name for tokenize calls
+    _vllm_base_url = vllm_base_url
+    _model_name = model_name
+    _return_token_id_information = return_token_id_information
+
+    if _vllm_base_url is None and generation_task is not None:
+        # Try to get from generation_task
+        if hasattr(generation_task, "_vllm_base_url"):
+            _vllm_base_url = generation_task._vllm_base_url
+        elif hasattr(generation_task.cfg, "server"):
+            server_cfg = generation_task.cfg.server
+            host = server_cfg.get("host")
+            port = server_cfg.get("port")
+            if host and port:
+                _vllm_base_url = f"http://{host}:{port}/v1"
+
+    if _model_name is None and generation_task is not None:
+        if hasattr(generation_task.cfg, "server"):
+            _model_name = generation_task.cfg.server.get("model")
+
+    # Also check environment
+    if _model_name is None:
+        _model_name = os.environ.get("NEMO_RL_MODEL_NAME")
+
+    if _return_token_id_information:
+        LOG.info(f"Token ID information enabled. vLLM URL: {_vllm_base_url}, model: {_model_name}")
 
     app = FastAPI(
         title=title,
@@ -957,18 +1088,81 @@ def create_skills_proxy_app(
             if "stop" in responses_create_params:
                 data_point["_request_stop"] = responses_create_params["stop"]
 
+            # Request logprobs for token ID extraction if enabled
+            if _return_token_id_information:
+                data_point["_request_logprobs"] = True
+                data_point["_request_return_tokens_as_token_ids"] = True
+
             LOG.debug(
                 f"/run request params: temperature={data_point.get('_request_temperature')}, "
                 f"top_p={data_point.get('_request_top_p')}, "
-                f"max_tokens={data_point.get('_request_max_tokens')}"
+                f"max_tokens={data_point.get('_request_max_tokens')}, "
+                f"logprobs={data_point.get('_request_logprobs')}"
             )
 
             output = await _process_fn(data_point, [])
 
             generation_text = output.get(_generation_key, output.get("generation", ""))
 
+            # Extract token ID information if enabled
+            prompt_token_ids = []
+            generation_token_ids = []
+            generation_log_probs = []
+
+            if _return_token_id_information:
+                # Extract generation token IDs from logprobs in the output
+                LOG.info(
+                    f"Token ID extraction: output keys={list(output.keys())}, "
+                    f"has_logprobs={'logprobs' in output}, has_tokens={'tokens' in output}"
+                )
+                if "logprobs" in output and "tokens" in output:
+                    # Logprobs were returned - extract token IDs
+                    tokens = output.get("tokens", [])
+                    LOG.info(f"Extracting from {len(tokens)} tokens")
+                    logprobs = output.get("logprobs", [])
+
+                    for i, token in enumerate(tokens):
+                        # Token may be "token_id:12345" format or actual token string
+                        if isinstance(token, str) and token.startswith("token_id:"):
+                            try:
+                                token_id = int(token.removeprefix("token_id:"))
+                                generation_token_ids.append(token_id)
+                            except ValueError:
+                                generation_token_ids.append(0)
+                        elif isinstance(token, int):
+                            generation_token_ids.append(token)
+                        else:
+                            # Token is a string - use -1 as placeholder
+                            generation_token_ids.append(-1)
+
+                        if i < len(logprobs):
+                            generation_log_probs.append(logprobs[i])
+                        else:
+                            generation_log_probs.append(0.0)
+
+                # Get prompt token IDs via /tokenize endpoint
+                if _vllm_base_url and _model_name:
+                    LOG.info(f"Calling tokenize: url={_vllm_base_url}, model={_model_name}")
+                    prompt_token_ids = (
+                        await tokenize_messages(
+                            base_url=_vllm_base_url,
+                            model=_model_name,
+                            messages=messages,
+                            tools=responses_create_params.get("tools"),
+                        )
+                        or []
+                    )
+                    LOG.info(f"Tokenize returned {len(prompt_token_ids)} prompt tokens")
+                else:
+                    LOG.warning(f"Cannot tokenize: vllm_url={_vllm_base_url}, model={_model_name}")
+
             # Build NeMo-Gym compatible response
             # This matches the format expected by NemoGym._postprocess_nemo_gym_to_nemo_rl_result
+            LOG.info(
+                f"Returning token info: prompt_tokens={len(prompt_token_ids)}, "
+                f"gen_tokens={len(generation_token_ids)}, logprobs={len(generation_log_probs)}"
+            )
+
             nemo_gym_response = {
                 "reward": 0.0,  # Reward will be calculated by MathEnvironment or set to 0
                 "response": {
@@ -984,9 +1178,9 @@ def create_skills_proxy_app(
                                 }
                             ],
                             # Token IDs for NeMo-RL training
-                            "prompt_token_ids": output.get("prompt_token_ids", []),
-                            "generation_token_ids": output.get("generation_token_ids", []),
-                            "generation_log_probs": output.get("generation_log_probs", []),
+                            "prompt_token_ids": prompt_token_ids,
+                            "generation_token_ids": generation_token_ids,
+                            "generation_log_probs": generation_log_probs,
                         }
                     ],
                 },

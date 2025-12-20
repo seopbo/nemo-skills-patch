@@ -361,9 +361,15 @@ class BaseModel:
                 result["num_reasoning_tokens"] = details.reasoning_tokens
                 result["num_answer_tokens"] = response.usage.completion_tokens - details.reasoning_tokens
 
-        if getattr(choice, "logprobs", None) and choice.logprobs.content:
+        has_logprobs = getattr(choice, "logprobs", None)
+        has_content = has_logprobs and choice.logprobs.content
+        LOG.debug(f"Logprobs check: has_logprobs={has_logprobs is not None}, has_content={has_content}")
+        if has_logprobs and has_content:
             result["logprobs"] = [tok.logprob for tok in choice.logprobs.content]
             result["tokens"] = [tok.token for tok in choice.logprobs.content]
+            LOG.info(
+                f"Extracted {len(result['tokens'])} tokens from logprobs, first few: {result['tokens'][:3] if result['tokens'] else 'none'}"
+            )
             result["top_logprobs"] = []
             for token_logprob in choice.logprobs.content:
                 logprob = {entry.token: entry.logprob for entry in token_logprob.top_logprobs}

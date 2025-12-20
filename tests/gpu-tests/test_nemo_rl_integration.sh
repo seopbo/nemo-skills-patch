@@ -57,6 +57,7 @@ ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-rl -
         ++data.prompt.prompt_config=generic/math \
         ++policy.generation.vllm_cfg.expose_http_server=true \
         ++policy.generation.vllm_cfg.async_engine=true \
+        ++policy.generation.vllm_cfg.skip_tokenizer_init=false \
         ++policy.megatron_cfg.enabled=false \
         ++env.should_use_nemo_gym=true \
         ++nemo_gym.policy_base_url=$PROXY_URL \
@@ -101,7 +102,6 @@ ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-skil
         ++start_server=True \
         ++inference.temperature=-1 \
         ++inference.top_p=-1 \
-        ++inference.tokens_to_generate=4096 \
         ++generate_port=$PROXY_PORT \
         ++prompt_format=openai" \
     2>&1 | tee /tmp/nemo-skills.log &
