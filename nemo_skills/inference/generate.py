@@ -431,53 +431,46 @@ class GenerationTask:
         self._vllm_base_url = vllm_config.base_url
 
     def _discover_model_name_from_vllm(self):
-        """Discover the model name from vLLM after the server is ready.
-
-        This is called after wait_for_server() to ensure vLLM is available.
-        """
-        from nemo_skills.training.nemo_rl.utils.skills_proxy import (
-            get_vllm_generation_config,
-            get_vllm_model_name,
-        )
+        """Discover the model name from vLLM after the server is ready."""
+        import requests
 
         base_url = getattr(self, "_vllm_base_url", None)
         if not base_url:
-            # Server was configured explicitly, not discovered
             return
 
-        # Now that server is ready, discover the model name
-        model_name = get_vllm_model_name(base_url, timeout=30.0)
+        # Query /v1/models with retries
+        url = base_url.rstrip("/")
+        if not url.endswith("/v1"):
+            url = f"{url}/v1"
+        models_url = f"{url}/models"
+
+        model_name = None
+        max_attempts = 360  # 30 minutes with 5 second intervals
+        for attempt in range(max_attempts):
+            try:
+                resp = requests.get(models_url, timeout=10)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if "data" in data and len(data["data"]) > 0:
+                        model_name = data["data"][0].get("id")
+                        break
+            except Exception:
+                pass
+            if attempt % 12 == 0:  # Log every minute
+                LOG.info(f"Waiting for vLLM models endpoint... ({attempt * 5}s)")
+            time.sleep(5)
+
         if model_name:
-            LOG.info(f"Discovered vLLM model name: {model_name}")
+            LOG.info(f"Discovered vLLM model: {model_name}")
             OmegaConf.set_struct(self.cfg.server, False)
             self.cfg.server["model"] = model_name
             OmegaConf.set_struct(self.cfg.server, True)
 
-            # Also update the LLM instance's model name
             if hasattr(self, "llm") and hasattr(self.llm, "litellm_kwargs"):
                 self.llm.litellm_kwargs["model"] = f"openai/{model_name}"
                 self.llm.model_name_or_path = model_name
-                LOG.info(f"Updated LLM model name to: {model_name}")
         else:
-            raise ValueError(
-                f"Failed to discover model name from vLLM at {base_url}. "
-                "Ensure vLLM is running and serving a model. "
-                "You can also set server.model explicitly."
-            )
-
-        # Also try to discover generation config now
-        gen_cfg = get_vllm_generation_config(timeout=5.0)
-        if gen_cfg:
-            LOG.info(f"Discovered vLLM generation config: {gen_cfg}")
-            if gen_cfg.temperature is not None and self.cfg.inference.temperature == 0.0:
-                LOG.info(f"Setting inference.temperature to {gen_cfg.temperature} (from vLLM)")
-                self.cfg.inference.temperature = gen_cfg.temperature
-            if gen_cfg.top_p is not None and self.cfg.inference.top_p == 0.95:
-                LOG.info(f"Setting inference.top_p to {gen_cfg.top_p} (from vLLM)")
-                self.cfg.inference.top_p = gen_cfg.top_p
-            if gen_cfg.max_tokens is not None and self.cfg.inference.tokens_to_generate is None:
-                LOG.info(f"Setting inference.tokens_to_generate to {gen_cfg.max_tokens} (from vLLM)")
-                self.cfg.inference.tokens_to_generate = gen_cfg.max_tokens
+            LOG.warning(f"Could not discover model name from {models_url}, requests may fail")
 
     def setup_prompt(self):
         if self.cfg.prompt_format == "openai":
