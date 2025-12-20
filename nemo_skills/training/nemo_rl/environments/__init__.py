@@ -13,6 +13,5 @@
 # limitations under the License.
 
 from nemo_skills.training.nemo_rl.environments.math_environment import MathEnvironment
-from nemo_skills.training.nemo_rl.environments.weather_environment import WeatherEnvironment
 
-__all__ = ["MathEnvironment", "WeatherEnvironment"]
+__all__ = ["MathEnvironment"]
