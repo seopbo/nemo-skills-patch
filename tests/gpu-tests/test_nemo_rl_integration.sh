@@ -64,7 +64,8 @@ ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-rl -
         ++grpo.max_num_epochs=5 \
         ++grpo.num_iterations=1 \
         ++grpo.num_generations_per_prompt=2 \
-        ++grpo.num_prompts_per_step=1" \
+        ++grpo.num_prompts_per_step=1 \
+        ++policy.train_global_batch_size=2" \
     2>&1 | tee /tmp/nemo-rl.log &
 NEMO_RL_PID=$!
 
