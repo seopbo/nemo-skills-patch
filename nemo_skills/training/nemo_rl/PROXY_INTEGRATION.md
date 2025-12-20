@@ -14,7 +14,7 @@ This is a proof-of-concept. The following items must be addressed before adding 
 
 **Goal:** Use NeMo-Skills declarative pipeline API to orchestrate proxy + NeMo-RL job, similar to how `nemo_evaluator.py` works.
 
-**Reference Implementation:** See PR 1133 for script-based pipeline pattern.
+**Reference Implementation:** See PR 1133 for script-based pipeline pattern (please upgrade the the run.Script version of pipelines)
 
 **Current State:** The test script (`tests/gpu-tests/test_nemo_rl_integration.sh`) manually:
 1. Starts NeMo-RL in background
@@ -26,28 +26,6 @@ This is a proof-of-concept. The following items must be addressed before adding 
 - `nemo_skills/pipeline/nemo_rl/grpo_gym.py` - New pipeline command (follow `nemo_evaluator.py` pattern)
 - `nemo_skills/pipeline/utils/commands.py` - Add `nemo_rl_command()` and `skills_proxy_command()` helpers
 
-**Key Integration Points with Declarative API:**
-```python
-# Pattern from nemo_skills/pipeline/utils/declarative.py
-from nemo_skills.pipeline.utils.declarative import Command, CommandGroup, Pipeline
-
-# Proxy command needs hostname_ref() for vLLM URL discovery
-proxy = Command(
-    command=lambda: f"python -m nemo_skills.inference.generate ++start_server=True ...",
-    name="proxy",
-    metadata={"port": proxy_port}
-)
-
-# NeMo-RL command points to proxy URL
-nemo_rl = Command(
-    command=lambda: f"python -m nemo_skills.training.nemo_rl.start_grpo_gym "
-                    f"++nemo_gym.policy_base_url=http://{proxy.hostname_ref()}:{proxy.meta_ref('port')}/v1 ...",
-    gpus=8,
-    name="nemo_rl"
-)
-
-group = CommandGroup(commands=[proxy, nemo_rl], ...)
-```
 
 **Benefits:**
 - Proper SLURM job submission
@@ -65,11 +43,6 @@ group = CommandGroup(commands=[proxy, nemo_rl], ...)
 
 | Location | Current Value | Issue |
 |----------|---------------|-------|
-| `skills_proxy.py:117` | `timeout: float = 5.0` | get_vllm_model_name |
-| `skills_proxy.py:151` | `timeout: float = 5.0` | get_vllm_generation_config |
-| `skills_proxy.py:231` | `timeout: float = 30.0` | tokenize_messages |
-| `skills_proxy.py:324` | `timeout: float = 5.0` | discover_vllm_server |
-| `skills_proxy.py:461` | `timeout=5` | Ray actor get |
 | `generate.py:201` | `server_wait_timeout: int = 300` | Backend server wait |
 | `test_nemo_rl_integration.sh:77` | `for i in {1..360}` | 12 min vLLM wait |
 | `test_nemo_rl_integration.sh:113` | `for i in {1..60}` | 2 min proxy wait |
@@ -86,24 +59,14 @@ NEMO_GYM_HEAD_SERVER_ENV_VAR = "NEMO_GYM_HEAD_SERVER_URL"
 **Proposed Solution:**
 
 1. **Pipeline-level configuration:** Pass vLLM URL, model name, and timeouts as explicit config
-2. **Health check polling:** Replace fixed timeouts with health check endpoints + exponential backoff
-3. **Failure detection:** If a component crashes (not just slow), detect via Ray actor status or process exit codes
+    * some of this might not be possible (e.g., VLLM URL isn't known until NeMo-RL starts)
+    * If that's the case, there needs to be a known communication protocol to discover the VLLM during runtime
+2. **Health check polling:** Replace fixed timeouts with health check endpoints + backoff
+3. **Failure detection:** If a component crashes (e.g., proxy, or nemo-rl), make sure the whole job fails
 
-```python
-# New config structure
-@dataclass
-class ProxyConfig:
-    vllm_base_url: str  # Explicit, not discovered
-    model_name: str
-    health_check_interval: float = 5.0
-    health_check_timeout: float = 300.0  # Max time to wait for healthy
-    request_timeout: float = 30.0
-```
 
 **Files to Modify:**
 - `nemo_skills/training/nemo_rl/utils/skills_proxy.py` - Add config class, remove env var discovery
-- `nemo_skills/inference/generate.py` - Use config-based timeouts
-- `nemo_skills/training/nemo_rl/configs/grpo.yaml` - Add timeout config section
 
 ---
 
@@ -179,10 +142,7 @@ nemo_gym_response = {
 
 **Proposed Integration:**
 
-Use NeMo-Skills evaluators to compute rewards directly in the proxy:
-- `MathEvaluator` for math problems (check `expected_answer` vs extracted answer)
-- `CodeExecEvaluator` for code execution tasks
-- `Lean4ProofEvaluator` for proof verification
+Use NeMo-Skills evaluators to compute rewards directly in the proxy. This should be configure with the `++eval_type` on the Skills side. We may need an additional wrapper layer to compute a reward on the evaluation fields.
 
 **Implementation:**
 ```python
@@ -212,7 +172,7 @@ if eval_type and supports_single_eval(eval_type, {}):
 
 ---
 
-### 6. 🟡 Separate NeMo-Gym from MathEnvironment (Medium Priority - Architecture)
+### 6. 🟡 Separate NeMo-Gym startup script from the math one (Medium Priority - Architecture)
 
 **Goal:** `start_grpo.py` should remain clean and unchanged. NeMo-Gym-specific logic should move to `start_grpo_gym.py`.
 
@@ -276,21 +236,6 @@ top_p: float = 0.95
 
 **Problem:** `-1` is a magic value. Users shouldn't need to know this.
 
-**Proposed Solution:**
-
-1. **Option A:** Add `use_server_defaults: bool = False` flag
-2. **Option B:** In proxy mode (`start_server=True`), automatically use passthrough
-3. **Option C:** Always allow request-level override (current behavior), but document better
-
-**Implementation for Option B:**
-```python
-# In generate.py __init__
-if self.cfg.start_server:
-    # In proxy mode, defer to incoming request parameters
-    self.cfg.inference.temperature = None  # Sentinel for "use request value"
-    self.cfg.inference.top_p = None
-```
-
 ---
 
 ### 9. 🟡 Consolidate responses_api_model Interface (Medium Priority - Maintainability)
@@ -322,15 +267,9 @@ if self.cfg.start_server:
 
 **Goal:** Confirm tool-calling works through proxy and returns in NeMo-Gym expected format.
 
-**Current State:** `tools` is passed through but not tested:
-```python
-# skills_proxy.py:1151-1152
-tools=responses_create_params.get("tools"),
-```
-
 **Validation Steps:**
 1. Create test with `tool_modules` configured
-2. Verify tool calls are executed in sandbox
+2. Verify tool calls are executed through the proxy
 3. Check response includes tool call results in NeMo-Gym format
 
 **Files to Reference:**
