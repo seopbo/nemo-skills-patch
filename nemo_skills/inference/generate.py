@@ -348,13 +348,14 @@ class GenerationTask:
         self.prompt = self.setup_prompt()
         self.llm = self.setup_llm()
 
-        # Setup hf_tokenizer for counting prompt tokens
+        # Setup hf_tokenizer for counting prompt tokens or text completions with messages
         self.hf_tokenizer = None
-        if self.cfg.count_prompt_tokens:
-            self.hf_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
+        if self.cfg.count_prompt_tokens or self.cfg.inference.endpoint_type == EndpointType.text:
+            if self.tokenizer:
+                self.hf_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
 
-            if self.hf_tokenizer is None:
-                raise ValueError("Tokenizer could not be initialized. Needed for counting prompt tokens.")
+                if self.hf_tokenizer is None:
+                    raise ValueError("Tokenizer could not be initialized.")
 
         if self.cfg.code_execution:
             self.extra_generate_params = self.prompt.get_code_execution_args()
@@ -634,7 +635,24 @@ class GenerationTask:
                     data_point["messages"].insert(0, {"role": "system", "content": self.cfg.system_message})
                 else:
                     data_point["messages"][0]["content"] = self.cfg.system_message
-            return data_point["messages"]
+
+            messages = data_point["messages"]
+
+            # For text endpoint, apply chat template to convert messages to string
+            if self.cfg.inference.endpoint_type == EndpointType.text:
+                if self.hf_tokenizer is None:
+                    raise ValueError(
+                        "Text completion endpoint requires a tokenizer to apply chat template. "
+                        "Set tokenizer parameter or ensure server.model is configured."
+                    )
+                return self.hf_tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    **(self.cfg.chat_template_kwargs or {}),
+                )
+
+            return messages
 
         # For ns format, we need a prompt template
         if self.prompt is None:

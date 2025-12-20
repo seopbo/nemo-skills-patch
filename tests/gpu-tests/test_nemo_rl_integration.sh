@@ -94,11 +94,16 @@ fi
 # Step 3: Start NeMo-Skills proxy with discovered vLLM URL
 # ============================================================================
 echo "Starting NeMo-Skills proxy (connecting to $VLLM_URL)..."
+# Use text completions endpoint because NeMo-RL's vLLM has skip_tokenizer_init=True
+# which breaks chat completions (can't apply chat template without tokenizer)
 ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-skills --num_gpus 0 \
     "NEMO_RL_VLLM_URL=$VLLM_URL NEMO_RL_MODEL_NAME=$MODEL python -m nemo_skills.inference.generate \
         ++start_server=True \
         ++inference.temperature=-1 \
         ++inference.top_p=-1 \
+        ++inference.endpoint_type=text \
+        ++inference.tokens_to_generate=4096 \
+        ++tokenizer=$MODEL \
         ++generate_port=$PROXY_PORT \
         ++prompt_format=openai" \
     2>&1 | tee /tmp/nemo-skills.log &
