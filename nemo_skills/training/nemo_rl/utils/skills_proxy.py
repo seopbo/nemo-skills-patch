@@ -13,12 +13,11 @@
 # limitations under the License.
 
 """
-NeMo-Skills Proxy Server Utilities for NeMo-RL/NeMo-Gym Integration.
+NeMo-Skills Proxy Server Utilities for NeMo-Gym Integration.
 
 This module provides:
-1. OpenAI-compatible API models for FastAPI endpoints
-2. A factory function to create proxy FastAPI applications
-3. Discovery utilities for finding vLLM servers in NeMo-RL environments
+1. A factory function to create proxy FastAPI applications for NeMo-Gym
+2. Discovery utilities for finding vLLM servers in NeMo-RL environments
 
 Usage:
     from nemo_skills.training.nemo_rl.utils.skills_proxy import (
@@ -34,17 +33,14 @@ Usage:
     uvicorn.run(app, host="0.0.0.0", port=7000)
 
 The proxy server exposes:
-    - /v1/chat/completions: OpenAI-compatible chat completions
-    - /v1/completions: OpenAI-compatible text completions
-    - /v1/models: Model listing
-    - /generate: NeMo-Skills native endpoint
+    - /run: NeMo-Gym agent endpoint for rollout collection
+    - /global_config_dict_yaml: NeMo-Gym configuration endpoint
     - /health: Health check
 """
 
 import json
 import logging
 import os
-import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Callable, Coroutine, Protocol
@@ -52,7 +48,6 @@ from typing import Any, Callable, Coroutine, Protocol
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
 
 from nemo_skills.utils import get_logger_name
 
@@ -602,106 +597,6 @@ def set_vllm_server_url(url: str, env_var: str = "NEMO_RL_VLLM_URL") -> None:
 
 
 # =============================================================================
-# OpenAI-Compatible API Models
-# =============================================================================
-#
-# Note: The OpenAI Python library exposes TypedDicts for requests (not Pydantic
-# models) and Pydantic models for responses (designed for parsing, not defining
-# endpoints). We define explicit Pydantic models here for FastAPI compatibility
-# and clear API documentation.
-
-
-class ChatMessage(BaseModel):
-    """OpenAI-compatible chat message."""
-
-    role: str
-    content: str
-    name: str | None = None
-
-
-class ChatCompletionRequest(BaseModel):
-    """OpenAI-compatible chat completion request."""
-
-    model: str = "nemo-skills"
-    messages: list[ChatMessage]
-    temperature: float | None = None
-    top_p: float | None = None
-    n: int = 1
-    stream: bool = False
-    stop: str | list[str] | None = None
-    max_tokens: int | None = None
-    presence_penalty: float = 0.0
-    frequency_penalty: float = 0.0
-    user: str | None = None
-    # NeMo-Skills extension: extra data for prompt filling
-    extra_data: dict | None = Field(default=None, description="Extra data for NeMo-Skills prompt filling")
-
-
-class CompletionRequest(BaseModel):
-    """OpenAI-compatible text completion request."""
-
-    model: str = "nemo-skills"
-    prompt: str | list[str]
-    temperature: float | None = None
-    top_p: float | None = None
-    n: int = 1
-    stream: bool = False
-    stop: str | list[str] | None = None
-    max_tokens: int | None = None
-    presence_penalty: float = 0.0
-    frequency_penalty: float = 0.0
-    user: str | None = None
-    # NeMo-Skills extension: extra data for prompt filling
-    extra_data: dict | None = Field(default=None, description="Extra data for NeMo-Skills prompt filling")
-
-
-class ChatCompletionChoice(BaseModel):
-    """OpenAI-compatible chat completion choice."""
-
-    index: int
-    message: ChatMessage
-    finish_reason: str | None = "stop"
-
-
-class CompletionChoice(BaseModel):
-    """OpenAI-compatible text completion choice."""
-
-    index: int
-    text: str
-    finish_reason: str | None = "stop"
-
-
-class Usage(BaseModel):
-    """OpenAI-compatible usage statistics."""
-
-    prompt_tokens: int = 0
-    completion_tokens: int = 0
-    total_tokens: int = 0
-
-
-class ChatCompletionResponse(BaseModel):
-    """OpenAI-compatible chat completion response."""
-
-    id: str
-    object: str = "chat.completion"
-    created: int
-    model: str
-    choices: list[ChatCompletionChoice]
-    usage: Usage
-
-
-class CompletionResponse(BaseModel):
-    """OpenAI-compatible text completion response."""
-
-    id: str
-    object: str = "text_completion"
-    created: int
-    model: str
-    choices: list[CompletionChoice]
-    usage: Usage
-
-
-# =============================================================================
 # Generation Task Protocol
 # =============================================================================
 
@@ -738,14 +633,15 @@ def create_skills_proxy_app(
     model_name: str | None = None,
 ) -> FastAPI:
     """
-    Create a FastAPI application that serves as an OpenAI-compatible proxy.
+    Create a FastAPI application for NeMo-Gym integration.
 
-    This proxy passes OpenAI-format messages through to the NeMo-Skills generation
-    pipeline, which can handle code execution loops, tool calling, and sandbox
-    integration.
+    This proxy passes messages through to the NeMo-Skills generation pipeline,
+    which can handle code execution loops, tool calling, and sandbox integration.
 
-    When used with NeMo-RL (which already templates prompts via ns_data_processor),
-    configure with prompt_format=openai to pass messages through without re-templating.
+    Endpoints:
+        - /run: NeMo-Gym agent endpoint for rollout collection
+        - /global_config_dict_yaml: NeMo-Gym configuration endpoint
+        - /health: Health check
 
     Args:
         generation_task: A GenerationTask instance (has cfg and _process_single_datapoint_core).
@@ -763,7 +659,7 @@ def create_skills_proxy_app(
         model_name: The model name for tokenize calls. If None, will be auto-discovered.
 
     Returns:
-        FastAPI application with OpenAI-compatible endpoints.
+        FastAPI application with NeMo-Gym compatible endpoints.
 
     Example:
         # Using with GenerationTask
@@ -820,167 +716,6 @@ def create_skills_proxy_app(
         description="Proxy server that adds NeMo-Skills prompting logic to model generations. "
         "Compatible with OpenAI API for seamless integration with NeMo-Gym/NeMo-RL.",
     )
-
-    @app.post("/generate")
-    async def generate_endpoint(data_point: dict):
-        """Generate output for a single data point (NeMo-Skills native format).
-
-        Request body should be the data point dictionary directly.
-        The body is parsed as JSON and passed directly to the generation logic.
-        """
-        try:
-            output = await _process_fn(data_point, [])
-            return JSONResponse(content=output)
-        except Exception as e:
-            LOG.exception("Error processing generation request")
-            raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
-
-    @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
-    async def chat_completions(request: ChatCompletionRequest):
-        """OpenAI-compatible chat completions endpoint.
-
-        This endpoint passes messages through to the NeMo-Skills generation pipeline.
-        Messages are passed through directly (no re-templating), making it compatible
-        with NeMo-RL which already templates prompts via ns_data_processor.
-
-        The generation pipeline handles:
-        - Code execution loops (if code_execution=True)
-        - Tool calling (if configured)
-        - Sandbox integration
-
-        Usage with NeMo-RL:
-            Configure policy.generation to point to this server as an OpenAI endpoint.
-
-        Usage with NeMo-Gym SimpleResponsesAPIModel:
-            Set the base_url to point to this server.
-        """
-        try:
-            # Build data point - pass messages through directly
-            messages = [{"role": m.role, "content": m.content} for m in request.messages]
-            data_point = {"messages": messages}
-
-            # Pass through sampling parameters from the request
-            # This is critical for NeMo-RL integration where vLLM asserts temperature matches
-            if request.temperature is not None:
-                data_point["_request_temperature"] = request.temperature
-            if request.top_p is not None:
-                data_point["_request_top_p"] = request.top_p
-            if request.max_tokens is not None:
-                data_point["_request_max_tokens"] = request.max_tokens
-            if request.stop is not None:
-                data_point["_request_stop"] = request.stop
-
-            # If extra_data is provided, merge it (for metadata like expected_answer)
-            if request.extra_data:
-                data_point.update(request.extra_data)
-
-            # Process through NeMo-Skills pipeline
-            output = await _process_fn(data_point, [])
-
-            # Build OpenAI-compatible response
-            generation_text = output.get(_generation_key, output.get("generation", ""))
-            num_tokens = output.get("num_generated_tokens", 0)
-
-            response = ChatCompletionResponse(
-                id=f"chatcmpl-{uuid.uuid4().hex[:8]}",
-                created=int(time.time()),
-                model=request.model,
-                choices=[
-                    ChatCompletionChoice(
-                        index=0,
-                        message=ChatMessage(role="assistant", content=generation_text),
-                        finish_reason=output.get("finish_reason", "stop"),
-                    )
-                ],
-                usage=Usage(
-                    prompt_tokens=output.get("num_input_tokens", 0),
-                    completion_tokens=num_tokens,
-                    total_tokens=output.get("num_input_tokens", 0) + num_tokens,
-                ),
-            )
-
-            return response
-
-        except Exception as e:
-            LOG.exception("Error processing chat completion request")
-            raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
-
-    @app.post("/v1/completions", response_model=CompletionResponse)
-    async def completions(request: CompletionRequest):
-        """OpenAI-compatible text completions endpoint.
-
-        Converts text prompts to message format and passes through to the pipeline.
-        """
-        try:
-            # Handle single prompt or list of prompts
-            prompts = [request.prompt] if isinstance(request.prompt, str) else request.prompt
-
-            choices = []
-            total_completion_tokens = 0
-
-            for idx, prompt in enumerate(prompts):
-                # Convert text prompt to message format for consistent handling
-                data_point = {"messages": [{"role": "user", "content": prompt}]}
-                if request.extra_data:
-                    data_point.update(request.extra_data)
-
-                # Pass through sampling parameters from the request
-                if request.temperature is not None:
-                    data_point["_request_temperature"] = request.temperature
-                if request.top_p is not None:
-                    data_point["_request_top_p"] = request.top_p
-                if request.max_tokens is not None:
-                    data_point["_request_max_tokens"] = request.max_tokens
-                if request.stop is not None:
-                    data_point["_request_stop"] = request.stop
-
-                # Process through NeMo-Skills pipeline
-                output = await _process_fn(data_point, [])
-
-                generation_text = output.get(_generation_key, output.get("generation", ""))
-                num_tokens = output.get("num_generated_tokens", 0)
-                total_completion_tokens += num_tokens
-
-                choices.append(
-                    CompletionChoice(
-                        index=idx,
-                        text=generation_text,
-                        finish_reason=output.get("finish_reason", "stop"),
-                    )
-                )
-
-            response = CompletionResponse(
-                id=f"cmpl-{uuid.uuid4().hex[:8]}",
-                created=int(time.time()),
-                model=request.model,
-                choices=choices,
-                usage=Usage(
-                    prompt_tokens=0,  # Not tracked for text completions
-                    completion_tokens=total_completion_tokens,
-                    total_tokens=total_completion_tokens,
-                ),
-            )
-
-            return response
-
-        except Exception as e:
-            LOG.exception("Error processing completion request")
-            raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
-
-    @app.get("/v1/models")
-    async def list_models():
-        """List available models (OpenAI-compatible)."""
-        return {
-            "object": "list",
-            "data": [
-                {
-                    "id": "nemo-skills",
-                    "object": "model",
-                    "created": int(time.time()),
-                    "owned_by": "nvidia",
-                }
-            ],
-        }
 
     @app.get("/health")
     async def health_check():
@@ -1192,86 +927,6 @@ def create_skills_proxy_app(
 
         except Exception as e:
             LOG.exception("Error processing /run request")
-            raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
-
-    @app.post("/v1/responses")
-    async def responses_api(request_body: dict):
-        """OpenAI Responses API endpoint for NeMo-Gym model server calls.
-
-        This endpoint handles the OpenAI Responses API format that NeMo-Gym uses
-        for model generation. It's similar to chat completions but with a different
-        format.
-
-        Request format:
-            {
-                "input": [{"role": "user", "content": "..."}],
-                "model": "...",
-                "tools": [],
-                ...
-            }
-        """
-        try:
-            input_messages = request_body.get("input", [])
-
-            # Convert to our message format
-            messages = []
-            for msg in input_messages:
-                if isinstance(msg, dict):
-                    messages.append({"role": msg.get("role", "user"), "content": msg.get("content", "")})
-                elif isinstance(msg, str):
-                    messages.append({"role": "user", "content": msg})
-
-            # Process through NeMo-Skills pipeline
-            data_point = {"messages": messages}
-
-            # Pass through sampling parameters from the request
-            if "temperature" in request_body:
-                data_point["_request_temperature"] = request_body["temperature"]
-            if "top_p" in request_body:
-                data_point["_request_top_p"] = request_body["top_p"]
-            if "max_tokens" in request_body:
-                data_point["_request_max_tokens"] = request_body["max_tokens"]
-            if "max_output_tokens" in request_body:
-                data_point["_request_max_tokens"] = request_body["max_output_tokens"]
-            if "stop" in request_body:
-                data_point["_request_stop"] = request_body["stop"]
-
-            output = await _process_fn(data_point, [])
-
-            generation_text = output.get(_generation_key, output.get("generation", ""))
-
-            # Build OpenAI Responses API compatible response
-            response = {
-                "id": f"resp-{uuid.uuid4().hex[:8]}",
-                "object": "response",
-                "created_at": int(time.time()),
-                "model": request_body.get("model", "nemo-skills"),
-                "output": [
-                    {
-                        "type": "message",
-                        "role": "assistant",
-                        "content": [
-                            {
-                                "type": "output_text",
-                                "text": generation_text,
-                            }
-                        ],
-                        "prompt_token_ids": output.get("prompt_token_ids", []),
-                        "generation_token_ids": output.get("generation_token_ids", []),
-                        "generation_log_probs": output.get("generation_log_probs", []),
-                    }
-                ],
-                "usage": {
-                    "input_tokens": output.get("num_input_tokens", 0),
-                    "output_tokens": output.get("num_generated_tokens", 0),
-                    "total_tokens": output.get("num_input_tokens", 0) + output.get("num_generated_tokens", 0),
-                },
-            }
-
-            return JSONResponse(content=response)
-
-        except Exception as e:
-            LOG.exception("Error processing /v1/responses request")
             raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
 
     return app

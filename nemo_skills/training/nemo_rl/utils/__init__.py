@@ -13,15 +13,6 @@
 # limitations under the License.
 
 from nemo_skills.training.nemo_rl.utils.skills_proxy import (
-    # OpenAI-compatible API models
-    ChatCompletionChoice,
-    ChatCompletionRequest,
-    ChatCompletionResponse,
-    ChatMessage,
-    CompletionChoice,
-    CompletionRequest,
-    CompletionResponse,
-    Usage,
     # Discovery utilities
     VLLMServerConfig,
     # Proxy server factory
@@ -31,15 +22,6 @@ from nemo_skills.training.nemo_rl.utils.skills_proxy import (
 )
 
 __all__ = [
-    # OpenAI-compatible API models
-    "ChatMessage",
-    "ChatCompletionRequest",
-    "ChatCompletionChoice",
-    "ChatCompletionResponse",
-    "CompletionRequest",
-    "CompletionChoice",
-    "CompletionResponse",
-    "Usage",
     # Proxy server factory
     "create_skills_proxy_app",
     # Discovery utilities
