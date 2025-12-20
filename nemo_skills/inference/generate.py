@@ -431,37 +431,54 @@ class GenerationTask:
         self._vllm_base_url = vllm_config.base_url
 
     def _discover_model_name_from_vllm(self):
-        """Discover the model name from vLLM after the server is ready."""
+        """Discover the model name from environment, head server, or vLLM."""
+        import os
+
         import requests
 
         base_url = getattr(self, "_vllm_base_url", None)
         if not base_url:
             return
 
-        # Query /v1/models with retries
-        url = base_url.rstrip("/")
-        if not url.endswith("/v1"):
-            url = f"{url}/v1"
-        models_url = f"{url}/models"
-
         model_name = None
-        max_attempts = 360  # 30 minutes with 5 second intervals
-        for attempt in range(max_attempts):
+
+        # First check environment variable (simplest way to pass from NeMo-RL)
+        model_name = os.environ.get("NEMO_RL_MODEL_NAME")
+        if model_name:
+            LOG.info(f"Using model from NEMO_RL_MODEL_NAME: {model_name}")
+
+        # Try NeMo-Gym head server
+        if not model_name:
+            head_server_url = os.environ.get("NEMO_GYM_HEAD_SERVER_URL")
+            if head_server_url:
+                try:
+                    resp = requests.get(f"{head_server_url.rstrip('/')}/global_config_dict_yaml", timeout=5)
+                    if resp.status_code == 200:
+                        import json
+
+                        config = json.loads(resp.content.decode())
+                        model_name = config.get("policy_model_name")
+                        if model_name:
+                            LOG.info(f"Discovered model from head server: {model_name}")
+                except Exception:
+                    pass
+
+        # Try /v1/models (may not work with NeMo-RL's vLLM)
+        if not model_name:
+            url = base_url.rstrip("/")
+            if not url.endswith("/v1"):
+                url = f"{url}/v1"
             try:
-                resp = requests.get(models_url, timeout=10)
+                resp = requests.get(f"{url}/models", timeout=10)
                 if resp.status_code == 200:
                     data = resp.json()
                     if "data" in data and len(data["data"]) > 0:
                         model_name = data["data"][0].get("id")
-                        break
+                        LOG.info(f"Discovered model from vLLM: {model_name}")
             except Exception:
                 pass
-            if attempt % 12 == 0:  # Log every minute
-                LOG.info(f"Waiting for vLLM models endpoint... ({attempt * 5}s)")
-            time.sleep(5)
 
         if model_name:
-            LOG.info(f"Discovered vLLM model: {model_name}")
             OmegaConf.set_struct(self.cfg.server, False)
             self.cfg.server["model"] = model_name
             OmegaConf.set_struct(self.cfg.server, True)
@@ -470,7 +487,7 @@ class GenerationTask:
                 self.llm.litellm_kwargs["model"] = f"openai/{model_name}"
                 self.llm.model_name_or_path = model_name
         else:
-            LOG.warning(f"Could not discover model name from {models_url}, requests may fail")
+            LOG.warning("Could not discover model name, requests may fail")
 
     def setup_prompt(self):
         if self.cfg.prompt_format == "openai":

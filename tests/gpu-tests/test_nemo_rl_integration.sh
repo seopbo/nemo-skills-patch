@@ -95,7 +95,7 @@ fi
 # ============================================================================
 echo "Starting NeMo-Skills proxy (connecting to $VLLM_URL)..."
 ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-skills --num_gpus 0 \
-    "NEMO_RL_VLLM_URL=$VLLM_URL python -m nemo_skills.inference.generate \
+    "NEMO_RL_VLLM_URL=$VLLM_URL NEMO_RL_MODEL_NAME=$MODEL python -m nemo_skills.inference.generate \
         ++start_server=True \
         ++inference.temperature=-1 \
         ++inference.top_p=-1 \
