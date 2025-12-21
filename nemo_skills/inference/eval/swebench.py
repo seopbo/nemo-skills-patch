@@ -521,7 +521,7 @@ class SweBenchGenerationTask(GenerationTask):
             "cd /root/mini-swe-agent && "
             f"/root/mini-swe-agent/venv/bin/python -m minisweagent run "
             f"--config {get_config_path(self.cfg.agent_config)} "
-            f"--agent.model.name hosted_vllm/{self.cfg.server.model} "
+            f"--agent.model.model_name hosted_vllm/{self.cfg.server.model} "
             f"--agent.model.api_base={api_base} "
             f"--agent.model.completion_kwargs {shlex.quote(json.dumps(completion_kwargs))} "
             f"--agent.model.model_kwargs.temperature {self.cfg.inference.temperature} "
