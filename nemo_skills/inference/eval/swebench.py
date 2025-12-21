@@ -520,7 +520,7 @@ class SweBenchGenerationTask(GenerationTask):
             "api_base": api_base,
             "temperature": self.cfg.inference.temperature,
             "top_p": self.cfg.inference.top_p,
-            "drop_params": True,  # Highly recommended for vLLM/local models
+            "drop_params": True,
         }
         model_kwargs_json = json.dumps(all_model_kwargs)
 
@@ -528,9 +528,7 @@ class SweBenchGenerationTask(GenerationTask):
             "cp -r /root_mount/mini-swe-agent /root && "
             "cp -r /root_mount/uv /root && "
             "cd /root/mini-swe-agent && "
-            # Set the model kwargs as an environment variable
             f"export MSWEA_MODEL_KWARGS={shlex.quote(model_kwargs_json)} && "
-            # Call the module directly without the 'run' command
             f"/root/mini-swe-agent/venv/bin/python -m minisweagent run "
             f"--config {get_config_path(self.cfg.agent_config)} "
             f"--model hosted_vllm/{self.cfg.server.model} "
