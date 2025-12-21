@@ -516,18 +516,25 @@ class SweBenchGenerationTask(GenerationTask):
             completion_kwargs["logprobs"] = True
 
         mini_swe_agent_cmd = (
-            # copy installed repo & uv dir from /root_mount
             "cp -r /root_mount/mini-swe-agent /root && "
             "cp -r /root_mount/uv /root && "
             "cd /root/mini-swe-agent && "
-            # run the agent
             f"/root/mini-swe-agent/venv/bin/python -m mini run "
-            f"    --config_spec {get_config_path(self.cfg.agent_config)} "
-            f"    --agent.model.name hosted_vllm/{self.cfg.server.model} "
-            f"    --yolo "
-            f"    --task {shlex.quote(data_point['problem_statement'])} && "
-            # move trajectories to the mounted directory
-            f"cp -r trajectories /trajectories_mount/"
+            f"--config {get_config_path(self.cfg.agent_config)} "
+            f"--agent.model.name=hosted_vllm/{self.cfg.server.model} "
+            f"--agent.model.api_base={api_base} "
+            f"--agent.model.model_kwargs.temperature={self.cfg.inference.temperature} "
+            f"--agent.model.model_kwargs.top_p={self.cfg.inference.top_p} "
+            f"--agent.model.model_kwargs.completion_kwargs={shlex.quote(json.dumps(completion_kwargs))} "
+            f"--agent.step_limit={self.cfg.agent_max_turns} "
+            f"--env.deployment.type=local "
+            f"--env.repo.type=preexisting "
+            f"--env.repo.repo_name=testbed "
+            f"--env.repo.base_commit={data_point['base_commit']} "
+            f"--problem_statement.text={shlex.quote(data_point['problem_statement'])} "
+            f"--problem_statement.id={data_point['instance_id']} "
+            f"--yolo && "
+            "cp -r trajectories /trajectories_mount/"
         )
 
         # Execute mini-swe-agent command
