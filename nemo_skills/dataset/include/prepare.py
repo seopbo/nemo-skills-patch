@@ -17,7 +17,12 @@ import json
 from pathlib import Path
 
 from datasets import load_dataset
-from lang_libs import get_mcq_format, supported_languages
+from lang_libs import (
+    get_mcq_format,
+    supported_languages,
+    ANSWER_PLACEHOLDER,
+    EXTRACT_REGEX,
+)
 from tqdm import tqdm
 
 SUPPORTED_LANGUAGES = supported_languages()
@@ -74,14 +79,6 @@ def get_other_fields(entry):
     }
 
 
-def get_extract_regex(mcq_format):
-    extract_regex = mcq_format.placeholder.replace("({})", r"\(?([ABCD])\)?")
-    extract_regex = extract_regex.lstrip("the").strip()
-    extract_regex = extract_regex.replace("\\(", "\\**\\(")
-    extract_regex = extract_regex.replace("\\)?", "\\)?\\**")
-    return extract_regex
-
-
 def format_entry(entry, args, language):
     if args.subset == "lite":
         choices = entry[Schema.CHOICES]
@@ -93,17 +90,14 @@ def format_entry(entry, args, language):
     category = (entry.get(args.category, "") or "").replace(" ", "_")
 
     mcq_format = get_mcq_format(language, il_prompts=args.il_prompts)
-
-    # TODO (dkaramyan): subject should be translated as well
     description = mcq_format.task.format(
-        subject=subject, ans_suffix=mcq_format.placeholder.format("X")
+        subject=subject, answer_placeholder=ANSWER_PLACEHOLDER
     )
-    extract_regex = get_extract_regex(mcq_format)
     expected_answer = chr(ord("A") + int(answer))  # Convert from [0 to 3] to [A to D]
     return {
         "expected_answer": expected_answer,
         "extract_from_boxed": False,
-        "extract_regex": extract_regex,
+        "extract_regex": EXTRACT_REGEX,
         "subset_for_metrics": language,
         "category": category,
         **get_mcq_fields(description, question, choices, mcq_format),
