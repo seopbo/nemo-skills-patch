@@ -18,6 +18,24 @@ INF_LATENCY = 9999.0
 FRAME_SIZE_SEC = 0.08  # 80ms per frame
 DEFAULT_SEGMENT_BUFFER_SEC = 0.5  # Default segment buffer for WER calculation
 
+LLM_JUDGE_PROMPT_TEMPLATE = """
+I need your help to evaluate the performance of a speech-to-speech model. The model receives speech input from the user and responds with speech output.
+Your task is to rate the model's responses based on the provided user input transcription [User] and the model's output transcription [Agent].
+
+Please evaluate the response on a scale of 1 to 5:
+1 point: The response is largely irrelevant, incorrect, or fails to address the user's query. It may be off-topic or provide incorrect information.
+2 points: The response is somewhat relevant but lacks accuracy or completeness. It may only partially answer the user's question or include extraneous information.
+3 points: The response is relevant and mostly accurate, but it may lack conciseness or include unnecessary details that don't contribute to the main point.
+4 points: The response is relevant, accurate, and concise, providing a clear answer to the user's question without unnecessary elaboration.
+5 points: The response is exceptionally relevant, accurate, and to the point. It directly addresses the user's query in a highly effective and efficient manner, providing exactly the information needed.
+
+Below is the conversation transcript:
+
+{conversation}
+
+After evaluating, please output "Rating: X" where X is your score (1-5), without anything else.
+""".strip()
+
 
 def normalize_text_for_wer(text):
     """Normalize text for WER calculation: remove punctuation, timestamps, lowercase.
@@ -1755,6 +1773,88 @@ Average Metrics:
                 f.write(json.dumps(result) + "\n")
         print(f"Per-sample results saved to: {output_jsonl_path}")
 
+    # Generate LLM judge input if requested
+    if args.generate_llm_judge_input and per_sample_results:
+        generate_llm_judge_input(per_sample_results, args.results_dir)
+
+
+def format_conversation_for_llm_judge(result: dict, use_full_agent: bool) -> str:
+    """Format conversation turns for LLM judge prompt."""
+    transcription = result.get("transcription", {})
+    user_trans = transcription.get("user", {})
+    agent_trans = transcription.get("agent", {})
+
+    agent_quality = result.get("eval_metrics", {}).get("agent_speech", {})
+    per_segment = agent_quality.get("per_segment", [])
+
+    # Build mapping of agent segments: start -> {full, sounded}
+    agent_content = {}
+    for seg in per_segment:
+        start = seg.get("start", 0)
+        agent_content[start] = {
+            "full": seg.get("reference", ""),
+            "sounded": seg.get("hypothesis", ""),
+        }
+
+    turns = []
+
+    for time_range, text in user_trans.items():
+        start = float(time_range.split("-")[0])
+        turns.append({"start": start, "role": "User", "text": text})
+
+    for time_range, text in agent_trans.items():
+        start = float(time_range.split("-")[0])
+        matched_text = None
+        for seg_start, content in agent_content.items():
+            if abs(seg_start - start) < 0.1:
+                matched_text = content["full"] if use_full_agent else content["sounded"]
+                break
+        turns.append({"start": start, "role": "Agent", "text": matched_text or text})
+
+    turns.sort(key=lambda x: x["start"])
+    return "\n".join(f"[{t['role']}]: {t['text']}" for t in turns)
+
+
+def generate_llm_judge_input(per_sample_results: list, results_dir: str):
+    """Generate llm_judge_input.jsonl for nemo-skills generation."""
+    output_entries = []
+
+    for result in per_sample_results:
+        original = result.get("original_entry", result)
+        audio_path = original.get("audio_path", "")
+        item_id = os.path.basename(audio_path) if audio_path else str(hash(json.dumps(original, sort_keys=True)))[:8]
+
+        # Create entry for "full" evaluation (ignoring barge-ins)
+        conv_full = format_conversation_for_llm_judge(result, use_full_agent=True)
+        prompt_full = LLM_JUDGE_PROMPT_TEMPLATE.format(conversation=conv_full)
+        output_entries.append(
+            {
+                "item_id": f"{item_id}_full",
+                "category": "open",  # Required for AudioMetrics judge evaluation
+                "subset_for_metrics": "full",  # Group metrics by eval type
+                "messages": [{"role": "user", "content": prompt_full}],
+            }
+        )
+
+        # Create entry for "sounded" evaluation (with barge-in effects)
+        conv_sounded = format_conversation_for_llm_judge(result, use_full_agent=False)
+        prompt_sounded = LLM_JUDGE_PROMPT_TEMPLATE.format(conversation=conv_sounded)
+        output_entries.append(
+            {
+                "item_id": f"{item_id}_sounded",
+                "category": "open",  # Required for AudioMetrics judge evaluation
+                "subset_for_metrics": "sounded",  # Group metrics by eval type
+                "messages": [{"role": "user", "content": prompt_sounded}],
+            }
+        )
+
+    output_path = os.path.join(results_dir, "llm_judge_input.jsonl")
+    with open(output_path, "w") as f:
+        for entry in output_entries:
+            f.write(json.dumps(entry) + "\n")
+
+    print(f"LLM judge input saved to: {output_path} ({len(output_entries)} prompts)")
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Evaluate conversation behavior from output.jsonl format")
@@ -1846,6 +1946,12 @@ def parse_args():
         action="store_true",
         default=False,
         help="Force recompute segmentation and ASR even if cached results exist",
+    )
+    parser.add_argument(
+        "--generate_llm_judge_input",
+        action="store_true",
+        default=False,
+        help="Generate llm_judge_input.jsonl for LLM-as-judge evaluation",
     )
     return parser.parse_args()
 
