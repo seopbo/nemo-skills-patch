@@ -6,13 +6,656 @@ import argparse
 import json
 import os
 import re
+import string
 
 import torch
 import torchaudio
+from jiwer import process_characters, process_words
 from nemo.collections import asr as nemo_asr
 from tqdm import tqdm
 
 INF_LATENCY = 9999.0
+FRAME_SIZE_SEC = 0.08  # 80ms per frame
+DEFAULT_SEGMENT_BUFFER_SEC = 0.5  # Default segment buffer for WER calculation
+
+
+def normalize_text_for_wer(text):
+    """Normalize text for WER calculation: remove punctuation, timestamps, lowercase.
+
+    Removes:
+    - Timestamp tags: <|t|>, <$t$>, <|0.00|>, <$0.00$>
+    - Sentence boundary tokens: <s>, </s>
+    - Special tokens: <SPECIAL_N>, <SPEC_N>
+    - All punctuation including hyphens
+    - Extra whitespace
+    """
+    if not text:
+        return ""
+
+    # Remove timestamp tags with values: <|0.00|>, <$0.00$>
+    text = re.sub(r"<\|[\d\.]+\|>", "", text)
+    text = re.sub(r"<\$[\d\.]+\$>", "", text)
+
+    # Remove sentence boundary tokens
+    text = re.sub(r"</?s>", "", text)
+
+    # Remove special tokens
+    text = re.sub(r"<SPECIAL_\d+>", "", text)
+    text = re.sub(r"<SPEC_\d+>", "", text)
+
+    # Remove any remaining angle bracket tokens
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # Remove punctuation including hyphens
+    text = text.translate(str.maketrans("", "", string.punctuation))
+
+    # Lowercase and normalize whitespace
+    text = text.lower()
+    text = " ".join(text.split())
+
+    return text
+
+
+def time_to_frame(time_sec):
+    """Convert time in seconds to frame index."""
+    return int(time_sec / FRAME_SIZE_SEC)
+
+
+def frame_to_time(frame_idx):
+    """Convert frame index to time in seconds."""
+    return frame_idx * FRAME_SIZE_SEC
+
+
+def extract_text_from_alignment(frame_alignment, field, start_frame=None, end_frame=None):
+    """Extract concatenated decoded text from frame_alignment within optional frame bounds.
+
+    Args:
+        frame_alignment: dict with frame_idx, asr_stream_decoded, agent_stream_decoded, etc.
+        field: "asr_stream_decoded" or "agent_stream_decoded"
+        start_frame: optional start frame index (inclusive)
+        end_frame: optional end frame index (exclusive)
+
+    Returns:
+        Concatenated text from the specified field within bounds
+    """
+    if not frame_alignment or field not in frame_alignment:
+        return ""
+
+    tokens = frame_alignment[field]
+    frame_indices = frame_alignment.get("frame_idx", list(range(len(tokens))))
+
+    if start_frame is None and end_frame is None:
+        # Return all tokens concatenated
+        return "".join(tokens)
+
+    # Filter by frame range
+    result_tokens = []
+    for i, fidx in enumerate(frame_indices):
+        if start_frame is not None and fidx < start_frame:
+            continue
+        if end_frame is not None and fidx >= end_frame:
+            continue
+        if i < len(tokens):
+            result_tokens.append(tokens[i])
+
+    return "".join(result_tokens)
+
+
+def get_debug_info(entry):
+    """Extract debug_info from entry, handling both direct and nested formats."""
+    original = entry.get("original_entry", entry)
+    return original.get("debug_info", {})
+
+
+def compute_user_speech_wer(
+    user_segments, frame_alignment, user_transcripts, audio_duration, segment_buffer_sec=DEFAULT_SEGMENT_BUFFER_SEC
+):
+    """Compute WER for user speech recognition from model's ASR output vs ground truth.
+
+    Args:
+        user_segments: list of user segment dicts with start/end times (from VAD)
+        frame_alignment: debug_info frame_alignment dict
+        user_transcripts: dict mapping (start, end) tuples to ground truth ASR text
+        audio_duration: total audio duration in seconds
+
+    Returns:
+        dict with:
+            per_segment: list of dicts with ref/hyp text, S/I/D counts, WER per segment
+            total_wer: WER calculated from sum of all errors / sum of ref words
+            out_of_bounds_words: list of (word, onset_time) tuples for words outside segments
+            out_of_bounds_word_ratio: words outside segments / audio_duration
+    """
+    if not frame_alignment or "asr_stream_decoded" not in frame_alignment:
+        return {
+            "per_segment": [],
+            "total_wer": None,
+            "total_ref_words": 0,
+            "total_substitutions": 0,
+            "total_insertions": 0,
+            "total_deletions": 0,
+            "out_of_bounds_words": [],
+            "out_of_bounds_word_ratio": None,
+            "error": "no_frame_alignment",
+        }
+
+    per_segment = []
+    total_ref_words = 0
+    total_substitutions = 0
+    total_insertions = 0
+    total_deletions = 0
+
+    for seg in user_segments:
+        start_frame = time_to_frame(seg["start"])
+        # Extend end boundary for WER calculation to capture trailing words
+        end_frame = time_to_frame(seg["end"] + segment_buffer_sec)
+
+        # Get model's ASR output for this segment from frame_alignment (hypothesis)
+        hyp_text = extract_text_from_alignment(frame_alignment, "asr_stream_decoded", start_frame, end_frame)
+        hyp_normalized = normalize_text_for_wer(hyp_text)
+
+        # Get ground truth ASR transcription (reference)
+        seg_key = (seg["start"], seg["end"])
+        ref_text = user_transcripts.get(seg_key, "")
+        ref_normalized = normalize_text_for_wer(ref_text)
+
+        ref_word_count = len(ref_normalized.split()) if ref_normalized else 0
+        hyp_word_count = len(hyp_normalized.split()) if hyp_normalized else 0
+
+        # Calculate detailed WER metrics using jiwer
+        if ref_normalized or hyp_normalized:
+            if ref_normalized and hyp_normalized:
+                result = process_words(ref_normalized, hyp_normalized)
+                subs = result.substitutions
+                ins = result.insertions
+                dels = result.deletions
+            elif ref_normalized:
+                # Hypothesis empty - all deletions
+                subs, ins, dels = 0, 0, ref_word_count
+            else:
+                # Reference empty - all insertions
+                subs, ins, dels = 0, hyp_word_count, 0
+
+            segment_wer = (
+                (subs + ins + dels) / ref_word_count if ref_word_count > 0 else (1.0 if hyp_word_count > 0 else 0.0)
+            )
+
+            total_ref_words += ref_word_count
+            total_substitutions += subs
+            total_insertions += ins
+            total_deletions += dels
+
+            per_segment.append(
+                {
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "reference": ref_normalized,
+                    "hypothesis": hyp_normalized,
+                    "ref_words": ref_word_count,
+                    "substitutions": subs,
+                    "insertions": ins,
+                    "deletions": dels,
+                    "wer": segment_wer,
+                }
+            )
+
+    # Calculate out-of-bounds words with timestamps
+    all_tokens = frame_alignment.get("asr_stream_decoded", [])
+    frame_indices = frame_alignment.get("frame_idx", list(range(len(all_tokens))))
+
+    # Build set of frames that are within user segments (with buffer on both ends)
+    in_segment_frames = set()
+    for seg in user_segments:
+        start_frame = time_to_frame(max(0, seg["start"] - segment_buffer_sec))
+        end_frame = time_to_frame(seg["end"] + segment_buffer_sec)
+        # Use end_frame + 1 to include the end frame (range is exclusive of end)
+        for f in range(start_frame, end_frame + 1):
+            in_segment_frames.add(f)
+
+    # Collect words outside segments with their timestamps
+    out_of_bounds_words = []
+    current_word = []
+    current_word_start_frame = None
+
+    for i, fidx in enumerate(frame_indices):
+        if fidx not in in_segment_frames and i < len(all_tokens):
+            token = all_tokens[i]
+            if token and token.strip():
+                # Check if this token starts a new word (contains space or is start)
+                if current_word_start_frame is None:
+                    current_word_start_frame = fidx
+                current_word.append(token)
+        else:
+            # End of out-of-segment region - flush accumulated tokens
+            if current_word:
+                word_text = normalize_text_for_wer("".join(current_word))
+                if word_text:
+                    for w in word_text.split():
+                        out_of_bounds_words.append(
+                            {
+                                "word": w,
+                                "onset_time": frame_to_time(current_word_start_frame),
+                            }
+                        )
+                current_word = []
+                current_word_start_frame = None
+
+    # Flush any remaining tokens
+    if current_word:
+        word_text = normalize_text_for_wer("".join(current_word))
+        if word_text:
+            for w in word_text.split():
+                out_of_bounds_words.append(
+                    {
+                        "word": w,
+                        "onset_time": frame_to_time(current_word_start_frame),
+                    }
+                )
+
+    out_of_bounds_word_count = len(out_of_bounds_words)
+    out_of_bounds_ratio = out_of_bounds_word_count / audio_duration if audio_duration > 0 else 0
+
+    # Calculate total WER from summed errors
+    total_errors = total_substitutions + total_insertions + total_deletions
+    total_wer = total_errors / total_ref_words if total_ref_words > 0 else None
+
+    return {
+        "per_segment": per_segment,
+        "total_wer": total_wer,
+        "total_ref_words": total_ref_words,
+        "total_substitutions": total_substitutions,
+        "total_insertions": total_insertions,
+        "total_deletions": total_deletions,
+        "out_of_bounds_words": out_of_bounds_words,
+        "out_of_bounds_word_count": out_of_bounds_word_count,
+        "out_of_bounds_word_ratio": out_of_bounds_ratio,
+    }
+
+
+def compute_wer_with_details(reference, hypothesis, ignore_trailing_deletions=True):
+    """Compute WER with detailed S/I/D counts, optionally ignoring trailing deletions.
+
+    When TTS is truncated due to user interruption, the hypothesis may be
+    shorter than the reference. If ignore_trailing_deletions=True, we ignore
+    these trailing deletions.
+
+    Args:
+        reference: normalized reference text (speech2text model output)
+        hypothesis: normalized hypothesis text (TTS audio transcribed)
+        ignore_trailing_deletions: whether to ignore trailing deletions (TTS truncation)
+
+    Returns:
+        dict with wer, subs, ins, dels, ref_words, truncation_detected, truncated_words
+    """
+    ref_words = reference.split() if reference else []
+    hyp_words = hypothesis.split() if hypothesis else []
+    ref_word_count = len(ref_words)
+    hyp_word_count = len(hyp_words)
+
+    if not reference and not hypothesis:
+        return {
+            "wer": 0.0,
+            "substitutions": 0,
+            "insertions": 0,
+            "deletions": 0,
+            "ref_words": 0,
+            "truncation_detected": False,
+            "truncated_words": [],
+        }
+    if not reference:
+        return {
+            "wer": 1.0,
+            "substitutions": 0,
+            "insertions": hyp_word_count,
+            "deletions": 0,
+            "ref_words": 0,
+            "truncation_detected": False,
+            "truncated_words": [],
+        }
+    if not hypothesis:
+        return {
+            "wer": 1.0,
+            "substitutions": 0,
+            "insertions": 0,
+            "deletions": ref_word_count,
+            "ref_words": ref_word_count,
+            "truncation_detected": True,
+            "truncated_words": ref_words,
+        }
+
+    # Use jiwer to get detailed metrics
+    result = process_words(reference, hypothesis)
+    subs = result.substitutions
+    ins = result.insertions
+    dels = result.deletions
+
+    truncation_detected = False
+    truncated_words = []
+
+    # Check for trailing deletion (truncation) if hypothesis is shorter
+    if ignore_trailing_deletions and hyp_word_count < ref_word_count:
+        # Try trimming reference to hypothesis length
+        trimmed_ref = " ".join(ref_words[:hyp_word_count])
+        if trimmed_ref:
+            trimmed_result = process_words(trimmed_ref, hypothesis)
+            trimmed_errors = trimmed_result.substitutions + trimmed_result.insertions + trimmed_result.deletions
+            original_errors = subs + ins + dels
+
+            # If trimming significantly reduces errors, it's truncation
+            if trimmed_errors < original_errors * 0.8:
+                truncation_detected = True
+                truncated_words = ref_words[hyp_word_count:]
+                subs = trimmed_result.substitutions
+                ins = trimmed_result.insertions
+                dels = trimmed_result.deletions
+                ref_word_count = hyp_word_count  # Adjust ref count for WER calculation
+
+    total_errors = subs + ins + dels
+    wer_value = total_errors / ref_word_count if ref_word_count > 0 else 0.0
+
+    return {
+        "wer": wer_value,
+        "substitutions": subs,
+        "insertions": ins,
+        "deletions": dels,
+        "ref_words": ref_word_count,
+        "truncation_detected": truncation_detected,
+        "truncated_words": truncated_words,
+    }
+
+
+def compute_agent_speech_quality(
+    agent_segments, frame_alignment, agent_transcripts, segment_buffer_sec=DEFAULT_SEGMENT_BUFFER_SEC
+):
+    """Compute WER/CER for agent speech: TTS output vs speech2text model output.
+
+    Args:
+        agent_segments: list of agent segment dicts with start/end times
+        frame_alignment: debug_info frame_alignment dict
+        agent_transcripts: dict mapping (start, end) tuples to TTS audio ASR transcription
+
+    Returns:
+        dict with per_segment details including ref/hyp text, S/I/D counts, WER/CER
+        Total WER/CER calculated from sum of all errors / sum of ref words/chars
+    """
+    if not frame_alignment or "agent_stream_decoded" not in frame_alignment:
+        return {
+            "per_segment": [],
+            "total_wer": None,
+            "total_cer": None,
+            "total_ref_words": 0,
+            "total_ref_chars": 0,
+            "total_word_substitutions": 0,
+            "total_word_insertions": 0,
+            "total_word_deletions": 0,
+            "total_char_substitutions": 0,
+            "total_char_insertions": 0,
+            "total_char_deletions": 0,
+            "truncation_events": 0,
+            "truncated_words": [],
+            "error": "no_frame_alignment",
+        }
+
+    per_segment = []
+    total_ref_words = 0
+    total_ref_chars = 0
+    total_word_subs = 0
+    total_word_ins = 0
+    total_word_dels = 0
+    total_char_subs = 0
+    total_char_ins = 0
+    total_char_dels = 0
+    truncation_events = 0
+    all_truncated_words = []
+
+    for seg in agent_segments:
+        start_frame = time_to_frame(seg["start"])
+        # Extend end boundary for WER calculation to capture trailing words
+        end_frame = time_to_frame(seg["end"] + segment_buffer_sec)
+
+        # Reference: speech2text model output from frame_alignment
+        ref_text = extract_text_from_alignment(frame_alignment, "agent_stream_decoded", start_frame, end_frame)
+        ref_normalized = normalize_text_for_wer(ref_text)
+
+        # Hypothesis: ASR transcription of TTS audio output
+        seg_key = (seg["start"], seg["end"])
+        hyp_text = agent_transcripts.get(seg_key, "")
+        hyp_normalized = normalize_text_for_wer(hyp_text)
+
+        if ref_normalized or hyp_normalized:
+            # Compute WER with truncation handling
+            wer_result = compute_wer_with_details(ref_normalized, hyp_normalized, ignore_trailing_deletions=True)
+
+            if wer_result["truncation_detected"]:
+                truncation_events += 1
+                all_truncated_words.extend(wer_result["truncated_words"])
+
+            total_ref_words += wer_result["ref_words"]
+            total_word_subs += wer_result["substitutions"]
+            total_word_ins += wer_result["insertions"]
+            total_word_dels += wer_result["deletions"]
+
+            # Compute CER (character error rate)
+            # If truncation was detected, compute CER only on the matched portion
+            if wer_result["truncation_detected"] and wer_result["truncated_words"]:
+                # Trim reference to match the non-truncated portion
+                ref_words = ref_normalized.split()
+                matched_ref_words = ref_words[: len(ref_words) - len(wer_result["truncated_words"])]
+                ref_for_cer = " ".join(matched_ref_words)
+            else:
+                ref_for_cer = ref_normalized
+
+            ref_chars = len(ref_for_cer) if ref_for_cer else 0
+            hyp_chars = len(hyp_normalized) if hyp_normalized else 0
+
+            if ref_for_cer and hyp_normalized:
+                cer_result = process_characters(ref_for_cer, hyp_normalized)
+                char_subs = cer_result.substitutions
+                char_ins = cer_result.insertions
+                char_dels = cer_result.deletions
+            elif ref_for_cer:
+                char_subs, char_ins, char_dels = 0, 0, ref_chars
+            else:
+                char_subs, char_ins, char_dels = 0, hyp_chars, 0
+
+            total_ref_chars += ref_chars
+            total_char_subs += char_subs
+            total_char_ins += char_ins
+            total_char_dels += char_dels
+
+            segment_cer = (
+                (char_subs + char_ins + char_dels) / ref_chars if ref_chars > 0 else (1.0 if hyp_chars > 0 else 0.0)
+            )
+
+            per_segment.append(
+                {
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "reference": ref_normalized,
+                    "hypothesis": hyp_normalized,
+                    "ref_words": wer_result["ref_words"],
+                    "word_substitutions": wer_result["substitutions"],
+                    "word_insertions": wer_result["insertions"],
+                    "word_deletions": wer_result["deletions"],
+                    "wer": wer_result["wer"],
+                    "ref_chars": ref_chars,
+                    "char_substitutions": char_subs,
+                    "char_insertions": char_ins,
+                    "char_deletions": char_dels,
+                    "cer": segment_cer,
+                    "truncation_detected": wer_result["truncation_detected"],
+                    "truncated_words": wer_result["truncated_words"],
+                }
+            )
+
+    # Calculate total WER/CER from summed errors
+    total_word_errors = total_word_subs + total_word_ins + total_word_dels
+    total_wer = total_word_errors / total_ref_words if total_ref_words > 0 else None
+
+    total_char_errors = total_char_subs + total_char_ins + total_char_dels
+    total_cer = total_char_errors / total_ref_chars if total_ref_chars > 0 else None
+
+    return {
+        "per_segment": per_segment,
+        "total_wer": total_wer,
+        "total_cer": total_cer,
+        "total_ref_words": total_ref_words,
+        "total_ref_chars": total_ref_chars,
+        "total_word_substitutions": total_word_subs,
+        "total_word_insertions": total_word_ins,
+        "total_word_deletions": total_word_dels,
+        "total_char_substitutions": total_char_subs,
+        "total_char_insertions": total_char_ins,
+        "total_char_deletions": total_char_dels,
+        "truncation_events": truncation_events,
+        "truncated_words": all_truncated_words,
+    }
+
+
+def compute_tts_hallucinations(
+    agent_segments, frame_alignment, agent_transcripts, segment_buffer_sec=DEFAULT_SEGMENT_BUFFER_SEC
+):
+    """Detect TTS hallucinations: words in TTS output not present in speech2text output.
+
+    Args:
+        agent_segments: list of agent segment dicts with start/end times
+        frame_alignment: debug_info frame_alignment dict
+        agent_transcripts: dict mapping (start, end) tuples to TTS audio ASR transcription
+
+    Returns:
+        dict with hallucinated words with onset times per segment and overall
+    """
+    if not frame_alignment or "agent_stream_decoded" not in frame_alignment:
+        return {
+            "per_segment": [],
+            "hallucinations": [],
+            "hallucination_rate": None,
+            "error": "no_frame_alignment",
+        }
+
+    per_segment = []
+    all_hallucinations = []
+    total_hyp_words = 0
+
+    for seg in agent_segments:
+        start_frame = time_to_frame(seg["start"])
+        # Extend end boundary for consistency with WER calculation
+        end_frame = time_to_frame(seg["end"] + segment_buffer_sec)
+        seg_start_time = seg["start"]
+
+        # Reference: speech2text model output from frame_alignment
+        ref_text = extract_text_from_alignment(frame_alignment, "agent_stream_decoded", start_frame, end_frame)
+        ref_normalized = normalize_text_for_wer(ref_text)
+        ref_words = set(ref_normalized.split()) if ref_normalized else set()
+
+        # Hypothesis: ASR transcription of TTS audio output
+        seg_key = (seg["start"], seg["end"])
+        hyp_text = agent_transcripts.get(seg_key, "")
+        hyp_normalized = normalize_text_for_wer(hyp_text)
+        hyp_words = hyp_normalized.split() if hyp_normalized else []
+
+        total_hyp_words += len(hyp_words)
+
+        # Find hallucinated words with estimated onset times
+        # Estimate onset time based on word position within segment
+        segment_duration = seg["end"] - seg["start"]
+        segment_hallucinations = []
+
+        for i, word in enumerate(hyp_words):
+            if word not in ref_words:
+                # Estimate onset time based on word position
+                word_ratio = i / len(hyp_words) if hyp_words else 0
+                estimated_onset = seg_start_time + word_ratio * segment_duration
+
+                hallucination_entry = {
+                    "word": word,
+                    "onset_time": round(estimated_onset, 3),
+                    "segment_start": seg_start_time,
+                    "segment_end": seg["end"],
+                }
+                segment_hallucinations.append(hallucination_entry)
+                all_hallucinations.append(hallucination_entry)
+
+        per_segment.append(
+            {
+                "start": seg["start"],
+                "end": seg["end"],
+                "count": len(segment_hallucinations),
+                "hallucinations": segment_hallucinations,
+            }
+        )
+
+    hallucination_rate = len(all_hallucinations) / total_hyp_words if total_hyp_words > 0 else 0.0
+
+    return {
+        "per_segment": per_segment,
+        "hallucinations": all_hallucinations,
+        "total_hallucinated": len(all_hallucinations),
+        "total_agent_words": total_hyp_words,
+        "hallucination_rate": hallucination_rate,
+    }
+
+
+def compute_token_balance(frame_alignment):
+    """Compute token balance metrics from frame alignment.
+
+    Both streams use <s> for BOS and </s> for EOS sentence boundary tokens.
+
+    Balance metric is normalized to [-1, 1]:
+    - 0 = perfectly balanced
+    - Positive = more BOS tokens than EOS tokens (incomplete utterances)
+    - Negative = more EOS tokens than BOS tokens
+
+    Args:
+        frame_alignment: debug_info frame_alignment dict
+
+    Returns:
+        dict with token counts and balance metrics for both streams
+    """
+    if not frame_alignment:
+        return {
+            "agent_bos_count": 0,
+            "agent_eos_count": 0,
+            "agent_balance": 0.0,
+            "user_bos_count": 0,
+            "user_eos_count": 0,
+            "user_balance": 0.0,
+            "error": "no_frame_alignment",
+        }
+
+    # Count agent stream BOS/EOS tokens (<s> and </s>)
+    agent_tokens = frame_alignment.get("agent_stream_decoded", [])
+    agent_text = "".join(agent_tokens) if agent_tokens else ""
+
+    # Agent BOS: <s>
+    agent_bos_count = agent_text.count("<s>")
+    # Agent EOS: </s>
+    agent_eos_count = agent_text.count("</s>")
+
+    # Calculate agent balance
+    agent_total = agent_bos_count + agent_eos_count
+    agent_balance = (agent_bos_count - agent_eos_count) / agent_total if agent_total > 0 else 0.0
+
+    # Count user stream (ASR) BOS/EOS tokens (<s> and </s>)
+    user_tokens = frame_alignment.get("asr_stream_decoded", [])
+    user_text = "".join(user_tokens) if user_tokens else ""
+
+    # User BOS: <s>
+    user_bos_count = user_text.count("<s>")
+    # User EOS: </s>
+    user_eos_count = user_text.count("</s>")
+
+    # Calculate user balance
+    user_total = user_bos_count + user_eos_count
+    user_balance = (user_bos_count - user_eos_count) / user_total if user_total > 0 else 0.0
+
+    return {
+        "agent_bos_count": agent_bos_count,
+        "agent_eos_count": agent_eos_count,
+        "agent_balance": agent_balance,
+        "user_bos_count": user_bos_count,
+        "user_eos_count": user_eos_count,
+        "user_balance": user_balance,
+    }
 
 
 def parse_float_list(arg):
@@ -28,8 +671,13 @@ def remove_special_symbols(text):
     return text.strip()
 
 
-def parse_timestamped_text(text_with_timestamps):
-    """Parse BOS <|t|> and EOS <$t$> timestamps from text."""
+def parse_timestamped_text(text_with_timestamps, audio_duration=None):
+    """Parse BOS <|t|> and EOS <$t$> timestamps from text.
+
+    Args:
+        text_with_timestamps: Text containing BOS <|t|> and EOS <$t$> markers
+        audio_duration: Optional audio duration to use as end time for last segment without EOS
+    """
     bos_pattern = r"<\|([\d\.]+)\|>"
     eos_pattern = r"<\$([\d\.]+)\$>"
 
@@ -56,11 +704,24 @@ def parse_timestamped_text(text_with_timestamps):
                 bos_end_pos = bos_matches[i].end()
                 eos_start_pos = eos_matches[eos_idx].start()
                 text = text_with_timestamps[bos_end_pos:eos_start_pos].strip()
+            elif i < len(bos_matches):
+                # No matching EOS - extract text from BOS to next BOS or end of string
+                bos_end_pos = bos_matches[i].end()
+                if i < len(bos_matches) - 1:
+                    next_bos_start_pos = bos_matches[i + 1].start()
+                    text = text_with_timestamps[bos_end_pos:next_bos_start_pos].strip()
+                else:
+                    # Last BOS without EOS - extract to end of string
+                    text = text_with_timestamps[bos_end_pos:].strip()
+                    # Remove any trailing EOS tags that might be present
+                    text = re.sub(r"<\$[\d\.]+\$>", "", text).strip()
 
             if end_time is not None:
                 agent_segments.append({"start": start_time, "end": end_time, "text": text})
             else:
-                agent_segments.append({"start": start_time, "end": start_time + 5.0, "text": text})
+                # No EOS - use audio duration if available, otherwise default to +5s
+                fallback_end = audio_duration if audio_duration is not None else start_time + 5.0
+                agent_segments.append({"start": start_time, "end": fallback_end, "text": text})
     elif bos_timestamps:
         for i, timestamp in enumerate(bos_timestamps):
             text = ""
@@ -75,7 +736,9 @@ def parse_timestamped_text(text_with_timestamps):
             if i < len(bos_timestamps) - 1:
                 agent_segments.append({"start": timestamp, "end": bos_timestamps[i + 1], "text": text})
             else:
-                agent_segments.append({"start": timestamp, "end": timestamp + 5.0, "text": text})
+                # Last segment - use audio duration if available, otherwise default to +5s
+                fallback_end = audio_duration if audio_duration is not None else timestamp + 5.0
+                agent_segments.append({"start": timestamp, "end": fallback_end, "text": text})
 
     return agent_segments
 
@@ -671,6 +1334,13 @@ def main(args):
     all_bc_accuracies = []
     all_metrics_dicts = []
 
+    # Speech quality metrics accumulators
+    all_user_speech_wer = []
+    all_agent_speech_wer = []
+    all_agent_speech_cer = []
+    all_hallucination_rates = []
+    all_out_of_bounds_ratios = []
+
     # For per-sample results output
     per_sample_results = []
 
@@ -703,6 +1373,7 @@ def main(args):
 
             # Get original entry if this is a wrapper format
             original_entry = entry.get("original_entry", entry)
+            debug_info = None  # Will be retrieved later if needed
         else:
             if not audio_path or not os.path.exists(audio_path):
                 print(f"Skipping {item_id}: audio file not found at {audio_path}")
@@ -724,12 +1395,17 @@ def main(args):
             user_audio_16k = torchaudio.functional.resample(user_audio, audio_sr, 16000)
             agent_audio_16k = torchaudio.functional.resample(agent_audio, audio_sr, 16000)
 
+            # Get estimated audio duration from debug_info for timestamp parsing
+            debug_info = get_debug_info(entry)
+            total_frames = debug_info.get("total_frames", 0) if debug_info else 0
+            estimated_audio_duration = total_frames * FRAME_SIZE_SEC if total_frames > 0 else None
+
             # Get agent segments from timestamps or VAD fallback
             agent_segments = []
             use_vad_for_agent = args.use_audio_segmentation
 
             if not use_vad_for_agent and generation_text:
-                agent_segments = parse_timestamped_text(generation_text)
+                agent_segments = parse_timestamped_text(generation_text, audio_duration=estimated_audio_duration)
                 if agent_segments:
                     print(f"  Parsed {len(agent_segments)} agent segments from timestamps")
 
@@ -762,6 +1438,22 @@ def main(args):
             user_transcripts = {}
             agent_transcripts = {}
             original_entry = entry
+
+        # Get frame_alignment for speech quality metrics (debug_info already retrieved earlier)
+        if not debug_info:
+            debug_info = get_debug_info(entry)
+        frame_alignment = debug_info.get("frame_alignment", {}) if debug_info else {}
+
+        # Get audio duration - from audio file or estimate from segments
+        audio_duration = 0.0
+        if not use_cached and audio_path and os.path.exists(audio_path):
+            audio_info = torchaudio.info(audio_path)
+            audio_duration = audio_info.num_frames / audio_info.sample_rate
+        else:
+            # Estimate from segments
+            all_ends = [s["end"] for s in user_segments + agent_segments]
+            if all_ends:
+                audio_duration = max(all_ends)
 
         # Compute metrics
         tt_metrics = compute_turn_taking_metrics(
@@ -799,27 +1491,44 @@ def main(args):
         all_bc_accuracies.append(bc_accuracy)
 
         # Transcriptions - skip if using cached data
-        if not use_cached:
-            # Extract agent text from timestamps OR transcribe with ASR
-            if use_vad_for_agent and asr_model is not None:
-                # When using audio segmentation, transcribe agent segments with ASR
-                print(f"  Transcribing {len(agent_segments)} agent segments with ASR...")
-                for seg in agent_segments:
-                    transcript, _ = transcribe_segment(agent_audio, seg["start"], seg["end"], audio_sr, asr_model)
-                    agent_transcripts[(seg["start"], seg["end"])] = transcript
-            elif generation_text and not use_vad_for_agent:
-                # Extract text from timestamp markers
-                agent_segments_with_text = parse_timestamped_text(generation_text)
-                agent_transcripts = {
-                    (seg["start"], seg["end"]): seg.get("text", "") for seg in agent_segments_with_text
-                }
+        if not use_cached and asr_model is not None:
+            # Always transcribe agent segments with ASR to get actual TTS output
+            # (The reference from frame_alignment is what model intended to say,
+            #  the ASR transcription is what was actually spoken by TTS)
+            print(f"  Transcribing {len(agent_segments)} agent segments with ASR...")
+            for seg in agent_segments:
+                transcript, _ = transcribe_segment(agent_audio, seg["start"], seg["end"], audio_sr, asr_model)
+                agent_transcripts[(seg["start"], seg["end"])] = transcript
 
             # Transcribe user segments with ASR
-            if asr_model is not None:
-                print(f"  Transcribing {len(user_segments)} user segments...")
-                for seg in user_segments:
-                    transcript, _ = transcribe_segment(user_audio, seg["start"], seg["end"], audio_sr, asr_model)
-                    user_transcripts[(seg["start"], seg["end"])] = transcript
+            print(f"  Transcribing {len(user_segments)} user segments...")
+            for seg in user_segments:
+                transcript, _ = transcribe_segment(user_audio, seg["start"], seg["end"], audio_sr, asr_model)
+                user_transcripts[(seg["start"], seg["end"])] = transcript
+
+        # Compute speech quality metrics if frame_alignment is available
+        user_speech_metrics = compute_user_speech_wer(
+            user_segments, frame_alignment, user_transcripts, audio_duration, args.segment_buffer_sec
+        )
+        agent_speech_metrics = compute_agent_speech_quality(
+            agent_segments, frame_alignment, agent_transcripts, args.segment_buffer_sec
+        )
+        hallucination_metrics = compute_tts_hallucinations(
+            agent_segments, frame_alignment, agent_transcripts, args.segment_buffer_sec
+        )
+        token_balance_metrics = compute_token_balance(frame_alignment)
+
+        # Accumulate speech quality metrics
+        if user_speech_metrics.get("total_wer") is not None:
+            all_user_speech_wer.append(user_speech_metrics["total_wer"])
+        if user_speech_metrics.get("out_of_bounds_word_ratio") is not None:
+            all_out_of_bounds_ratios.append(user_speech_metrics["out_of_bounds_word_ratio"])
+        if agent_speech_metrics.get("total_wer") is not None:
+            all_agent_speech_wer.append(agent_speech_metrics["total_wer"])
+        if agent_speech_metrics.get("total_cer") is not None:
+            all_agent_speech_cer.append(agent_speech_metrics["total_cer"])
+        if hallucination_metrics.get("hallucination_rate") is not None:
+            all_hallucination_rates.append(hallucination_metrics["hallucination_rate"])
 
         metrics_dict = {
             "item_id": item_id,
@@ -836,6 +1545,10 @@ def main(args):
             "failed_barge_ins": failed_barge_ins,
             "user_transcripts": user_transcripts,
             "agent_transcripts": agent_transcripts,
+            "user_speech_metrics": user_speech_metrics,
+            "agent_speech_metrics": agent_speech_metrics,
+            "hallucination_metrics": hallucination_metrics,
+            "token_balance_metrics": token_balance_metrics,
         }
 
         all_metrics_dicts.append(metrics_dict)
@@ -865,6 +1578,47 @@ def main(args):
                         "avg_latency_ms": barge_in_metrics.get("avg_latency_ms", None),
                     },
                     "backchanneling": {"failures": bc_failure},
+                    "user_speech": {
+                        "total_wer": user_speech_metrics.get("total_wer"),
+                        "total_ref_words": user_speech_metrics.get("total_ref_words", 0),
+                        "total_substitutions": user_speech_metrics.get("total_substitutions", 0),
+                        "total_insertions": user_speech_metrics.get("total_insertions", 0),
+                        "total_deletions": user_speech_metrics.get("total_deletions", 0),
+                        "per_segment": user_speech_metrics.get("per_segment", []),
+                        "out_of_bounds_words": user_speech_metrics.get("out_of_bounds_words", []),
+                        "out_of_bounds_word_count": user_speech_metrics.get("out_of_bounds_word_count", 0),
+                        "out_of_bounds_word_ratio": user_speech_metrics.get("out_of_bounds_word_ratio"),
+                    },
+                    "agent_speech": {
+                        "total_wer": agent_speech_metrics.get("total_wer"),
+                        "total_cer": agent_speech_metrics.get("total_cer"),
+                        "total_ref_words": agent_speech_metrics.get("total_ref_words", 0),
+                        "total_ref_chars": agent_speech_metrics.get("total_ref_chars", 0),
+                        "total_word_substitutions": agent_speech_metrics.get("total_word_substitutions", 0),
+                        "total_word_insertions": agent_speech_metrics.get("total_word_insertions", 0),
+                        "total_word_deletions": agent_speech_metrics.get("total_word_deletions", 0),
+                        "total_char_substitutions": agent_speech_metrics.get("total_char_substitutions", 0),
+                        "total_char_insertions": agent_speech_metrics.get("total_char_insertions", 0),
+                        "total_char_deletions": agent_speech_metrics.get("total_char_deletions", 0),
+                        "per_segment": agent_speech_metrics.get("per_segment", []),
+                        "truncation_events": agent_speech_metrics.get("truncation_events", 0),
+                        "truncated_words": agent_speech_metrics.get("truncated_words", []),
+                    },
+                    "tts_hallucinations": {
+                        "hallucination_rate": hallucination_metrics.get("hallucination_rate"),
+                        "total_hallucinated": hallucination_metrics.get("total_hallucinated", 0),
+                        "total_agent_words": hallucination_metrics.get("total_agent_words", 0),
+                        "hallucinations": hallucination_metrics.get("hallucinations", []),
+                        "per_segment": hallucination_metrics.get("per_segment", []),
+                    },
+                    "token_balance": {
+                        "agent_bos_count": token_balance_metrics.get("agent_bos_count", 0),
+                        "agent_eos_count": token_balance_metrics.get("agent_eos_count", 0),
+                        "agent_balance": token_balance_metrics.get("agent_balance", 0.0),
+                        "user_bos_count": token_balance_metrics.get("user_bos_count", 0),
+                        "user_eos_count": token_balance_metrics.get("user_eos_count", 0),
+                        "user_balance": token_balance_metrics.get("user_balance", 0.0),
+                    },
                 },
                 "segmentation": {
                     "user_segments": [{"start": s["start"], "end": s["end"]} for s in user_segments],
@@ -890,7 +1644,42 @@ def main(args):
         else 0,
         "avg_bc_accuracy": sum(all_bc_accuracies) / len(all_bc_accuracies) * 100 if all_bc_accuracies else 0,
         "num_audios_evaluated": count,
+        # Speech quality metrics
+        "avg_user_speech_wer": sum(all_user_speech_wer) / len(all_user_speech_wer) * 100
+        if all_user_speech_wer
+        else None,
+        "avg_out_of_bounds_ratio": sum(all_out_of_bounds_ratios) / len(all_out_of_bounds_ratios)
+        if all_out_of_bounds_ratios
+        else None,
+        "avg_agent_speech_wer": sum(all_agent_speech_wer) / len(all_agent_speech_wer) * 100
+        if all_agent_speech_wer
+        else None,
+        "avg_agent_speech_cer": sum(all_agent_speech_cer) / len(all_agent_speech_cer) * 100
+        if all_agent_speech_cer
+        else None,
+        "avg_hallucination_rate": sum(all_hallucination_rates) / len(all_hallucination_rates) * 100
+        if all_hallucination_rates
+        else None,
     }
+
+    # Format optional metrics for display
+    user_wer_str = (
+        f"{avg_metrics['avg_user_speech_wer']:.1f}%" if avg_metrics["avg_user_speech_wer"] is not None else "N/A"
+    )
+    out_bounds_str = (
+        f"{avg_metrics['avg_out_of_bounds_ratio']:.3f}"
+        if avg_metrics["avg_out_of_bounds_ratio"] is not None
+        else "N/A"
+    )
+    agent_wer_str = (
+        f"{avg_metrics['avg_agent_speech_wer']:.1f}%" if avg_metrics["avg_agent_speech_wer"] is not None else "N/A"
+    )
+    agent_cer_str = (
+        f"{avg_metrics['avg_agent_speech_cer']:.1f}%" if avg_metrics["avg_agent_speech_cer"] is not None else "N/A"
+    )
+    halluc_str = (
+        f"{avg_metrics['avg_hallucination_rate']:.1f}%" if avg_metrics["avg_hallucination_rate"] is not None else "N/A"
+    )
 
     avg_metrics_str = f"""
 {"=" * 50}
@@ -905,7 +1694,14 @@ Average Metrics:
    - Average latency: {avg_metrics["avg_barge_in_latency"]:.1f} ms
 3. Back-channeling:
    - Average accuracy: {avg_metrics["avg_bc_accuracy"]:.1f}%
-4. Number of audios evaluated: {avg_metrics["num_audios_evaluated"]}
+4. User speech quality:
+   - Average WER: {user_wer_str}
+   - Out-of-bounds word ratio: {out_bounds_str} words/sec
+5. Agent speech quality:
+   - Average WER: {agent_wer_str}
+   - Average CER: {agent_cer_str}
+   - TTS hallucination rate: {halluc_str}
+6. Number of audios evaluated: {avg_metrics["num_audios_evaluated"]}
 {"=" * 50}"""
 
     print(avg_metrics_str)
@@ -934,6 +1730,15 @@ Average Metrics:
                     "avg_latency_ms": avg_metrics["avg_barge_in_latency"],
                 },
                 "backchanneling": {"avg_accuracy": avg_metrics["avg_bc_accuracy"]},
+                "user_speech": {
+                    "avg_wer": avg_metrics["avg_user_speech_wer"],
+                    "out_of_bounds_word_ratio": avg_metrics["avg_out_of_bounds_ratio"],
+                },
+                "agent_speech": {
+                    "avg_wer": avg_metrics["avg_agent_speech_wer"],
+                    "avg_cer": avg_metrics["avg_agent_speech_cer"],
+                    "hallucination_rate": avg_metrics["avg_hallucination_rate"],
+                },
                 "num_samples_evaluated": avg_metrics["num_audios_evaluated"],
             },
             "args": vars(args),
@@ -986,6 +1791,12 @@ def parse_args():
         type=int,
         default=1500,
         help="Minimum silence duration in milliseconds for VAD",
+    )
+    parser.add_argument(
+        "--segment_buffer_sec",
+        type=float,
+        default=0.5,
+        help="Buffer in seconds to extend segment boundaries for WER calculation and out-of-bounds detection",
     )
     parser.add_argument(
         "--disable_transcription",
