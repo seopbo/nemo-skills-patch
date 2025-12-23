@@ -16,8 +16,8 @@ from collections import namedtuple
 
 MCQFormat = namedtuple("MCQFormat", ["q_label", "opt_label", "answer_prefix", "task"])
 
-ANSWER_PLACEHOLDER = "ANSWER: (X)"
-EXTRACT_REGEX = r"(?i)\b[^\s:()\-–]+\b\s*[:\-–]?\s*\(?\s*([ABCD])\s*\)?\b"
+ANSWER_PLACEHOLDER = '{"answer":"X"}'
+EXTRACT_REGEX = r'\{"[^"]+"\s*:\s*"([ABCD])"\}'
 
 MCQ_FORMATS = {
     "English": MCQFormat(
