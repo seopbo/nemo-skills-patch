@@ -15,7 +15,6 @@
 import asyncio
 import json
 import logging
-import os
 import random
 import shutil
 import subprocess
@@ -39,6 +38,8 @@ from nemo_skills.evaluation.evaluator import (
     supports_single_eval,
 )
 from nemo_skills.inference.model import (
+    AudioProcessor,
+    AudioProcessorConfig,
     ParallelThinkingConfig,
     get_code_execution_model,
     get_model,
@@ -190,10 +191,10 @@ class GenerateSolutionsConfig:
     # List of content types to drop from messages (e.g., base64 audio) to keep output files smaller
     drop_content_types: list[str] = field(default_factory=lambda: ["audio_url"])
 
-    # Audio chunking configuration
-    enable_audio_chunking: bool = True
-    audio_chunk_task_types: list[str] | None = None  # If None, chunk all task types; if specified, only chunk these
-    chunk_audio_threshold_sec: int = 30  # Duration in seconds for each audio chunk
+    # Audio processing configuration (EXPERIMENTAL)
+    # Set to enable audio file preprocessing (file->base64 conversion, chunking for long audio)
+    # Example: ++audio.data_dir=/path/to/audio ++audio.enable_chunking=true
+    audio: AudioProcessorConfig | None = None
 
     # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
     eval_type: str | None = None  # "lean4-proof", "math", etc.
@@ -389,25 +390,6 @@ class GenerationTask:
     def setup_llm(self):
         self.sandbox = get_sandbox(**self.cfg.sandbox) if self.cfg.sandbox is not None else None
 
-        # Prepare data_dir for audio processing
-        data_dir = ""
-        if "data_dir" in self.cfg.eval_config and not (
-            isinstance(self.cfg.eval_config["data_dir"], type(None)) or isinstance(self.cfg.eval_type, type(None))
-        ):
-            data_dir = os.path.join(self.cfg.eval_config["data_dir"], self.cfg.eval_type)
-
-        # Prepare audio chunking config
-        audio_chunking_config = {
-            "data_dir": data_dir,
-            "enable_audio_chunking": self.cfg.enable_audio_chunking,
-            "audio_chunk_task_types": self.cfg.audio_chunk_task_types,
-            "chunk_audio_threshold_sec": self.cfg.chunk_audio_threshold_sec,
-        }
-
-        # Only pass audio_chunking_config to models that support it (VLLM-based servers)
-        audio_supported_servers = {"vllm"}
-        server_type = self.cfg.server.get("server_type", "").lower()
-
         if self.cfg.code_execution:
             llm = get_code_execution_model(**self.cfg.server, tokenizer=self.tokenizer, sandbox=self.sandbox)
         elif self.cfg.tool_modules is not None:
@@ -418,10 +400,24 @@ class GenerationTask:
                 tokenizer=self.tokenizer,
                 additional_config={"sandbox": self.cfg.sandbox},
             )
-        elif server_type in audio_supported_servers:
-            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer, **audio_chunking_config)
         else:
             llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
+
+        # Audio wrapper (preprocesses messages before they reach the model)
+        if self.cfg.audio is not None:
+            audio_supported_servers = {"vllm"}
+            server_type = self.cfg.server.get("server_type", "").lower()
+            if server_type not in audio_supported_servers:
+                raise ValueError(
+                    f"Audio processing is not supported for server_type='{server_type}'. "
+                    f"Supported server types: {audio_supported_servers}"
+                )
+            llm = AudioProcessor(
+                llm,
+                self.cfg.audio,
+                eval_config=dict(self.cfg.eval_config),
+                eval_type=self.cfg.eval_type,
+            )
 
         if self.cfg.parallel_thinking.mode is not None:
             # We don't want to override these key variables which overlap with self.cfg
@@ -564,7 +560,7 @@ class GenerationTask:
         """Preprocess the prompt before sending to the model.
 
         Override this method to add custom preprocessing logic.
-        Audio conversion is now handled by the model (e.g., VLLMModel).
+        Audio conversion is handled by the AudioProcessor wrapper.
         """
         return prompt
 
