@@ -131,6 +131,12 @@ def get_benchmark_args_from_module(
     if eval_args:
         generation_args = f"{eval_args} {generation_args}"
     generation_args += f" ++eval_config.split={split} "
+    
+    # Pass dataset_group from benchmark config if defined
+    dataset_group = get_arg_from_module_or_dict(benchmark_module, "DATASET_GROUP", None, override_dict=override_dict)
+    if dataset_group:
+        generation_args += f" ++dataset_group={dataset_group} "
+    
     requires_sandbox = get_arg_from_module_or_dict(benchmark_module, "REQUIRES_SANDBOX", False, override_dict)
     keep_mounts_for_sandbox = get_arg_from_module_or_dict(
         benchmark_module, "KEEP_MOUNTS_FOR_SANDBOX", False, override_dict

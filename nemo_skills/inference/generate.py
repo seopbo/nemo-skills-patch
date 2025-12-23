@@ -199,6 +199,7 @@ class GenerateSolutionsConfig:
     # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
     eval_type: str | None = None  # "lean4-proof", "math", etc.
     eval_config: dict = field(default_factory=dict)  # Config for the evaluator
+    dataset_group: str | None = None  # "math", "code", "speechlm", etc. from benchmark's DATASET_GROUP
 
     def __post_init__(self):
         self._post_init_validate_data()
@@ -404,7 +405,14 @@ class GenerationTask:
             llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
 
         # Audio wrapper (preprocesses messages before they reach the model)
-        if self.cfg.audio is not None:
+        # Auto-enable for audio benchmarks on vLLM (eval_type=audio OR dataset_group=speechlm)
+        should_enable_audio = (
+            self.cfg.audio is not None or 
+            (self.cfg.server.get("server_type", "").lower() == "vllm" and 
+             (self.cfg.eval_type == "audio" or self.cfg.dataset_group == "speechlm"))
+        )
+        
+        if should_enable_audio:
             audio_supported_servers = {"vllm"}
             server_type = self.cfg.server.get("server_type", "").lower()
             if server_type not in audio_supported_servers:
@@ -412,9 +420,13 @@ class GenerationTask:
                     f"Audio processing is not supported for server_type='{server_type}'. "
                     f"Supported server types: {audio_supported_servers}"
                 )
+            
+            # Use provided config or create default
+            audio_config = self.cfg.audio if self.cfg.audio is not None else AudioProcessorConfig()
+            
             llm = AudioProcessor(
                 llm,
-                self.cfg.audio,
+                audio_config,
                 eval_config=dict(self.cfg.eval_config),
                 eval_type=self.cfg.eval_type,
             )
@@ -643,7 +655,7 @@ class GenerationTask:
         }
 
         # Pass task_type for audio chunking
-        if "task_type" in data_point:
+        if isinstance(self.llm, AudioProcessor) and "task_type" in data_point:
             generation_params["task_type"] = data_point["task_type"]
 
         if self.cfg.code_execution:
