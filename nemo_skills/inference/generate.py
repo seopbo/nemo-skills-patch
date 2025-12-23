@@ -406,12 +406,11 @@ class GenerationTask:
 
         # Audio wrapper (preprocesses messages before they reach the model)
         # Auto-enable for audio benchmarks on vLLM (eval_type=audio OR dataset_group=speechlm)
-        should_enable_audio = (
-            self.cfg.audio is not None or 
-            (self.cfg.server.get("server_type", "").lower() == "vllm" and 
-             (self.cfg.eval_type == "audio" or self.cfg.dataset_group == "speechlm"))
+        should_enable_audio = self.cfg.audio is not None or (
+            self.cfg.server.get("server_type", "").lower() == "vllm"
+            and (self.cfg.eval_type == "audio" or self.cfg.dataset_group == "speechlm")
         )
-        
+
         if should_enable_audio:
             audio_supported_servers = {"vllm"}
             server_type = self.cfg.server.get("server_type", "").lower()
@@ -420,10 +419,10 @@ class GenerationTask:
                     f"Audio processing is not supported for server_type='{server_type}'. "
                     f"Supported server types: {audio_supported_servers}"
                 )
-            
+
             # Use provided config or create default
             audio_config = self.cfg.audio if self.cfg.audio is not None else AudioProcessorConfig()
-            
+
             llm = AudioProcessor(
                 llm,
                 audio_config,
