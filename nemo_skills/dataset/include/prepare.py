@@ -18,8 +18,12 @@ from collections import defaultdict
 from pathlib import Path
 
 from datasets import load_dataset
-from lang_libs import (ANSWER_PLACEHOLDER, EXTRACT_REGEX, get_mcq_format,
-                       supported_languages)
+from lang_libs import (
+    ANSWER_PLACEHOLDER,
+    EXTRACT_REGEX,
+    get_mcq_format,
+    supported_languages,
+)
 from tqdm import tqdm
 
 SUPPORTED_LANGUAGES = supported_languages()
@@ -62,27 +66,29 @@ def construct_few_shot_examples(languages, num_few_shot_examples):
     return few_shot_examples
 
 
-def retrieve_few_shot_examples(few_shot_examples, language, subject, num_few_shot_examples):
+def retrieve_few_shot_examples(
+    few_shot_examples, language, subject, num_few_shot_examples
+):
     retrieved_examples = []
 
     # If the language is not in the few-shot examples, return an empty list
     if language not in few_shot_examples:
         return retrieved_examples
-    
+
     # Prefer the subject-specific few-shot examples
     if subject in few_shot_examples[language]:
         retrieved_examples.extend(few_shot_examples[language][subject])
-    
+
     # If we still need more examples, use the other subjects
     if len(retrieved_examples) < num_few_shot_examples:
         for s in few_shot_examples[language]:
             if s != subject:
                 retrieved_examples.append(few_shot_examples[language][s][0])
-            
+
             if len(retrieved_examples) >= num_few_shot_examples:
                 break
     return retrieved_examples
-    
+
 
 def digit_to_letter(digit):
     return chr(ord("A") + int(digit))
@@ -100,7 +106,11 @@ def get_mcq_fields(description, question, choices, mcq_format, use_answer_prefix
             question,
             mcq_format.opt_label,
             options_text,
-            mcq_format.answer_prefix if use_answer_prefix else "",
+            (
+                mcq_format.answer_prefix
+                if use_answer_prefix
+                else ANSWER_PLACEHOLDER.replace("(X)", "")
+            ),
         ]
     )
     return {"question": question, "options": options_text, **options_dict}
@@ -132,7 +142,7 @@ def format_entry(entry, args, language, few_shot_examples):
 
     mcq_format = get_mcq_format(language, il_prompts=args.il_prompts)
     description = mcq_format.task.format(
-        subject=subject, answer_placeholder=ANSWER_PLACEHOLDER
+        subject=subject.lower(), answer_placeholder=ANSWER_PLACEHOLDER
     )
     expected_answer = digit_to_letter(answer)  # Convert from [0 to 3] to [A to D]
 
@@ -141,13 +151,14 @@ def format_entry(entry, args, language, few_shot_examples):
 
     if len(few_shot_examples) > 0:
         use_answer_prefix = False
-        shots = retrieve_few_shot_examples(few_shot_examples, language, subject, args.num_few_shot_examples)
+        shots = retrieve_few_shot_examples(
+            few_shot_examples, language, subject, args.num_few_shot_examples
+        )
         for shot in shots:
             q = shot[Schema.QUESTION]
             a = digit_to_letter(shot[Schema.ANSWER])
             options_text = "\n".join(
-                f"{digit_to_letter(i)}. {shot[v]}"
-                for i, v in enumerate(Schema.OPTIONS)
+                f"{digit_to_letter(i)}. {shot[v]}" for i, v in enumerate(Schema.OPTIONS)
             )
             few_shot_example_text = "\n".join(
                 [
