@@ -44,8 +44,7 @@ class Schema:
     CHOICES: str = "choices"  # `choices` field is available only for lite subset
 
 
-def construct_few_shot_examples(num_few_shot_examples, languages):
-
+def construct_few_shot_examples(languages, num_few_shot_examples):
     # we will use validation set for few-shot examples
     datasets = [
         load_dataset(f"CohereLabs/include-base-44", lang)["validation"]
@@ -56,16 +55,34 @@ def construct_few_shot_examples(num_few_shot_examples, languages):
         subject_dict = defaultdict(list)
         for entry in dataset:
             subject_dict[entry[Schema.SUBJECT]].append(entry)
-
-        examples = []
-        while len(examples) < num_few_shot_examples:
-            for subject in subject_dict.keys():
-                if len(subject_dict[subject]) > 0:
-                    examples.append(subject_dict[subject].pop(0))
-        few_shot_examples[lang] = examples
-
+        few_shot_examples[lang] = {
+            subject: subject_dict[subject][:num_few_shot_examples]
+            for subject in subject_dict
+        }
     return few_shot_examples
 
+
+def retrieve_few_shot_examples(few_shot_examples, language, subject, num_few_shot_examples):
+    retrieved_examples = []
+
+    # If the language is not in the few-shot examples, return an empty list
+    if language not in few_shot_examples:
+        return retrieved_examples
+    
+    # Prefer the subject-specific few-shot examples
+    if subject in few_shot_examples[language]:
+        retrieved_examples.extend(few_shot_examples[language][subject])
+    
+    # If we still need more examples, use the other subjects
+    if len(retrieved_examples) < num_few_shot_examples:
+        for s in few_shot_examples[language]:
+            if s != subject:
+                retrieved_examples.append(few_shot_examples[language][s][0])
+            
+            if len(retrieved_examples) >= num_few_shot_examples:
+                break
+    return retrieved_examples
+    
 
 def digit_to_letter(digit):
     return chr(ord("A") + int(digit))
@@ -103,7 +120,7 @@ def get_other_fields(entry):
     }
 
 
-def format_entry(entry, args, language, few_shot_examples=None):
+def format_entry(entry, args, language, few_shot_examples):
     if args.subset == "lite":
         choices = entry[Schema.CHOICES]
     else:
@@ -122,13 +139,14 @@ def format_entry(entry, args, language, few_shot_examples=None):
     # For CoT, we will use the answer prefix
     use_answer_prefix = True
 
-    if few_shot_examples is not None:
+    if len(few_shot_examples) > 0:
         use_answer_prefix = False
-        for example in few_shot_examples:
-            q = example[Schema.QUESTION]
-            a = digit_to_letter(example[Schema.ANSWER])
+        shots = retrieve_few_shot_examples(few_shot_examples, language, subject, args.num_few_shot_examples)
+        for shot in shots:
+            q = shot[Schema.QUESTION]
+            a = digit_to_letter(shot[Schema.ANSWER])
             options_text = "\n".join(
-                f"{digit_to_letter(i)}. {example[v]}"
+                f"{digit_to_letter(i)}. {shot[v]}"
                 for i, v in enumerate(Schema.OPTIONS)
             )
             few_shot_example_text = "\n".join(
@@ -162,7 +180,7 @@ def write_data_to_file(args):
     few_shot_examples = {}
     if args.num_few_shot_examples > 0:
         few_shot_examples = construct_few_shot_examples(
-            args.num_few_shot_examples, args.languages
+            args.languages, args.num_few_shot_examples
         )
     data_dir = Path(__file__).absolute().parent
     output_file = data_dir / f"{args.split}.jsonl"
@@ -171,9 +189,7 @@ def write_data_to_file(args):
             for entry in tqdm(
                 dataset, desc=f"Preparing {lang} dataset ({args.subset} subset)"
             ):
-                entry = format_entry(
-                    entry, args, lang, few_shot_examples.get(lang, None)
-                )
+                entry = format_entry(entry, args, lang, few_shot_examples)
                 json.dump(entry, fout, ensure_ascii=False)
                 fout.write("\n")
 
