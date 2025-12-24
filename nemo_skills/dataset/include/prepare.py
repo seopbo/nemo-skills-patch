@@ -14,15 +14,12 @@
 
 import argparse
 import json
+from collections import defaultdict
 from pathlib import Path
 
 from datasets import load_dataset
-from lang_libs import (
-    get_mcq_format,
-    supported_languages,
-    ANSWER_PLACEHOLDER,
-    EXTRACT_REGEX,
-)
+from lang_libs import (ANSWER_PLACEHOLDER, EXTRACT_REGEX, get_mcq_format,
+                       supported_languages)
 from tqdm import tqdm
 
 SUPPORTED_LANGUAGES = supported_languages()
@@ -47,8 +44,35 @@ class Schema:
     CHOICES: str = "choices"  # `choices` field is available only for lite subset
 
 
-def get_mcq_fields(description, question, choices, mcq_format):
-    options_dict = {chr(ord("A") + i): option for i, option in enumerate(choices)}
+def construct_few_shot_examples(num_few_shot_examples, languages):
+
+    # we will use validation set for few-shot examples
+    datasets = [
+        load_dataset(f"CohereLabs/include-base-44", lang)["validation"]
+        for lang in languages
+    ]
+    few_shot_examples = {}
+    for dataset, lang in zip(datasets, languages):
+        subject_dict = defaultdict(list)
+        for entry in dataset:
+            subject_dict[entry[Schema.SUBJECT]].append(entry)
+
+        examples = []
+        while len(examples) < num_few_shot_examples:
+            for subject in subject_dict.keys():
+                if len(subject_dict[subject]) > 0:
+                    examples.append(subject_dict[subject].pop(0))
+        few_shot_examples[lang] = examples
+
+    return few_shot_examples
+
+
+def digit_to_letter(digit):
+    return chr(ord("A") + int(digit))
+
+
+def get_mcq_fields(description, question, choices, mcq_format, use_answer_prefix=True):
+    options_dict = {digit_to_letter(i): option for i, option in enumerate(choices)}
     options_text = "\n".join(
         f"{letter}. {option}" for letter, option in options_dict.items()
     )
@@ -59,7 +83,7 @@ def get_mcq_fields(description, question, choices, mcq_format):
             question,
             mcq_format.opt_label,
             options_text,
-            mcq_format.answer_prefix,
+            mcq_format.answer_prefix if use_answer_prefix else "",
         ]
     )
     return {"question": question, "options": options_text, **options_dict}
@@ -79,7 +103,7 @@ def get_other_fields(entry):
     }
 
 
-def format_entry(entry, args, language):
+def format_entry(entry, args, language, few_shot_examples=None):
     if args.subset == "lite":
         choices = entry[Schema.CHOICES]
     else:
@@ -93,14 +117,38 @@ def format_entry(entry, args, language):
     description = mcq_format.task.format(
         subject=subject, answer_placeholder=ANSWER_PLACEHOLDER
     )
-    expected_answer = chr(ord("A") + int(answer))  # Convert from [0 to 3] to [A to D]
+    expected_answer = digit_to_letter(answer)  # Convert from [0 to 3] to [A to D]
+
+    # For CoT, we will use the answer prefix
+    use_answer_prefix = True
+
+    if few_shot_examples is not None:
+        use_answer_prefix = False
+        for example in few_shot_examples:
+            q = example[Schema.QUESTION]
+            a = digit_to_letter(example[Schema.ANSWER])
+            options_text = "\n".join(
+                f"{digit_to_letter(i)}. {example[v]}"
+                for i, v in enumerate(Schema.OPTIONS)
+            )
+            few_shot_example_text = "\n".join(
+                [
+                    mcq_format.q_label,
+                    q,
+                    mcq_format.opt_label,
+                    options_text,
+                    ANSWER_PLACEHOLDER.replace("X", a),
+                ]
+            )
+            description += f"\n{few_shot_example_text}"
+
     return {
         "expected_answer": expected_answer,
         "extract_from_boxed": False,
         "extract_regex": EXTRACT_REGEX,
         "subset_for_metrics": language,
         "category": category,
-        **get_mcq_fields(description, question, choices, mcq_format),
+        **get_mcq_fields(description, question, choices, mcq_format, use_answer_prefix),
         **get_other_fields(entry),
     }
 
@@ -110,6 +158,12 @@ def write_data_to_file(args):
         load_dataset(f"CohereLabs/include-{args.subset}-44", lang)[args.split]
         for lang in args.languages
     ]
+
+    few_shot_examples = {}
+    if args.num_few_shot_examples > 0:
+        few_shot_examples = construct_few_shot_examples(
+            args.num_few_shot_examples, args.languages
+        )
     data_dir = Path(__file__).absolute().parent
     output_file = data_dir / f"{args.split}.jsonl"
     with open(output_file, "wt", encoding="utf-8") as fout:
@@ -117,7 +171,9 @@ def write_data_to_file(args):
             for entry in tqdm(
                 dataset, desc=f"Preparing {lang} dataset ({args.subset} subset)"
             ):
-                entry = format_entry(entry, args, lang)
+                entry = format_entry(
+                    entry, args, lang, few_shot_examples.get(lang, None)
+                )
                 json.dump(entry, fout, ensure_ascii=False)
                 fout.write("\n")
 
@@ -134,7 +190,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--split",
         default="test",
-        choices=("validation", "test"),
+        choices=("test",),
         help="Dataset split to process.",
     )
     parser.add_argument(
@@ -165,6 +221,13 @@ if __name__ == "__main__":
         default=False,
         action="store_true",
         help="Use in-language prompts.",  # Default: English Prompts, which provide the prompt instructions in English.
+    )
+    parser.add_argument(
+        "--num_few_shot_examples",
+        type=int,
+        default=0,
+        choices=range(6),
+        help="Number of few-shot examples to use.",
     )
 
     args = parser.parse_args()
