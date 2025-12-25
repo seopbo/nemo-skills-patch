@@ -179,7 +179,24 @@ class GenerateSolutionsConfig:
     #     - Set an ExampleTool server-only arg:
     #         ++tool_overrides.ExampleTool.foo_argument='[TEST] '
     tool_overrides: dict | None = field(default_factory=dict)
-    # Schema overrides for tool definitions (optional)
+    #
+    #   Schema overrides allow customizing tool schemas shown to the model.
+    #   Dict keyed by provider class name (like tool_overrides), then tool name.
+    #   Format: ProviderClassName -> tool_name -> (name, description, parameters)
+    #
+    #   Example YAML configuration (config.yaml):
+    #     schema_overrides:
+    #       PythonTool:
+    #         stateful_python_code_exec:
+    #           name: "python_executor"
+    #           description: "Evaluate Python code interactively"
+    #           parameters:
+    #             code:
+    #               name: "script"
+    #               description: "Python code to execute"
+    #
+    #   To use this config with Hydra, launch your script with:
+    #      --config-path /path/to/configs --config-name config
     schema_overrides: dict | None = field(default_factory=dict)
 
     # if True, will move full generation to _full_generation key and keep cfg.generation_key without thinking tokens

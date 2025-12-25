@@ -1,4 +1,4 @@
-# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,20 +12,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""
-todo: We are working on providing the data files that are necessary to run IOI25 evaluation.
-"""
-
 # settings that define how evaluation should be done by default (all can be changed from cmdline)
-GENERATION_ARGS = "++prompt_config=generic/default ++eval_type=ioi"
+EVAL_SPLIT = "default"
 DATASET_GROUP = "code"
-METRICS_TYPE = "ioi"
-
-# environment variables required by this benchmark
-SANDBOX_ENV_VARS = [
-    "UWSGI_PROCESSES=1024",
-    "UWSGI_CPU_AFFINITY=8",
-    "UWSGI_CHEAPER=1023",
-    "NUM_WORKERS=1",
-    "STATEFUL_SANDBOX=0",
-]
+METRICS_TYPE = "swe-bench"
+# evaluation is fused with generation for efficiency
+GENERATION_MODULE = "nemo_skills.inference.eval.swebench"
+GENERATION_ARGS = "++eval_harness_repo=https://github.com/wasiahmad/SWE-rebench.git "
