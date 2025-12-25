@@ -179,6 +179,8 @@ class GenerateSolutionsConfig:
     #     - Set an ExampleTool server-only arg:
     #         ++tool_overrides.ExampleTool.foo_argument='[TEST] '
     tool_overrides: dict | None = field(default_factory=dict)
+    # Schema overrides for tool definitions (optional)
+    schema_overrides: dict | None = field(default_factory=dict)
 
     # if True, will move full generation to _full_generation key and keep cfg.generation_key without thinking tokens
     # IMPORTANT: do not set this for non-reasoning models as it will make the generations empty!
@@ -189,12 +191,11 @@ class GenerateSolutionsConfig:
     enable_litellm_cache: bool = False
 
     # List of content types to drop from messages (e.g., base64 audio) to keep output files smaller
-    drop_content_types: list[str] = field(default_factory=lambda: ["audio_url"])
+    drop_content_types: list[str] = field(default_factory=lambda: ["audio_url", "input_audio"])
 
     # Audio processing configuration (EXPERIMENTAL)
-    # Set to enable audio file preprocessing (file->base64 conversion, chunking for long audio)
-    # Example: ++audio.data_dir=/path/to/audio ++audio.enable_chunking=true
-    audio: AudioProcessorConfig | None = None
+    # audio_format: "audio_url" (vLLM/Qwen) or "input_audio" (OpenAI/NVIDIA API/Gemini)
+    audio_format: str = "audio_url"
 
     # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
     eval_type: str | None = None  # "lean4-proof", "math", etc.
@@ -398,36 +399,33 @@ class GenerationTask:
                 **self.cfg.server,
                 tool_modules=self.cfg.tool_modules,
                 tool_overrides=self.cfg.tool_overrides,
+                schema_overrides=self.cfg.schema_overrides,
                 tokenizer=self.tokenizer,
                 additional_config={"sandbox": self.cfg.sandbox},
             )
         else:
             llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
 
+
         # Audio wrapper (preprocesses messages before they reach the model)
-        # Auto-enable for audio benchmarks on vLLM (eval_type=audio OR dataset_group=speechlm)
-        should_enable_audio = self.cfg.audio is not None or (
-            self.cfg.server.get("server_type", "").lower() == "vllm"
-            and (self.cfg.eval_type == "audio" or self.cfg.dataset_group == "speechlm")
-        )
-
+        # Auto-enable for audio benchmarks on vLLM or OpenAI-compatible APIs (eval_type=audio OR dataset_group=speechlm)
+        server_type = self.cfg.server.get("server_type", "").lower()
+        audio_supported_servers = {"vllm", "openai"}
+        is_audio_eval = self.cfg.eval_type == "audio" or self.cfg.dataset_group == "speechlm"
+        
+        should_enable_audio = server_type in audio_supported_servers and is_audio_eval
+        
         if should_enable_audio:
-            audio_supported_servers = {"vllm"}
-            server_type = self.cfg.server.get("server_type", "").lower()
-            if server_type not in audio_supported_servers:
-                raise ValueError(
-                    f"Audio processing is not supported for server_type='{server_type}'. "
-                    f"Supported server types: {audio_supported_servers}"
-                )
-
-            # Use provided config or create default
-            audio_config = self.cfg.audio if self.cfg.audio is not None else AudioProcessorConfig()
-
+            audio_config = AudioProcessorConfig(audio_format=self.cfg.audio_format)
             llm = AudioProcessor(
                 llm,
                 audio_config,
                 eval_config=dict(self.cfg.eval_config),
                 eval_type=self.cfg.eval_type,
+            )
+            LOG.info(
+                "AudioProcessor enabled: server_type=%s, eval_type=%s, dataset_group=%s, audio_format=%s",
+                server_type, self.cfg.eval_type, self.cfg.dataset_group, self.cfg.audio_format
             )
 
         if self.cfg.parallel_thinking.mode is not None:

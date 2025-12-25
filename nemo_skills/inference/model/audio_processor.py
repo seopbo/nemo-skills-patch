@@ -39,12 +39,16 @@ class AudioProcessorConfig:
         enable_chunking: Whether to chunk long audio files.
         chunk_task_types: If None, chunk all task types; if specified, only chunk these.
         chunk_threshold_sec: Audio duration threshold (in seconds) above which to chunk.
+        audio_format: Format for embedding audio in API requests:
+            - "audio_url": data URI format (for vLLM/Qwen): {"type": "audio_url", "audio_url": {"url": "data:..."}}
+            - "input_audio": OpenAI format (for NVIDIA API/Gemini): {"type": "input_audio", "input_audio": {"data": ..., "format": "wav"}}
     """
 
     data_dir: str = ""
     enable_chunking: bool = True
     chunk_task_types: list[str] | None = None
     chunk_threshold_sec: int = 30
+    audio_format: str = "audio_url"  # "audio_url" or "input_audio"
 
 
 def audio_file_to_base64(audio_file_path: str) -> str:
@@ -52,6 +56,24 @@ def audio_file_to_base64(audio_file_path: str) -> str:
     with open(audio_file_path, "rb") as audio_file:
         audio_content = audio_file.read()
         return base64.b64encode(audio_content).decode("utf-8")
+
+
+def make_audio_content_block(base64_audio: str, audio_format: str = "audio_url") -> dict:
+    """Create an audio content block in the specified format.
+    
+    Args:
+        base64_audio: Base64-encoded audio data
+        audio_format: Format to use - "audio_url" or "input_audio"
+        
+    Returns:
+        Audio content block dict for API request
+    """
+    if audio_format == "input_audio":
+        # OpenAI native format (works with NVIDIA API / Gemini / Azure)
+        return {"type": "input_audio", "input_audio": {"data": base64_audio, "format": "wav"}}
+    else:
+        # Data URI format (works with vLLM / Qwen)
+        return {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
 
 
 def load_audio_file(audio_file_path: str):
@@ -163,11 +185,16 @@ class AudioProcessor:
         else:
             self.data_dir = ""
 
+        LOG.info("AudioProcessor initialized: audio_format=%s, data_dir=%s", config.audio_format, self.data_dir)
+
         # Expose common model attributes for compatibility
         if hasattr(model, "model_name_or_path"):
             self.model_name_or_path = model.model_name_or_path
         if hasattr(model, "tokenizer"):
             self.tokenizer = model.tokenizer
+
+        # Avoid log spam: we only log the first few prepared prompts at INFO.
+        self._logged_prepared_prompts = 0
 
     async def generate_async(
         self,
@@ -198,6 +225,15 @@ class AudioProcessor:
 
             # Convert audio fields to base64 format
             messages = self._prepare_audio_messages(messages)
+            
+            # Log content block types (first 3 prompts only, never base64)
+            if self._logged_prepared_prompts < 3:
+                for msg in messages:
+                    if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                        types = [c.get("type") for c in msg["content"] if isinstance(c, dict)]
+                        LOG.info("AudioProcessor prepared user content blocks: %s", types)
+                        break
+                self._logged_prepared_prompts += 1
             prompt = messages
 
         return await self.model.generate_async(prompt=prompt, **kwargs)
@@ -235,17 +271,13 @@ class AudioProcessor:
                 audio = msg["audio"]
                 audio_path = os.path.join(self.data_dir, audio["path"])
                 base64_audio = audio_file_to_base64(audio_path)
-                audio_items.append(
-                    {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
-                )
+                audio_items.append(make_audio_content_block(base64_audio, self.config.audio_format))
                 del msg["audio"]
             elif "audios" in msg:
                 for audio in msg["audios"]:
                     audio_path = os.path.join(self.data_dir, audio["path"])
                     base64_audio = audio_file_to_base64(audio_path)
-                    audio_items.append(
-                        {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
-                    )
+                    audio_items.append(make_audio_content_block(base64_audio, self.config.audio_format))
                 del msg["audios"]
 
             # Audio items BEFORE text content (required for Qwen models)
@@ -335,7 +367,7 @@ class AudioProcessor:
 
                     # Add audio chunk at the beginning (before text)
                     msg_copy["content"] = [
-                        {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{chunk_base64}"}}
+                        make_audio_content_block(chunk_base64, self.config.audio_format)
                     ] + text_content
 
                     # Remove original audio fields

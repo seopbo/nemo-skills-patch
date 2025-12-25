@@ -48,7 +48,7 @@ class OpenAIModel(BaseModel):
         api_key = super()._get_api_key(api_key, api_key_env_var, base_url)
 
         if api_key is None:
-            if "api.nvidia.com" in base_url:
+            if "api.nvidia.com" in base_url or "inference-api.nvidia.com" in base_url:
                 api_key = os.getenv("NVIDIA_API_KEY")
                 if not api_key:
                     raise ValueError("NVIDIA_API_KEY is required for NVIDIA models and could not be found.")
