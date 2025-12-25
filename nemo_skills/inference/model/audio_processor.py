@@ -60,11 +60,11 @@ def audio_file_to_base64(audio_file_path: str) -> str:
 
 def make_audio_content_block(base64_audio: str, audio_format: str = "audio_url") -> dict:
     """Create an audio content block in the specified format.
-    
+
     Args:
         base64_audio: Base64-encoded audio data
         audio_format: Format to use - "audio_url" or "input_audio"
-        
+
     Returns:
         Audio content block dict for API request
     """
@@ -225,7 +225,7 @@ class AudioProcessor:
 
             # Convert audio fields to base64 format
             messages = self._prepare_audio_messages(messages)
-            
+
             # Log content block types (first 3 prompts only, never base64)
             if self._logged_prepared_prompts < 3:
                 for msg in messages:

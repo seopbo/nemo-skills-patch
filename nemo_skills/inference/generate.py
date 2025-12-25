@@ -406,15 +406,14 @@ class GenerationTask:
         else:
             llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
 
-
         # Audio wrapper (preprocesses messages before they reach the model)
         # Auto-enable for audio benchmarks on vLLM or OpenAI-compatible APIs (eval_type=audio OR dataset_group=speechlm)
         server_type = self.cfg.server.get("server_type", "").lower()
         audio_supported_servers = {"vllm", "openai"}
         is_audio_eval = self.cfg.eval_type == "audio" or self.cfg.dataset_group == "speechlm"
-        
+
         should_enable_audio = server_type in audio_supported_servers and is_audio_eval
-        
+
         if should_enable_audio:
             audio_config = AudioProcessorConfig(audio_format=self.cfg.audio_format)
             llm = AudioProcessor(
@@ -425,7 +424,10 @@ class GenerationTask:
             )
             LOG.info(
                 "AudioProcessor enabled: server_type=%s, eval_type=%s, dataset_group=%s, audio_format=%s",
-                server_type, self.cfg.eval_type, self.cfg.dataset_group, self.cfg.audio_format
+                server_type,
+                self.cfg.eval_type,
+                self.cfg.dataset_group,
+                self.cfg.audio_format,
             )
 
         if self.cfg.parallel_thinking.mode is not None:
