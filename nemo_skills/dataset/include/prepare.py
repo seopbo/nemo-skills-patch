@@ -141,10 +141,9 @@ def format_entry(entry, args, language, few_shot_examples):
     category = (entry.get(args.category, "") or "").replace(" ", "_")
 
     mcq_format = get_mcq_format(language, il_prompts=args.il_prompts)
-    # description = mcq_format.task.format(
-    #     subject=subject.lower(), answer_placeholder=ANSWER_PLACEHOLDER
-    # )
-    description = 'The following are multiple choice questions (with answers) about {subject}.'.format(subject=subject.lower())
+    description = mcq_format.task.format(
+        subject=subject.lower(), answer_placeholder=ANSWER_PLACEHOLDER
+    )
     expected_answer = digit_to_letter(answer)  # Convert from [0 to 3] to [A to D]
 
     # For CoT, we will use the answer prefix
