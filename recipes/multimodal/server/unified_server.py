@@ -508,45 +508,50 @@ def create_app(
             import os
             from datetime import datetime
 
-            save_dir = os.environ.get(
-                "AUDIO_SAVE_DIR", "/lustre/fsw/portfolios/llmservice/users/vmendelev/tmp/voicebench_test"
-            )
-            os.makedirs(save_dir, exist_ok=True)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            base_filename = f"response_{timestamp}_{response_id}"
-
+            save_dir = os.environ.get("AUDIO_SAVE_DIR", "")
+            if save_dir:
+                try:
+                    os.makedirs(save_dir, exist_ok=True)
+                except PermissionError:
+                    save_dir = ""  # Fall through to skip saving
             saved_audio_path = None
             saved_json_path = None
 
-            # Save JSON with text and debug info
-            try:
-                saved_json_path = os.path.join(save_dir, f"{base_filename}.json")
-                json_output = {
-                    "response_id": response_id,
-                    "timestamp": timestamp,
-                    "text": message_content,
-                    "debug_info": result.debug_info,
-                    "generation_time_ms": result.generation_time_ms,
-                    "num_tokens_generated": result.num_tokens_generated,
-                }
-                with open(saved_json_path, "w") as f:
-                    json_lib.dump(json_output, f, indent=2)
-                print(f"[Server] JSON saved to: {saved_json_path}")
-            except Exception as e:
-                print(f"[Server] Warning: Failed to save JSON: {e}")
+            # Save outputs if AUDIO_SAVE_DIR is set and writable
+            if save_dir:
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                base_filename = f"response_{timestamp}_{response_id}"
+
+                # Save JSON with text and debug info
+                try:
+                    saved_json_path = os.path.join(save_dir, f"{base_filename}.json")
+                    json_output = {
+                        "response_id": response_id,
+                        "timestamp": timestamp,
+                        "text": message_content,
+                        "debug_info": result.debug_info,
+                        "generation_time_ms": result.generation_time_ms,
+                        "num_tokens_generated": result.num_tokens_generated,
+                    }
+                    with open(saved_json_path, "w") as f:
+                        json_lib.dump(json_output, f, indent=2)
+                    print(f"[Server] JSON saved to: {saved_json_path}")
+                except Exception as e:
+                    print(f"[Server] Warning: Failed to save JSON: {e}")
+
+                # Save audio file if available
+                if result.audio_bytes:
+                    try:
+                        saved_audio_path = os.path.join(save_dir, f"{base_filename}.wav")
+                        with open(saved_audio_path, "wb") as f:
+                            f.write(result.audio_bytes)
+                        print(f"[Server] Audio saved to: {saved_audio_path} ({len(result.audio_bytes)} bytes)")
+                    except Exception as e:
+                        print(f"[Server] Warning: Failed to save audio: {e}")
 
             # Include audio output if available (base64 encoded)
             audio_output = None
             if result.audio_bytes:
-                # Save audio file
-                try:
-                    saved_audio_path = os.path.join(save_dir, f"{base_filename}.wav")
-                    with open(saved_audio_path, "wb") as f:
-                        f.write(result.audio_bytes)
-                    print(f"[Server] Audio saved to: {saved_audio_path} ({len(result.audio_bytes)} bytes)")
-                except Exception as e:
-                    print(f"[Server] Warning: Failed to save audio: {e}")
-
                 audio_output = {
                     "data": base64.b64encode(result.audio_bytes).decode("utf-8"),
                     "format": result.audio_format or "wav",
@@ -621,7 +626,7 @@ def main():
     parser.add_argument(
         "--backend",
         default=BACKEND_TYPE,
-        choices=["salm", "tts", "s2s", "s2s_incremental", "s2s_session"],
+        choices=["salm", "magpie_tts", "s2s", "s2s_incremental", "s2s_session"],
         help="Backend type to use",
     )
     parser.add_argument("--model", default=MODEL_PATH, help="Path to model")

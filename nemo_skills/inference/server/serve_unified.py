@@ -30,13 +30,13 @@ Usage via NeMo-Skills:
         --server_entrypoint "-m nemo_skills.inference.server.serve_unified" \\
         --server_args "--backend salm"
 
-    # TTS backend (text-to-speech)
+    # MagpieTTS backend (text-to-speech with RTF metrics)
     ns eval \\
         --server_type vllm \\
         --server_gpus 1 \\
         --model /path/to/tts_model \\
         --server_entrypoint "-m nemo_skills.inference.server.serve_unified" \\
-        --server_args "--backend tts --codec_model /path/to/codec"
+        --server_args "--backend magpie_tts --codec_model /path/to/codec"
 
     # S2S backend (speech-to-speech)
     ns eval \\
@@ -138,8 +138,8 @@ def main():
     parser.add_argument(
         "--backend",
         default="salm",
-        choices=["salm", "tts", "s2s", "s2s_incremental", "s2s_session"],
-        help="Backend type: salm (speech-augmented LM), tts (text-to-speech), s2s (speech-to-speech offline), s2s_incremental (frame-by-frame processing), s2s_session (session-aware multi-turn)",
+        choices=["salm", "magpie_tts", "s2s", "s2s_incremental", "s2s_session"],
+        help="Backend type: salm (speech-augmented LM), magpie_tts (MagpieTTS with RTF metrics), s2s (speech-to-speech offline), s2s_incremental (frame-by-frame processing), s2s_session (session-aware multi-turn)",
     )
 
     # Backend-specific model paths
@@ -170,7 +170,9 @@ def main():
         "--decoder_only_model", action="store_true", help="Use decoder-only model architecture (TTS backend)"
     )
     parser.add_argument("--use_local_transformer", action="store_true", help="Use local transformer (TTS backend)")
-    parser.add_argument("--top_k", type=int, default=None, help="Top-k sampling (TTS backend)")
+    parser.add_argument("--top_k", type=int, default=80, help="Top-k sampling (TTS backend)")
+    parser.add_argument("--use_cfg", action="store_true", help="Enable classifier-free guidance (TTS backend)")
+    parser.add_argument("--cfg_scale", type=float, default=2.5, help="CFG scale factor (TTS backend)")
 
     # Environment setup
     parser.add_argument("--code_path", default=None, help="Path to NeMo source code to add to PYTHONPATH")
@@ -288,12 +290,13 @@ def main():
     if args.prompt_format:
         extra_config["prompt_format"] = args.prompt_format
 
-    if args.backend == "tts":
+    if args.backend == "magpie_tts":
         extra_config["decoder_only_model"] = args.decoder_only_model
         extra_config["phoneme_input_type"] = args.phoneme_input_type
         extra_config["use_local_transformer"] = args.use_local_transformer
-        if args.top_k:
-            extra_config["top_k"] = args.top_k
+        extra_config["top_k"] = args.top_k
+        extra_config["use_cfg"] = args.use_cfg
+        extra_config["cfg_scale"] = args.cfg_scale
 
     # S2S backend options
     if args.backend in ("s2s", "s2s_incremental", "s2s_session"):
@@ -340,6 +343,10 @@ def main():
     print(f"  Batch Timeout: {args.batch_timeout}s")
     print(f"  Device: {args.device}")
     print(f"  Dtype: {args.dtype}")
+    if args.backend == "magpie_tts":
+        print(f"  Top-k: {args.top_k}")
+        print(f"  CFG: {args.use_cfg} (scale: {args.cfg_scale})")
+        print(f"  Local Transformer: {args.use_local_transformer}")
     if args.backend in ("s2s_incremental", "s2s_session"):
         if args.config_path:
             print(f"  Config Path: {args.config_path}")
