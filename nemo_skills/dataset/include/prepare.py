@@ -102,7 +102,7 @@ def normalize_entry_field(entry, key):
     return (entry.get(key, "") or "").replace(" ", "_")
 
 
-def get_mcq_fields(description, question, choices, mcq_format):
+def get_mcq_fields(description, question, choices, mcq_format, answer_prefix):
     options_dict = {digit_to_letter(i): option for i, option in enumerate(choices)}
     options_text = "\n".join(
         f"{letter}. {option}" for letter, option in options_dict.items()
@@ -114,7 +114,7 @@ def get_mcq_fields(description, question, choices, mcq_format):
             question,
             mcq_format.opt_label,
             options_text,
-            mcq_format.answer_prefix,
+            answer_prefix,
         ]
     )
     return {"question": question, "options": options_text, **options_dict}
@@ -150,10 +150,16 @@ def format_entry(entry, args, language, few_shot_examples):
         subject=subject.lower(), answer_placeholder=ANSWER_PLACEHOLDER.format("X")
     )
 
+    # For CoT, we will use the answer prefix stored in the mcq_format
+    # e.g. "Answer: Let's think step by step."
+    answer_prefix = mcq_format.answer_prefix
+
     if len(few_shot_examples) > 0:
         shots = retrieve_few_shot_examples(
             few_shot_examples, language, subject, args.num_few_shot_examples
         )
+        # For few-shot examples, we will use the answer prefix "The answer is"
+        answer_prefix="The answer is "
         for shot in shots:
             q = shot[Schema.QUESTION]
             a = digit_to_letter(shot[Schema.ANSWER])
@@ -177,7 +183,7 @@ def format_entry(entry, args, language, few_shot_examples):
         "extract_regex": EXTRACT_REGEX,
         "subset_for_metrics": language,
         "category": category,
-        **get_mcq_fields(description, question, choices, mcq_format),
+        **get_mcq_fields(description, question, choices, mcq_format, answer_prefix),
         **get_other_fields(entry),
     }
 
