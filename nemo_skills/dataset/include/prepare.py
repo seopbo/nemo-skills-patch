@@ -48,7 +48,7 @@ class Schema:
     CHOICES: str = "choices"  # `choices` field is available only for lite subset
 
 
-def construct_few_shot_examples(languages, num_few_shot_examples):
+def construct_few_shot_examples(languages):
     # we will use validation set for few-shot examples
     datasets = [
         load_dataset(f"CohereLabs/include-base-44", lang)["validation"]
@@ -59,10 +59,7 @@ def construct_few_shot_examples(languages, num_few_shot_examples):
         subject_dict = defaultdict(list)
         for entry in dataset:
             subject_dict[entry[Schema.SUBJECT]].append(entry)
-        few_shot_examples[lang] = {
-            subject: subject_dict[subject][:num_few_shot_examples]
-            for subject in subject_dict
-        }
+        few_shot_examples[lang] = subject_dict
     return few_shot_examples
 
 
@@ -77,7 +74,9 @@ def retrieve_few_shot_examples(
 
     # Prefer the subject-specific few-shot examples
     if subject in few_shot_examples[language]:
-        retrieved_examples.extend(few_shot_examples[language][subject])
+        retrieved_examples.extend(
+            few_shot_examples[language][subject][:num_few_shot_examples]
+        )
 
     # If we still need more examples, use the other subjects
     if len(retrieved_examples) < num_few_shot_examples:
@@ -87,6 +86,11 @@ def retrieve_few_shot_examples(
 
             if len(retrieved_examples) >= num_few_shot_examples:
                 break
+
+    if len(retrieved_examples) < num_few_shot_examples:
+        print(
+            f"Warning: Only {len(retrieved_examples)} few-shot examples found for {subject} in {language}"
+        )
     return retrieved_examples
 
 
@@ -94,7 +98,11 @@ def digit_to_letter(digit):
     return chr(ord("A") + int(digit))
 
 
-def get_mcq_fields(description, question, choices, mcq_format, use_answer_prefix=True):
+def normalize_entry_field(entry, key):
+    return (entry.get(key, "") or "").replace(" ", "_")
+
+
+def get_mcq_fields(description, question, choices, mcq_format):
     options_dict = {digit_to_letter(i): option for i, option in enumerate(choices)}
     options_text = "\n".join(
         f"{letter}. {option}" for letter, option in options_dict.items()
@@ -106,11 +114,7 @@ def get_mcq_fields(description, question, choices, mcq_format, use_answer_prefix
             question,
             mcq_format.opt_label,
             options_text,
-            (
-                mcq_format.answer_prefix
-                if use_answer_prefix
-                else ANSWER_PLACEHOLDER.replace("(X)", "")
-            ),
+            mcq_format.answer_prefix,
         ]
     )
     return {"question": question, "options": options_text, **options_dict}
@@ -118,7 +122,7 @@ def get_mcq_fields(description, question, choices, mcq_format, use_answer_prefix
 
 def get_other_fields(entry):
     return {
-        k: (entry.get(k, "") or "").replace(" ", "_")
+        k: normalize_entry_field(entry, k)
         for k in [
             Schema.COUNTRY,
             Schema.REGIONAL_FEATURE,
@@ -138,19 +142,15 @@ def format_entry(entry, args, language, few_shot_examples):
     question = entry[Schema.QUESTION]
     subject = entry[Schema.SUBJECT]
     answer = entry[Schema.ANSWER]  # from 0 to 3
-    category = (entry.get(args.category, "") or "").replace(" ", "_")
+    expected_answer = digit_to_letter(answer)  # Convert from [0 to 3] to [A to D]
+    category = normalize_entry_field(entry, args.category)
 
     mcq_format = get_mcq_format(language, il_prompts=args.il_prompts)
     description = mcq_format.task.format(
-        subject=subject.lower(), answer_placeholder=ANSWER_PLACEHOLDER
+        subject=subject.lower(), answer_placeholder=ANSWER_PLACEHOLDER.format("X")
     )
-    expected_answer = digit_to_letter(answer)  # Convert from [0 to 3] to [A to D]
-
-    # For CoT, we will use the answer prefix
-    use_answer_prefix = True
 
     if len(few_shot_examples) > 0:
-        use_answer_prefix = False
         shots = retrieve_few_shot_examples(
             few_shot_examples, language, subject, args.num_few_shot_examples
         )
@@ -166,7 +166,7 @@ def format_entry(entry, args, language, few_shot_examples):
                     q,
                     mcq_format.opt_label,
                     options_text,
-                    ANSWER_PLACEHOLDER.replace("X", a),
+                    ANSWER_PLACEHOLDER.format(a),
                 ]
             )
             description += f"\n{few_shot_example_text}"
@@ -177,7 +177,7 @@ def format_entry(entry, args, language, few_shot_examples):
         "extract_regex": EXTRACT_REGEX,
         "subset_for_metrics": language,
         "category": category,
-        **get_mcq_fields(description, question, choices, mcq_format, use_answer_prefix),
+        **get_mcq_fields(description, question, choices, mcq_format),
         **get_other_fields(entry),
     }
 
@@ -190,9 +190,7 @@ def write_data_to_file(args):
 
     few_shot_examples = {}
     if args.num_few_shot_examples > 0:
-        few_shot_examples = construct_few_shot_examples(
-            args.languages, args.num_few_shot_examples
-        )
+        few_shot_examples = construct_few_shot_examples(args.languages)
     data_dir = Path(__file__).absolute().parent
     output_file = data_dir / f"{args.split}.jsonl"
     with open(output_file, "wt", encoding="utf-8") as fout:
@@ -243,12 +241,18 @@ if __name__ == "__main__":
         ),
         help="Category for aggregation.",
     )
+
+    # In-Language (IL) Prompts present the prompt instructions in the same language as the sample
+    # Default: English Prompts, which provide the prompt instructions in English.
     parser.add_argument(
-        "--il_prompts",  # In-Language (IL) Prompts, which present the prompt instructions in the same language as the sample
+        "--il_prompts",
         default=False,
         action="store_true",
-        help="Use in-language prompts.",  # Default: English Prompts, which provide the prompt instructions in English.
+        help="Use in-language prompts.",
     )
+
+    # Number of few-shot examples to use.
+    # Default: 0, which means no few-shot examples are used.
     parser.add_argument(
         "--num_few_shot_examples",
         type=int,
