@@ -29,8 +29,13 @@ def run_scoring(
     asr_model_name: str = "nvidia/parakeet-tdt-1.1b",
     language: str = "en",
     with_utmosv2: bool = False,
+    benchmark: str = None,
 ) -> None:
-    """Run NeMo scoring on all benchmarks in results_dir."""
+    """Run NeMo scoring on benchmarks in results_dir.
+
+    Args:
+        benchmark: If provided, score only this benchmark. Otherwise score all.
+    """
     benchmarks_dir = os.path.join(results_dir, "eval-results")
     if not os.path.exists(benchmarks_dir):
         benchmarks_dir = results_dir
@@ -42,16 +47,23 @@ def run_scoring(
         "with_utmosv2": with_utmosv2,
     }
 
-    for benchmark in os.listdir(benchmarks_dir):
-        benchmark_dir = os.path.join(benchmarks_dir, benchmark)
+    # Determine which benchmarks to score
+    if benchmark:
+        benchmarks_to_score = [benchmark]
+    else:
+        benchmarks_to_score = os.listdir(benchmarks_dir)
+
+    for bench in benchmarks_to_score:
+        benchmark_dir = os.path.join(benchmarks_dir, bench)
         if not os.path.isdir(benchmark_dir):
             continue
 
         output_jsonl = os.path.join(benchmark_dir, "output.jsonl")
         if not os.path.exists(output_jsonl):
+            print(f"Skipping {bench}: output.jsonl not found")
             continue
 
-        print(f"\nScoring: {benchmark}")
+        print(f"\nScoring: {bench}")
         metrics = score_benchmark(output_jsonl, scoring_cfg)
 
         # Save metrics.json
@@ -154,6 +166,7 @@ if __name__ == "__main__":
     parser.add_argument("--language", default="en")
     parser.add_argument("--with_utmosv2", action="store_true")
     parser.add_argument("--aggregation_only", action="store_true")
+    parser.add_argument("--benchmark", default=None, help="Score only this benchmark (e.g. nv_tts.libritts_seen)")
     args = parser.parse_args()
 
     if args.aggregation_only:
@@ -165,4 +178,5 @@ if __name__ == "__main__":
             asr_model_name=args.asr_model_name,
             language=args.language,
             with_utmosv2=args.with_utmosv2,
+            benchmark=args.benchmark,
         )
