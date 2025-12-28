@@ -71,6 +71,7 @@ def run_generation(cfg: dict, expname: str):
         server_args=server_args,
         data_dir=gen["data_dir"],
         num_chunks=gen["num_chunks"],
+        gpus_per_node=gen.get("gpus_per_node", 1),
         partition=cfg["partition"],
         expname=expname,
         auto_summarize_results=False,

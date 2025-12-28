@@ -5,7 +5,7 @@ cluster: eos
 container: /lustre/fsw/llmservice_nemo_speechlm/users/vmendelev/containters/nemo-25.11.sqsh
 partition: batch
 mount_paths: /lustre:/lustre
-output_dir: /lustre/fsw/llmservice_nemo_speechlm/users/vmendelev/tmp/nv_tts_eval_grpo_small_step1100_full
+output_dir: /lustre/fsw/llmservice_nemo_speechlm/users/vmendelev/tmp/nv_tts_eval_grpo_small_step1100_full_8c_a3
 
 # NeMo code path
 nemo_code_path: /lustre/fsw/llmservice_nemo_speechlm/users/vmendelev/experimenta/tts_eval/NeMo
@@ -27,7 +27,8 @@ generation:
     --hparams_file /lustre/fsw/llmservice_nemo_speechlm/users/vmendelev/experimenta/tts_eval/small_hparams.yaml
     --checkpoint_file /lustre/fsw/llmservice_nemo_speechlm/users/agorodetskii/checkpoints/N2512_English_TTSArena/grpo_small_from_ft_step1100.ckpt
   data_dir: /lustre/fsw/llmservice_nemo_speechlm/users/vmendelev/tmp/data_dir
-  num_chunks: 2
+  num_chunks: 8
+  gpus_per_node: 8
   extra_args: ++server.server_type=vllm_multimodal
 
 # Scoring settings

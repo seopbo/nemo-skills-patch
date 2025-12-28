@@ -341,8 +341,15 @@ def get_generation_cmd(
         cmd += "++wait_for_sandbox=true "
 
     if chunk_id is not None:
-        cmd += f" ++num_chunks={num_chunks} ++chunk_id={chunk_id} "
-        output_file = get_chunked_rs_filename(output_dir, random_seed=random_seed, chunk_id=chunk_id)
+        # Check if chunk_id is a shell expression (e.g., "$((0 + $SLURM_LOCALID))")
+        is_shell_expr = isinstance(chunk_id, str) and "$" in str(chunk_id)
+
+        if is_shell_expr:
+            # For shell expressions, use double quotes so shell expands the expression
+            cmd += f' ++num_chunks={num_chunks} "++chunk_id={chunk_id}" '
+        else:
+            cmd += f" ++num_chunks={num_chunks} ++chunk_id={chunk_id} "
+
         donefiles = []
         # we are always waiting for all chunks in num_chunks, no matter chunk_ids in
         # the current run (as we don't want to merge partial jobs)
@@ -351,10 +358,23 @@ def get_generation_cmd(
             donefile = f"{filename}.done"
             donefiles.append(donefile)
 
-        if job_end_cmd:
-            job_end_cmd += f" && touch {donefiles[chunk_id]} "
+        if is_shell_expr:
+            # For shell expression, compute the donefile path at runtime
+            # Get the base pattern with _chunk_0 and replace with shell expression
+            base_donefile = donefiles[0]  # e.g., /path/output_chunk_0.jsonl.done
+            # Replace "_chunk_0.jsonl" with "_chunk_$((expr)).jsonl" where expr is expanded by shell
+            # Extract the expression part (e.g., "0 + $SLURM_LOCALID" from "$((0 + $SLURM_LOCALID))")
+            donefile_pattern = base_donefile.replace("_chunk_0.jsonl", f"_chunk_{chunk_id}.jsonl")
+            if job_end_cmd:
+                job_end_cmd += f' && touch "{donefile_pattern}" '
+            else:
+                job_end_cmd = f'touch "{donefile_pattern}" '
         else:
-            job_end_cmd = f"touch {donefiles[chunk_id]} "
+            output_file = get_chunked_rs_filename(output_dir, random_seed=random_seed, chunk_id=chunk_id)
+            if job_end_cmd:
+                job_end_cmd += f" && touch {donefiles[chunk_id]} "
+            else:
+                job_end_cmd = f"touch {donefiles[chunk_id]} "
 
         # getting file name as if there is no chunking since that's where we want to merge
         merged_output_file = get_chunked_rs_filename(output_dir=output_dir, random_seed=random_seed)
@@ -424,6 +444,7 @@ def configure_client(
     get_random_port: bool,
     extra_arguments: str,
     server_container: str | None = None,
+    gpus_per_node: int = 1,
 ):
     """
     Utility function to configure a client for the model inference server.
@@ -439,6 +460,7 @@ def configure_client(
         get_random_port: Whether to get a random port for the server.
         extra_arguments: Extra arguments to pass to the command.
         server_container: Container to use for the server.
+        gpus_per_node: Number of GPUs per node for multi-instance mode.
 
     Returns:
         A tuple containing:
@@ -467,10 +489,17 @@ def configure_client(
             server_config["container"] = server_container
         # Only add server_type if user didn't specify it (allows vllm_multimodal override)
         server_type_arg = "" if user_specified_server_type else f"++server.server_type={server_type} "
-        extra_arguments = (
-            f"{extra_arguments} {server_type_arg}++server.host=127.0.0.1 "
-            f"++server.port={server_port} ++server.model={model} "
-        )
+        if gpus_per_node > 1:
+            # Multi-instance mode: port is computed at runtime based on SLURM_LOCALID
+            extra_arguments = (
+                f"{extra_arguments} {server_type_arg}++server.host=127.0.0.1 "
+                f'"++server.port=$(({server_port} + $SLURM_LOCALID))" ++server.model={model} '
+            )
+        else:
+            extra_arguments = (
+                f"{extra_arguments} {server_type_arg}++server.host=127.0.0.1 "
+                f"++server.port={server_port} ++server.model={model} "
+            )
     else:  # model is hosted elsewhere
         server_config = None
         # Only add server_type if user didn't specify it

@@ -290,8 +290,9 @@ def main():
     if args.debug:
         os.environ["DEBUG"] = "1"
 
-    # Set CUDA devices
-    os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in range(args.num_gpus))
+    # Set CUDA devices (only if not already set by the environment, e.g., SLURM)
+    if "CUDA_VISIBLE_DEVICES" not in os.environ:
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(str(i) for i in range(args.num_gpus))
 
     # Build extra config for backend-specific options
     extra_config = {}
