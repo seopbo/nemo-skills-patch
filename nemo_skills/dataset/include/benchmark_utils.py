@@ -13,9 +13,6 @@
 # limitations under the License.
 
 
-import os
-import subprocess
-from pathlib import Path
 from datasets import load_dataset
 from collections import defaultdict
 
@@ -38,11 +35,13 @@ class Schema:
     ]  # `option_{x}` fields are available only for base subset
     CHOICES: str = "choices"  # `choices` field is available only for lite subset
 
+
 def load_include_datasets(languages, subset, split):
     return [
         load_dataset(f"CohereLabs/include-{subset}-44", lang)[split]
         for lang in languages
     ]
+
 
 def load_few_shot_split(languages, few_shot_split="validation"):
     val_datasets = load_include_datasets(languages, "base", few_shot_split)
@@ -54,6 +53,7 @@ def load_few_shot_split(languages, few_shot_split="validation"):
         few_shot_examples[lang] = subject_dict
     return few_shot_examples
 
+
 def retrieve_few_shot_examples(few_shot_examples, language, subject, num_fewshot):
     retrieved_examples = []
 
@@ -63,9 +63,7 @@ def retrieve_few_shot_examples(few_shot_examples, language, subject, num_fewshot
 
     # Prefer the subject-specific few-shot examples
     if subject in few_shot_examples[language]:
-        retrieved_examples.extend(
-            few_shot_examples[language][subject][:num_fewshot]
-        )
+        retrieved_examples.extend(few_shot_examples[language][subject][:num_fewshot])
 
     # If we still need more examples, use the other subjects
     if len(retrieved_examples) < num_fewshot:
@@ -85,12 +83,15 @@ def retrieve_few_shot_examples(few_shot_examples, language, subject, num_fewshot
     return retrieved_examples
 
 
-
-QUESTION_TEMPLATE = "{question}\nA. {option_a}\nB. {option_b}\nC. {option_c}\nD. {option_d}\nAnswer: "
+QUESTION_TEMPLATE = (
+    "{question}\nA. {option_a}\nB. {option_b}\nC. {option_c}\nD. {option_d}\nAnswer: "
+)
 FEWSHOT_DELIMITER = "\n\n"
 ENG_COT_PREFIX = "Let's think step by step."
 ENG_ZERO_SHOT_DESCRIPTION = "The following is multiple-choice question about {subject}."
-ENG_FEWSHOT_DESCRIPTION = "The following are multiple-choice questions (with answers) about {subject}."
+ENG_FEWSHOT_DESCRIPTION = (
+    "The following are multiple-choice questions (with answers) about {subject}."
+)
 LATTER_REGEX = r"\b\(?\s*([ABCD])\s*\)?\.?\b"
 EXTRACT_REGEX = r"[\s\S]*" + LATTER_REGEX
 
@@ -138,7 +139,7 @@ DESCRIPTION_TEMPLATES = {
     "Ukrainian": "Нижче наведено запитання з кількома варіантами відповідей (з відповідями) про {subject}.",
     "Urdu": "ذیل میں {subject} کے بارے میں متعدد انتخابی سوالات (جوابات کے ساتھ) ہیں۔",
     "Uzbek": "Quyida {subject} boʻyicha koʻp tanlovli savollar (javoblari bilan) keltirilgan.",
-    "Vietnamese": "Sau đây là các câu hỏi trắc nghiệm (có đáp án) về {subject}."
+    "Vietnamese": "Sau đây là các câu hỏi trắc nghiệm (có đáp án) về {subject}.",
 }
 
 SUPPORTED_LANGUAGES = sorted(list(DESCRIPTION_TEMPLATES.keys()))
@@ -150,6 +151,7 @@ def digit_to_letter(digit):
 
 def normalize_entry_field(entry, key):
     return (entry.get(key, "") or "").replace(" ", "_")
+
 
 def copy_other_fields(entry):
     return {
@@ -164,13 +166,24 @@ def copy_other_fields(entry):
         ]
     }
 
-def get_mcq_fields(target_question, target_options, language, subject, il_prompts, num_fewshot, few_shot_examples):
-    target_options_dict = {digit_to_letter(i): option for i, option in enumerate(target_options)}
+
+def get_mcq_fields(
+    target_question,
+    target_options,
+    language,
+    subject,
+    il_prompts,
+    num_fewshot,
+    few_shot_examples,
+):
+    target_options_dict = {
+        digit_to_letter(i): option for i, option in enumerate(target_options)
+    }
     target_options_text = "\n".join(
         f"{letter}. {option}" for letter, option in target_options_dict.items()
     )
 
-    eng_prompt = (il_prompts == False)
+    eng_prompt = il_prompts == False
     if num_fewshot == 0:
         if eng_prompt:
             prompt = ENG_ZERO_SHOT_DESCRIPTION.format(subject=subject)
@@ -178,25 +191,29 @@ def get_mcq_fields(target_question, target_options, language, subject, il_prompt
             prompt = DESCRIPTION_TEMPLATES[language].format(subject=subject)
         prompt += FEWSHOT_DELIMITER
         prompt += QUESTION_TEMPLATE.format(
-            question=target_question, 
-            option_a=target_options_dict["A"], 
-            option_b=target_options_dict["B"], 
-            option_c=target_options_dict["C"], 
-            option_d=target_options_dict["D"]
+            question=target_question,
+            option_a=target_options_dict["A"],
+            option_b=target_options_dict["B"],
+            option_c=target_options_dict["C"],
+            option_d=target_options_dict["D"],
         )
         if eng_prompt:
             prompt += ENG_COT_PREFIX
     else:
-        shots = retrieve_few_shot_examples(few_shot_examples, language, subject, num_fewshot)
+        shots = retrieve_few_shot_examples(
+            few_shot_examples, language, subject, num_fewshot
+        )
         shot_answers = [digit_to_letter(shot[Schema.ANSWER]) for shot in shots]
         shots = [
             QUESTION_TEMPLATE.format(
-                question=shot[Schema.QUESTION], 
-                option_a=shot[Schema.OPTIONS[0]], 
-                option_b=shot[Schema.OPTIONS[1]], 
-                option_c=shot[Schema.OPTIONS[2]], 
-                option_d=shot[Schema.OPTIONS[3]]
-            ) + answer for shot, answer in zip(shots, shot_answers)
+                question=shot[Schema.QUESTION],
+                option_a=shot[Schema.OPTIONS[0]],
+                option_b=shot[Schema.OPTIONS[1]],
+                option_c=shot[Schema.OPTIONS[2]],
+                option_d=shot[Schema.OPTIONS[3]],
+            )
+            + answer
+            for shot, answer in zip(shots, shot_answers)
         ]
         if eng_prompt:
             prompt = ENG_FEWSHOT_DESCRIPTION.format(subject=subject)
@@ -206,10 +223,10 @@ def get_mcq_fields(target_question, target_options, language, subject, il_prompt
         prompt += FEWSHOT_DELIMITER.join(shots)
         prompt += FEWSHOT_DELIMITER
         prompt += QUESTION_TEMPLATE.format(
-            question=target_question, 
-            option_a=target_options_dict["A"], 
-            option_b=target_options_dict["B"], 
-            option_c=target_options_dict["C"], 
-            option_d=target_options_dict["D"]
+            question=target_question,
+            option_a=target_options_dict["A"],
+            option_b=target_options_dict["B"],
+            option_c=target_options_dict["C"],
+            option_d=target_options_dict["D"],
         )
     return {"question": prompt, "options": target_options_text, **target_options_dict}
