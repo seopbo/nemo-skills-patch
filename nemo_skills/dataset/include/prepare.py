@@ -14,189 +14,49 @@
 
 import argparse
 import json
-from collections import defaultdict
 from pathlib import Path
 
-from datasets import load_dataset
-from lang_libs import (
-    ANSWER_PLACEHOLDER,
-    EXTRACT_REGEX,
-    get_mcq_format,
-    supported_languages,
-)
+from benchmark_utils import (EXTRACT_REGEX, SUPPORTED_LANGUAGES, Schema,
+                             copy_other_fields, digit_to_letter,
+                             get_mcq_fields, load_few_shot_split,
+                             load_include_datasets, normalize_entry_field)
 from tqdm import tqdm
 
-SUPPORTED_LANGUAGES = supported_languages()
 
-
-# Dataset schema defined in Hugging Face datasets
-class Schema:
-    ANSWER: str = "answer"
-    LANGUAGE: str = "language"
-    DOMAIN: str = "domain"
-    QUESTION: str = "question"
-    SUBJECT: str = "subject"
-    COUNTRY: str = "country"
-    REGIONAL_FEATURE: str = "regional_feature"
-    LEVEL: str = "level"
-    OPTIONS: list[str] = [
-        "option_a",
-        "option_b",
-        "option_c",
-        "option_d",
-    ]  # `option_{x}` fields are available only for base subset
-    CHOICES: str = "choices"  # `choices` field is available only for lite subset
-
-
-def construct_few_shot_examples(languages):
-    # we will use validation set for few-shot examples
-    datasets = [
-        load_dataset(f"CohereLabs/include-base-44", lang)["validation"]
-        for lang in languages
-    ]
-    few_shot_examples = {}
-    for dataset, lang in zip(datasets, languages):
-        subject_dict = defaultdict(list)
-        for entry in dataset:
-            subject_dict[entry[Schema.SUBJECT]].append(entry)
-        few_shot_examples[lang] = subject_dict
-    return few_shot_examples
-
-
-def retrieve_few_shot_examples(
-    few_shot_examples, language, subject, num_few_shot_examples
+def format_entry(
+    entry, subset, language, il_prompts, category, num_fewshot, few_shot_examples
 ):
-    retrieved_examples = []
-
-    # If the language is not in the few-shot examples, return an empty list
-    if language not in few_shot_examples:
-        return retrieved_examples
-
-    # Prefer the subject-specific few-shot examples
-    if subject in few_shot_examples[language]:
-        retrieved_examples.extend(
-            few_shot_examples[language][subject][:num_few_shot_examples]
-        )
-
-    # If we still need more examples, use the other subjects
-    if len(retrieved_examples) < num_few_shot_examples:
-        for s in few_shot_examples[language]:
-            if s != subject:
-                retrieved_examples.append(few_shot_examples[language][s][0])
-
-            if len(retrieved_examples) >= num_few_shot_examples:
-                break
-
-    if len(retrieved_examples) < num_few_shot_examples:
-        print(
-            f"Warning: Only {len(retrieved_examples)} few-shot examples found for {subject} in {language}"
-        )
-    return retrieved_examples
-
-
-def digit_to_letter(digit):
-    return chr(ord("A") + int(digit))
-
-
-def normalize_entry_field(entry, key):
-    return (entry.get(key, "") or "").replace(" ", "_")
-
-
-def get_mcq_fields(description, question, choices, mcq_format, answer_prefix):
-    options_dict = {digit_to_letter(i): option for i, option in enumerate(choices)}
-    options_text = "\n".join(
-        f"{letter}. {option}" for letter, option in options_dict.items()
+    target_options = (
+        entry[Schema.CHOICES]
+        if subset == "lite"
+        else [entry[v] for v in Schema.OPTIONS]
     )
-    question = "\n".join(
-        [
-            description,
-            mcq_format.q_label,
-            question,
-            mcq_format.opt_label,
-            options_text,
-            answer_prefix,
-        ]
-    )
-    return {"question": question, "options": options_text, **options_dict}
-
-
-def get_other_fields(entry):
-    return {
-        k: normalize_entry_field(entry, k)
-        for k in [
-            Schema.COUNTRY,
-            Schema.REGIONAL_FEATURE,
-            Schema.LEVEL,
-            Schema.SUBJECT,
-            Schema.LANGUAGE,
-            Schema.DOMAIN,
-        ]
-    }
-
-
-def format_entry(entry, args, language, few_shot_examples):
-    if args.subset == "lite":
-        choices = entry[Schema.CHOICES]
-    else:
-        choices = [entry[v] for v in Schema.OPTIONS]
-    question = entry[Schema.QUESTION]
+    target_question = entry[Schema.QUESTION]
     subject = entry[Schema.SUBJECT]
-    answer = entry[Schema.ANSWER]  # from 0 to 3
-    expected_answer = digit_to_letter(answer)  # Convert from [0 to 3] to [A to D]
-    category = normalize_entry_field(entry, args.category)
-
-    mcq_format = get_mcq_format(language, il_prompts=args.il_prompts)
-    description = mcq_format.task.format(
-        subject=subject.lower(), answer_placeholder=ANSWER_PLACEHOLDER.format("X")
-    )
-
-    # For CoT, we will use the answer prefix stored in the mcq_format
-    # e.g. "Answer: Let's think step by step."
-    answer_prefix = mcq_format.answer_prefix
-
-    if len(few_shot_examples) > 0:
-        shots = retrieve_few_shot_examples(
-            few_shot_examples, language, subject, args.num_few_shot_examples
-        )
-        # For few-shot examples, we will use the answer prefix "The answer is"
-        answer_prefix="The answer is "
-        for shot in shots:
-            q = shot[Schema.QUESTION]
-            a = digit_to_letter(shot[Schema.ANSWER])
-            options_text = "\n".join(
-                f"{digit_to_letter(i)}. {shot[v]}" for i, v in enumerate(Schema.OPTIONS)
-            )
-            few_shot_example_text = "\n".join(
-                [
-                    mcq_format.q_label,
-                    q,
-                    mcq_format.opt_label,
-                    options_text,
-                    ANSWER_PLACEHOLDER.format(a),
-                ]
-            )
-            description += f"\n{few_shot_example_text}"
-
+    expected_answer = digit_to_letter(
+        entry[Schema.ANSWER]
+    )  # Convert from [0 to 3] to [A to D]
+    category = normalize_entry_field(entry, category)
     return {
         "expected_answer": expected_answer,
         "extract_from_boxed": False,
         "extract_regex": EXTRACT_REGEX,
         "subset_for_metrics": language,
         "category": category,
-        **get_mcq_fields(description, question, choices, mcq_format, answer_prefix),
-        **get_other_fields(entry),
+        **get_mcq_fields(
+            target_question,
+            target_options,
+            language,
+            subject,
+            il_prompts,
+            num_fewshot,
+            few_shot_examples,
+        ),
+        **copy_other_fields(entry),
     }
 
 
-def write_data_to_file(args):
-    datasets = [
-        load_dataset(f"CohereLabs/include-{args.subset}-44", lang)[args.split]
-        for lang in args.languages
-    ]
-
-    few_shot_examples = {}
-    if args.num_few_shot_examples > 0:
-        few_shot_examples = construct_few_shot_examples(args.languages)
+def write_data_to_file(args, datasets, few_shot_examples):
     data_dir = Path(__file__).absolute().parent
     output_file = data_dir / f"{args.split}.jsonl"
     with open(output_file, "wt", encoding="utf-8") as fout:
@@ -204,7 +64,15 @@ def write_data_to_file(args):
             for entry in tqdm(
                 dataset, desc=f"Preparing {lang} dataset ({args.subset} subset)"
             ):
-                entry = format_entry(entry, args, lang, few_shot_examples)
+                entry = format_entry(
+                    entry=entry,
+                    subset=args.subset,
+                    language=lang,
+                    il_prompts=args.il_prompts,
+                    category=args.category,
+                    num_fewshot=args.num_fewshot,
+                    few_shot_examples=few_shot_examples,
+                )
                 json.dump(entry, fout, ensure_ascii=False)
                 fout.write("\n")
 
@@ -213,7 +81,14 @@ def main(args):
     invalid = set(args.languages) - set(SUPPORTED_LANGUAGES)
     if invalid:
         raise ValueError(f"Unsupported languages: {invalid}")
-    write_data_to_file(args)
+
+    datasets = load_include_datasets(args.languages, args.subset, args.split)
+    few_shot_examples = {}
+    if args.num_fewshot > 0:
+        few_shot_examples = load_few_shot_split(args.languages)
+    write_data_to_file(
+        args=args, datasets=datasets, few_shot_examples=few_shot_examples
+    )
 
 
 if __name__ == "__main__":
@@ -260,7 +135,7 @@ if __name__ == "__main__":
     # Number of few-shot examples to use.
     # Default: 0, which means no few-shot examples are used.
     parser.add_argument(
-        "--num_few_shot_examples",
+        "--num_fewshot",
         type=int,
         default=0,
         choices=range(6),
