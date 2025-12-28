@@ -174,6 +174,15 @@ def main():
     parser.add_argument("--use_cfg", action="store_true", help="Enable classifier-free guidance (TTS backend)")
     parser.add_argument("--cfg_scale", type=float, default=2.5, help="CFG scale factor (TTS backend)")
 
+    # Checkpoint loading options (for magpie_tts backend - alternative to --model .nemo)
+    parser.add_argument("--hparams_file", default=None, help="Path to hparams.yaml (use with --checkpoint_file)")
+    parser.add_argument("--checkpoint_file", default=None, help="Path to .ckpt checkpoint (use with --hparams_file)")
+    parser.add_argument(
+        "--legacy_codebooks", action="store_true", help="Use legacy codebook indices for old checkpoints"
+    )
+    parser.add_argument("--legacy_text_conditioning", action="store_true", help="Use legacy text conditioning")
+    parser.add_argument("--hparams_from_wandb", action="store_true", help="hparams file was exported from wandb")
+
     # Environment setup
     parser.add_argument("--code_path", default=None, help="Path to NeMo source code to add to PYTHONPATH")
     parser.add_argument("--hack_path", default=None, help="Path to safetensors/torch.py patch file")
@@ -297,6 +306,17 @@ def main():
         extra_config["top_k"] = args.top_k
         extra_config["use_cfg"] = args.use_cfg
         extra_config["cfg_scale"] = args.cfg_scale
+        # Checkpoint loading options
+        if args.hparams_file:
+            extra_config["hparams_file"] = args.hparams_file
+        if args.checkpoint_file:
+            extra_config["checkpoint_file"] = args.checkpoint_file
+        if args.legacy_codebooks:
+            extra_config["legacy_codebooks"] = True
+        if args.legacy_text_conditioning:
+            extra_config["legacy_text_conditioning"] = True
+        if args.hparams_from_wandb:
+            extra_config["hparams_from_wandb"] = True
 
     # S2S backend options
     if args.backend in ("s2s", "s2s_incremental", "s2s_session"):
@@ -347,6 +367,13 @@ def main():
         print(f"  Top-k: {args.top_k}")
         print(f"  CFG: {args.use_cfg} (scale: {args.cfg_scale})")
         print(f"  Local Transformer: {args.use_local_transformer}")
+        if args.hparams_file and args.checkpoint_file:
+            print(f"  Hparams: {args.hparams_file}")
+            print(f"  Checkpoint: {args.checkpoint_file}")
+            if args.legacy_codebooks:
+                print("  Legacy Codebooks: True")
+            if args.legacy_text_conditioning:
+                print("  Legacy Text Conditioning: True")
     if args.backend in ("s2s_incremental", "s2s_session"):
         if args.config_path:
             print(f"  Config Path: {args.config_path}")

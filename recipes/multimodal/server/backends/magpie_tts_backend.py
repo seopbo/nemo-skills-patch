@@ -29,6 +29,12 @@ class MagpieTTSConfig(BackendConfig):
     max_decoder_steps: int = 440
     use_local_transformer: bool = False
     output_sample_rate: int = 22050
+    # Checkpoint loading options (alternative to model_path .nemo file)
+    hparams_file: Optional[str] = None
+    checkpoint_file: Optional[str] = None
+    legacy_codebooks: bool = False
+    legacy_text_conditioning: bool = False
+    hparams_from_wandb: bool = False
 
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "MagpieTTSConfig":
@@ -46,6 +52,11 @@ class MagpieTTSConfig(BackendConfig):
             "max_decoder_steps",
             "use_local_transformer",
             "output_sample_rate",
+            "hparams_file",
+            "checkpoint_file",
+            "legacy_codebooks",
+            "legacy_text_conditioning",
+            "hparams_from_wandb",
         }
         return cls(
             **{k: v for k, v in d.items() if k in known}, extra_config={k: v for k, v in d.items() if k not in known}
@@ -88,8 +99,24 @@ class MagpieTTSBackend(InferenceBackend):
         if not self.tts_config.codec_model_path:
             raise ValueError("codec_model_path required")
 
-        model_path = self.config.model_path
-        cfg = ModelLoadConfig(nemo_file=model_path, codecmodel_path=self.tts_config.codec_model_path)
+        # Support both checkpoint mode (hparams + ckpt) and nemo mode
+        has_ckpt_mode = self.tts_config.hparams_file and self.tts_config.checkpoint_file
+        if has_ckpt_mode:
+            cfg = ModelLoadConfig(
+                hparams_file=self.tts_config.hparams_file,
+                checkpoint_file=self.tts_config.checkpoint_file,
+                codecmodel_path=self.tts_config.codec_model_path,
+                legacy_codebooks=self.tts_config.legacy_codebooks,
+                legacy_text_conditioning=self.tts_config.legacy_text_conditioning,
+                hparams_from_wandb=self.tts_config.hparams_from_wandb,
+            )
+        else:
+            cfg = ModelLoadConfig(
+                nemo_file=self.config.model_path,
+                codecmodel_path=self.tts_config.codec_model_path,
+                legacy_codebooks=self.tts_config.legacy_codebooks,
+                legacy_text_conditioning=self.tts_config.legacy_text_conditioning,
+            )
         self._model, self._checkpoint_name = load_magpie_model(cfg, device=self.config.device)
 
         self._runner = MagpieInferenceRunner(
