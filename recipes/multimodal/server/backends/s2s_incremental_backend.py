@@ -92,6 +92,13 @@ class S2SIncrementalConfig(BackendConfig):
     # Per-frame alignment output
     output_frame_alignment: bool = False  # Whether to include per-frame alignment in debug output
 
+    # Response end detection (for session backend)
+    response_end_detection_mode: str = "audio_energy"  # "audio_energy" or "eos"
+    audio_energy_threshold: float = 0.01  # RMS threshold for audio energy detection
+    audio_energy_window_sec: float = 0.5  # Window size for audio energy calculation
+    max_response_duration_sec: float = 30.0  # Maximum response duration before forced stop
+    eos_detection_window: int = 10  # Consecutive PAD tokens to detect EOS
+
     @classmethod
     def from_dict(cls, d: Dict[str, Any]) -> "S2SIncrementalConfig":
         """Create config from dictionary."""
@@ -118,6 +125,11 @@ class S2SIncrementalConfig(BackendConfig):
             "save_session_artifacts",
             "session_artifacts_dir",
             "output_frame_alignment",
+            "response_end_detection_mode",
+            "audio_energy_threshold",
+            "audio_energy_window_sec",
+            "max_response_duration_sec",
+            "eos_detection_window",
         }
         known = {k: v for k, v in d.items() if k in known_fields}
         extra = {k: v for k, v in d.items() if k not in known_fields}
