@@ -975,3 +975,41 @@ class S2SSessionBackend(S2SIncrementalBackend):
             result["session_audio_path"] = audio_path
 
         return result
+
+    def warmup(self):
+        """
+        Run a warmup inference to pre-compile Triton kernels.
+
+        This prevents race conditions when multiple requests arrive simultaneously
+        before kernels are compiled.
+        """
+        import tempfile
+
+        import soundfile as sf
+
+        print("[S2SSession] Running warmup inference...")
+
+        # Create a short silence audio for warmup (0.5 seconds)
+        warmup_duration_sec = 0.5
+        warmup_samples = int(warmup_duration_sec * SAMPLE_RATE)
+        warmup_audio = np.zeros(warmup_samples, dtype=np.float32)
+
+        # Write to temp file
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            sf.write(f.name, warmup_audio, SAMPLE_RATE)
+            warmup_path = f.name
+
+        try:
+            # Run inference with minimal settings
+            from ..session_manager import SessionState
+
+            session_state = SessionState(session_id="warmup")
+            _ = self.inference_with_session(
+                audio_path=warmup_path,
+                session_state=session_state,
+                num_frames_per_inference=self.inc_config.num_frames_per_inference,
+            )
+            print("[S2SSession] Warmup complete")
+        finally:
+            if os.path.exists(warmup_path):
+                os.unlink(warmup_path)
