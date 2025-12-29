@@ -53,8 +53,10 @@ MODEL_PATH = os.getenv("UNIFIED_SERVER_MODEL_PATH", "")
 CODEC_MODEL_PATH = os.getenv("UNIFIED_SERVER_CODEC_MODEL_PATH", "")
 
 # Batching configuration
-BATCH_SIZE = int(os.getenv("UNIFIED_SERVER_BATCH_SIZE", "8"))
-BATCH_TIMEOUT = float(os.getenv("UNIFIED_SERVER_BATCH_TIMEOUT", "0.1"))
+# Note: S2S backends process requests sequentially anyway, so batch_size>1 just adds delay
+# Use batch_timeout=0 for immediate processing without waiting
+BATCH_SIZE = int(os.getenv("UNIFIED_SERVER_BATCH_SIZE", "1"))
+BATCH_TIMEOUT = float(os.getenv("UNIFIED_SERVER_BATCH_TIMEOUT", "0"))
 
 # Generation defaults
 MAX_NEW_TOKENS = int(os.getenv("UNIFIED_SERVER_MAX_NEW_TOKENS", "512"))
@@ -171,6 +173,7 @@ class RequestBatcher:
 backend_instance = None
 request_batcher = None
 session_manager = None
+session_inference_lock = None  # Lock to serialize session inference (avoid Triton race conditions)
 server_config = {}
 
 
@@ -242,7 +245,7 @@ def create_app(
     extra_config: Dict[str, Any] = None,
 ) -> FastAPI:
     """Create and configure the FastAPI app."""
-    global backend_instance, request_batcher, session_manager, server_config
+    global backend_instance, request_batcher, session_manager, session_inference_lock, server_config
 
     # Extract server-level config from extra_config
     ignore_system_prompt = extra_config.pop("ignore_system_prompt", False) if extra_config else False
@@ -306,7 +309,16 @@ def create_app(
         # Initialize session manager for session-aware backends
         if backend_type == "s2s_session":
             session_manager = SessionManager(ttl_seconds=session_ttl, max_sessions=max_sessions)
+            session_inference_lock = asyncio.Lock()  # noqa: F841 - used in chat_completions endpoint
             print(f"[Server] Session manager initialized (TTL: {session_ttl}s, max: {max_sessions})")
+
+            # Warmup inference to pre-compile Triton kernels (avoids race conditions on first requests)
+            print("[Server] Running warmup inference to compile Triton kernels...")
+            try:
+                backend_instance.warmup()
+                print("[Server] Warmup complete - Triton kernels compiled")
+            except Exception as e:
+                print(f"[Server] Warmup failed (will compile on first request): {e}")
 
         print("[Server] Ready!")
         print(f"  Backend: {backend_type}")
@@ -478,13 +490,15 @@ def create_app(
                 session_id = session_state.session_id
 
                 # Run inference with session in thread pool
+                # Use lock to serialize inference and avoid Triton kernel compilation race conditions
                 loop = asyncio.get_event_loop()
-                result, updated_session = await loop.run_in_executor(
-                    None,
-                    backend_instance.generate_with_session,
-                    gen_request,
-                    session_state,
-                )
+                async with session_inference_lock:
+                    result, updated_session = await loop.run_in_executor(
+                        None,
+                        backend_instance.generate_with_session,
+                        gen_request,
+                        session_state,
+                    )
 
                 # Save updated session state
                 if updated_session is not None:
