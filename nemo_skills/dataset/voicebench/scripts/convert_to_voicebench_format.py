@@ -21,6 +21,7 @@ from pathlib import Path
 # Mapping from VoiceBench subtests to evaluator types
 SUBTEST_TO_EVALUATOR = {
     "sd_qa": "qa",
+    "sd_qa_usa": "qa",  # Same evaluator as sd_qa
     "alpacaeval": "open",
     "alpacaeval_full": "open",
     "alpacaeval_speaker": "open",
@@ -37,6 +38,7 @@ SUBTEST_TO_EVALUATOR = {
 # Subtests that require GPT judge (api_judge.py) before evaluation
 REQUIRES_GPT_JUDGE = {
     "sd_qa",
+    "sd_qa_usa",  # Same as sd_qa
     "alpacaeval",
     "alpacaeval_full",
     "alpacaeval_speaker",
