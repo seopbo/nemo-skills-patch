@@ -88,10 +88,11 @@ QUESTION_TEMPLATE = (
 )
 FEWSHOT_DELIMITER = "\n\n"
 ENG_COT_PREFIX = "Let's think step by step."
-ENG_ZERO_SHOT_DESCRIPTION = "The following is multiple-choice question about {subject}. Respond with the letter of the correct answer."
+ENG_ZERO_SHOT_DESCRIPTION = "The following is multiple-choice question about {subject}."
 ENG_FEWSHOT_DESCRIPTION = (
-    "The following are multiple-choice questions (with answers) about {subject}. Respond with the letter of the correct answer."
+    "The following are multiple-choice questions (with answers) about {subject}."
 )
+ENG_INSTRUCTION = "Now answer the following question. Think step by step and then finish your answer with the letter of the correct answer (A., B., C., D.)."
 LATTER_REGEX = r"\b\(?\s*([ABCD])\s*\)?\.?\b"
 EXTRACT_REGEX = r"[\s\S]*" + LATTER_REGEX
 
@@ -212,7 +213,7 @@ def get_mcq_fields(
                 option_c=shot[Schema.OPTIONS[2]],
                 option_d=shot[Schema.OPTIONS[3]],
             )
-            + answer
+            + f"{answer}."
             for shot, answer in zip(shots, shot_answers)
         ]
         if eng_prompt:
@@ -221,6 +222,8 @@ def get_mcq_fields(
             prompt = DESCRIPTION_TEMPLATES[language].format(subject=subject)
         prompt += FEWSHOT_DELIMITER
         prompt += FEWSHOT_DELIMITER.join(shots)
+        prompt += FEWSHOT_DELIMITER
+        prompt += ENG_INSTRUCTION
         prompt += FEWSHOT_DELIMITER
         prompt += QUESTION_TEMPLATE.format(
             question=target_question,
