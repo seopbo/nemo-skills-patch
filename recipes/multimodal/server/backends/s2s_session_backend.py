@@ -29,6 +29,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import numpy as np
+import scipy.signal
 import torch
 
 from ..session_manager import SessionState, TurnData
@@ -147,63 +148,64 @@ class S2SSessionBackend(S2SIncrementalBackend):
         session_state.llm_cache = state["llm_cache"]
         session_state.input_embeds_history = state.get("input_embeds_history")
 
-    def _get_frame_alignment_info(
+    def _generate_dual_channel_audio_for_turn(
         self,
-        frame_idx: int,
-        phase: str,
-        turn_number: int,
-        gen_text: torch.Tensor,
-        gen_asr_text: torch.Tensor,
-        pad_id: int,
-        is_tts_stop: bool,
-    ) -> Dict[str, Any]:
+        input_audio_path: str,
+        output_audio_bytes: Optional[bytes],
+    ) -> tuple[Optional[bytes], int]:
         """
-        Get per-frame alignment information.
-
-        Args:
-            frame_idx: Global frame index
-            phase: "user_turn" or "agent_response"
-            turn_number: Current turn number
-            gen_text: Generated text tokens (agent)
-            gen_asr_text: ASR text tokens (user transcription)
-            pad_id: Padding token ID
-            is_tts_stop: Whether TTS stop criteria was met at this frame
+        Generate 2-channel audio (user=ch0, agent=ch1) for a single turn.
 
         Returns:
-            Dict with frame alignment info:
-            - frame_idx: Global frame index
-            - user_stream: "turn_N", "pause", or "[PAD]"
-            - agent_stream_token: Token ID
-            - agent_stream_decoded: Decoded text for this token
-            - asr_stream_token: ASR token ID
-            - asr_stream_decoded: Decoded ASR text for this token
-            - is_tts_stop: Whether TTS stop criteria was met
+            Tuple of (audio_bytes, sample_rate) or (None, 0) if failed.
         """
-        # Get token values
-        agent_token = gen_text[0, frame_idx].item() if frame_idx < gen_text.shape[1] else pad_id
-        asr_token = gen_asr_text[0, frame_idx].item() if frame_idx < gen_asr_text.shape[1] else pad_id
+        import soundfile as sf
 
-        # Decode tokens
-        agent_decoded = self._decode_single_token(agent_token, pad_id)
-        asr_decoded = self._decode_single_token(asr_token, pad_id)
+        if not output_audio_bytes:
+            return None, 0
 
-        # Determine user stream status
-        if phase == "user_turn":
-            user_stream = f"turn_{turn_number}"
-        else:
-            # During agent response, user is silent (represented as [PAD])
-            user_stream = "[PAD]"
+        output_sr = TTS_SAMPLE_RATE
 
-        return {
-            "frame_idx": frame_idx,
-            "user_stream": user_stream,
-            "agent_stream_token": agent_token,
-            "agent_stream_decoded": agent_decoded,
-            "asr_stream_token": asr_token,
-            "asr_stream_decoded": asr_decoded,
-            "is_tts_stop": is_tts_stop,
-            "phase": phase,
-        }
+        # Load user audio
+        try:
+            user_audio, user_sr = sf.read(input_audio_path)
+            if user_sr != output_sr:
+                user_audio = scipy.signal.resample(user_audio, int(len(user_audio) * output_sr / user_sr))
+            if len(user_audio.shape) > 1:
+                user_audio = user_audio[:, 0]
+        except Exception as e:
+            print(f"[S2SSession] Error reading user audio: {e}")
+            return None, 0
+
+        # Load agent audio
+        try:
+            agent_audio, agent_sr = sf.read(io.BytesIO(output_audio_bytes))
+            if agent_sr != output_sr:
+                agent_audio = scipy.signal.resample(agent_audio, int(len(agent_audio) * output_sr / agent_sr))
+            if len(agent_audio.shape) > 1:
+                agent_audio = agent_audio[:, 0]
+        except Exception as e:
+            print(f"[S2SSession] Error reading agent audio: {e}")
+            return None, 0
+
+        # Create 2-channel audio (zero-padded to max length)
+        max_len = max(len(user_audio), len(agent_audio))
+        stereo = np.zeros((max_len, 2), dtype=np.float32)
+        stereo[: len(user_audio), 0] = user_audio
+        stereo[: len(agent_audio), 1] = agent_audio
+
+        # Normalize
+        max_val = np.abs(stereo).max()
+        if max_val > 0:
+            stereo = stereo / max_val * 0.95
+
+        # Encode to bytes
+        wav_buffer = io.BytesIO()
+        sf.write(wav_buffer, stereo, output_sr, format="WAV")
+        print(
+            f"[S2SSession] Generated dual-channel audio: user={len(user_audio)} samples, agent={len(agent_audio)} samples"
+        )
+        return wav_buffer.getvalue(), output_sr
 
     def _get_session_artifacts_dir(self, session_id: str) -> Optional[str]:
         """Get or create the artifacts directory for a session."""
@@ -403,10 +405,9 @@ class S2SSessionBackend(S2SIncrementalBackend):
         max_response_frames = int(self.inc_config.max_response_duration_sec / FRAME_SIZE_SEC)
         audio_energy_window_samples = int(audio_energy_window_sec * TTS_SAMPLE_RATE)
 
-        # Per-frame alignment tracking
+        # Per-frame alignment tracking (use same format as incremental backend)
         output_frame_alignment = self.inc_config.output_frame_alignment
-        frame_alignment = [] if output_frame_alignment else None
-        turn_number = session_state.turn_count if session_state else 0
+        frame_alignment = self._init_frame_alignment() if output_frame_alignment else None
         pad_id = self._model.stt_model.text_pad_id
 
         # Phase 1: Process audio frames
@@ -448,18 +449,17 @@ class S2SSessionBackend(S2SIncrementalBackend):
                 past_key_values = result["past_key_values"]
                 code = result["code"]
 
-            # Collect frame alignment info
-            if output_frame_alignment:
-                frame_info = self._get_frame_alignment_info(
+            # Collect frame alignment info (same format as incremental backend)
+            if frame_alignment is not None:
+                self._append_frame_alignment(
+                    frame_alignment=frame_alignment,
                     frame_idx=global_frame_idx,
                     phase="user_turn",
-                    turn_number=turn_number,
                     gen_text=gen_text,
                     gen_asr_text=gen_asr_text,
                     pad_id=pad_id,
                     is_tts_stop=False,
                 )
-                frame_alignment.append(frame_info)
 
             local_frame_idx += num_frames_per_inference
 
@@ -576,18 +576,17 @@ class S2SSessionBackend(S2SIncrementalBackend):
                     stop_reason = "eos"
                     print("[S2SSession] Response completed (EOS)")
 
-            # Collect frame alignment info for response phase
-            if output_frame_alignment:
-                frame_info = self._get_frame_alignment_info(
+            # Collect frame alignment info for response phase (same format as incremental backend)
+            if frame_alignment is not None:
+                self._append_frame_alignment(
+                    frame_alignment=frame_alignment,
                     frame_idx=global_frame_idx,
                     phase="agent_response",
-                    turn_number=turn_number,
                     gen_text=gen_text,
                     gen_asr_text=gen_asr_text,
                     pad_id=pad_id,
                     is_tts_stop=is_tts_stop,
                 )
-                frame_alignment.append(frame_info)
 
             local_frame_idx += num_frames_per_inference
             response_frames += num_frames_per_inference
@@ -714,8 +713,8 @@ class S2SSessionBackend(S2SIncrementalBackend):
                 num_frames_per_inference=self.inc_config.num_frames_per_inference,
             )
 
-            # Encode audio to bytes
-            audio_bytes = None
+            # Encode agent audio to bytes (single-channel for storage)
+            agent_audio_bytes = None
             if output["audio"] is not None:
                 audio_np = output["audio"].float().cpu().numpy().squeeze()
                 max_val = np.abs(audio_np).max()
@@ -726,9 +725,20 @@ class S2SSessionBackend(S2SIncrementalBackend):
                 import soundfile as sf
 
                 sf.write(wav_buffer, audio_np, self.target_sample_rate, format="WAV")
-                audio_bytes = wav_buffer.getvalue()
+                agent_audio_bytes = wav_buffer.getvalue()
 
             elapsed_ms = (time.time() - start_time) * 1000
+
+            # Generate dual-channel audio (user=ch0, agent=ch1) for response
+            response_audio_bytes = agent_audio_bytes
+            response_sample_rate = self.target_sample_rate
+            if saved_input_audio_path and agent_audio_bytes:
+                dual_audio_bytes, dual_sr = self._generate_dual_channel_audio_for_turn(
+                    saved_input_audio_path, agent_audio_bytes
+                )
+                if dual_audio_bytes:
+                    response_audio_bytes = dual_audio_bytes
+                    response_sample_rate = dual_sr
 
             updated_session = output["session_state"]
             session_id = updated_session.session_id if updated_session else "unknown"
@@ -755,17 +765,17 @@ class S2SSessionBackend(S2SIncrementalBackend):
 
             # Calculate agent audio duration
             agent_duration_sec = 0.0
-            if audio_bytes:
+            if agent_audio_bytes:
                 agent_duration_sec = debug_info.get("response_frames", 0) * FRAME_SIZE_SEC
 
-            # Store turn data in session
+            # Store turn data in session (use single-channel agent audio for storage)
             if updated_session is not None:
                 if not hasattr(updated_session, "turns") or updated_session.turns is None:
                     updated_session.turns = []
                 turn_data = TurnData(
                     turn_idx=turn_idx,
                     user_audio_bytes=input_audio_bytes,
-                    agent_audio_bytes=audio_bytes,
+                    agent_audio_bytes=agent_audio_bytes,
                     agent_text=output_text,
                     user_duration_sec=user_duration_sec,
                     agent_duration_sec=agent_duration_sec,
@@ -784,7 +794,7 @@ class S2SSessionBackend(S2SIncrementalBackend):
                     "temperature": request.temperature,
                 },
                 output_text=output_text,
-                output_audio_bytes=audio_bytes,
+                output_audio_bytes=agent_audio_bytes,
                 debug_info=debug_info,
                 generation_time_ms=elapsed_ms,
             )
@@ -793,14 +803,17 @@ class S2SSessionBackend(S2SIncrementalBackend):
             if artifacts_info:
                 debug_info["artifacts"] = artifacts_info
 
+            # Add total_frames to match incremental backend debug format
+            debug_info["total_frames"] = debug_info.get("final_frame_idx", 0)
+
             # Add per-turn text responses to debug_info
             if updated_session is not None and updated_session.turns:
                 debug_info["turn_texts"] = [t.agent_text for t in updated_session.turns]
 
             result = GenerationResult(
                 text=output_text,
-                audio_bytes=audio_bytes,
-                audio_sample_rate=self.target_sample_rate,
+                audio_bytes=response_audio_bytes,
+                audio_sample_rate=response_sample_rate,
                 request_id=request.request_id,
                 generation_time_ms=elapsed_ms,
                 debug_info=debug_info,
