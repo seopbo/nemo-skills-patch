@@ -33,9 +33,7 @@ def format_entry(
     )
     target_question = entry[Schema.QUESTION]
     subject = entry[Schema.SUBJECT]
-    expected_answer = digit_to_letter(
-        entry[Schema.ANSWER]
-    )  # Convert from [0 to 3] to [A to D]
+    expected_answer = digit_to_letter(entry[Schema.ANSWER])  
     category = normalize_entry_field(entry, category)
     return {
         "expected_answer": expected_answer,

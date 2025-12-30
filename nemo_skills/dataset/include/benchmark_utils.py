@@ -88,9 +88,9 @@ QUESTION_TEMPLATE = (
 )
 FEWSHOT_DELIMITER = "\n\n"
 ENG_COT_PREFIX = "Let's think step by step."
-ENG_ZERO_SHOT_DESCRIPTION = "The following is multiple-choice question about {subject}."
+ENG_ZERO_SHOT_DESCRIPTION = "The following is multiple-choice question about {subject}. Respond with the letter of the correct answer."
 ENG_FEWSHOT_DESCRIPTION = (
-    "The following are multiple-choice questions (with answers) about {subject}."
+    "The following are multiple-choice questions (with answers) about {subject}. Respond with the letter of the correct answer."
 )
 LATTER_REGEX = r"\b\(?\s*([ABCD])\s*\)?\.?\b"
 EXTRACT_REGEX = r"[\s\S]*" + LATTER_REGEX
