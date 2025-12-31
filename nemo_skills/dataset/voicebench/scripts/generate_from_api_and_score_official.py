@@ -1,0 +1,210 @@
+# Copyright (c) 2025, NVIDIA CORPORATION & AFFILIATES.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""
+Generate VoiceBench responses using nemo-skills and score with official VoiceBench package.
+
+Usage:
+    python generate_from_api_and_score_official.py --config voicebench_eval_config.yaml
+"""
+
+import argparse
+from datetime import datetime
+from pathlib import Path
+
+import yaml
+from convert_to_voicebench_format import REQUIRES_GPT_JUDGE, SUBTEST_TO_EVALUATOR
+
+from nemo_skills.pipeline.cli import eval as nemo_eval
+from nemo_skills.pipeline.cli import run_cmd, wrap_arguments
+
+ALL_SUBTESTS = [
+    "advbench",
+    "alpacaeval",
+    "alpacaeval_full",
+    "alpacaeval_speaker",
+    "bbh",
+    "commoneval",
+    "ifeval",
+    "mmsu",
+    "mtbench",
+    "openbookqa",
+    "sd_qa",
+    "sd_qa_usa",
+    "wildvoice",
+]
+
+
+def load_config(config_path: str) -> dict:
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
+
+
+def build_score_command(config: dict, subtest: str) -> str:
+    """Build the scoring command to run via run_cmd.
+
+    Uses run_voicebench_scoring.py to create output compatible with nemo-skills:
+    - summarized-results/ directory with logs
+    - metrics.json with evaluation results
+    """
+    eval_results_dir = f"{config['output_dir']}/eval-results/voicebench.{subtest}"
+    evaluator = SUBTEST_TO_EVALUATOR.get(subtest, "open")
+    needs_judge = subtest in REQUIRES_GPT_JUDGE
+    voicebench_repo = config["voicebench_repo_path"]
+    scoring_script = "nemo_skills/dataset/voicebench/scripts/run_voicebench_scoring.py"
+
+    cmd_args = [
+        f"python {scoring_script}",
+        f"--eval_results_dir {eval_results_dir}",
+        f"--voicebench_repo {voicebench_repo}",
+        f"--subtest {subtest}",
+        f"--evaluator {evaluator}",
+    ]
+
+    if needs_judge:
+        cmd_args.append("--needs_judge")
+        if config.get("api_type"):
+            cmd_args.append(f"--api_type {config['api_type']}")
+        if config.get("nvidia_model"):
+            cmd_args.append(f"--nvidia_model {config['nvidia_model']}")
+
+    return " ".join(cmd_args)
+
+
+def run_voicebench_eval(config: dict):
+    """Run VoiceBench evaluation using direct Python calls."""
+
+    # Parse subtests
+    subtests_cfg = config.get("subtests", "all")
+    if subtests_cfg == "all":
+        subtests = ALL_SUBTESTS
+    elif isinstance(subtests_cfg, str):
+        subtests = [s.strip() for s in subtests_cfg.split(",")]
+    else:
+        subtests = subtests_cfg
+
+    subtests = [s for s in subtests if s in ALL_SUBTESTS]
+    if not subtests:
+        raise ValueError("No valid subtests specified")
+
+    generation_only = config.get("generation_only", False)
+    scoring_only = config.get("scoring_only", False)
+    dry_run = config.get("dry_run", False)
+
+    print(f"Processing {len(subtests)} subtests: {', '.join(subtests)}")
+    print(f"Output directory: {config['output_dir']}")
+
+    # Build base extra args for hydra overrides
+    # Skip native evaluation for all subtests - VoiceBench scorer handles evaluation
+    base_extra_args = ["++eval_type=null"]
+    if config.get("max_samples"):
+        base_extra_args.append(f"++max_samples={config['max_samples']}")
+    if config.get("server_server_type"):
+        base_extra_args.append(f"++server.server_type={config['server_server_type']}")
+
+    for subtest in subtests:
+        extra_args_str = " ".join(base_extra_args)
+        print(f"\n{'=' * 60}")
+        print(f"Processing subtest: {subtest}")
+        print(f"{'=' * 60}")
+
+        expname = f"{config.get('expname', 'voicebench')}_{subtest}"
+        benchmark = f"voicebench.{subtest}"
+
+        # Generation phase
+        if not scoring_only:
+            print("\n--- Running generation ---")
+            nemo_eval(
+                ctx=wrap_arguments(extra_args_str),
+                cluster=config["cluster"],
+                output_dir=config["output_dir"],
+                benchmarks=benchmark,
+                model=config["model"],
+                server_type=config.get("server_type", "vllm"),
+                server_gpus=config.get("server_gpus", 1),
+                num_chunks=config.get("num_chunks", 1),
+                server_container=config.get("server_container"),
+                server_entrypoint=config.get("server_entrypoint"),
+                data_dir=config.get("data_dir"),
+                server_args=config.get("server_args", ""),
+                installation_command=config.get("installation_command"),
+                partition=config.get("partition"),
+                expname=expname,
+                auto_summarize_results=False,
+                dry_run=dry_run,
+            )
+
+        # Scoring phase
+        if not generation_only:
+            print("\n--- Running scoring ---")
+            score_command = build_score_command(config, subtest)
+            eval_results_path = f"{config['output_dir']}/eval-results/voicebench.{subtest}"
+            run_cmd(
+                ctx=wrap_arguments(""),
+                cluster=config["cluster"],
+                command=score_command,
+                partition=config.get("cpu_partition") or config.get("partition"),
+                run_after=[expname] if not scoring_only else None,
+                expname=f"{expname}_score",
+                installation_command=config.get("scoring_installation_command"),
+                log_dir=f"{eval_results_path}/summarized-results",
+                dry_run=dry_run,
+            )
+
+    print(f"\n{'=' * 60}")
+    print("Done!")
+    print(f"{'=' * 60}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="VoiceBench evaluation with official scoring")
+    parser.add_argument("--config", required=True, help="Path to YAML config file")
+
+    # CLI overrides
+    parser.add_argument("--cluster", help="Override cluster")
+    parser.add_argument("--partition", help="Override partition")
+    parser.add_argument("--model", help="Override model")
+    parser.add_argument("--output_dir", help="Override output directory")
+    parser.add_argument("--subtests", help="Override subtests (comma-separated)")
+    parser.add_argument("--max_samples", type=int, help="Override max_samples")
+    parser.add_argument("--dry_run", action="store_true", help="Print commands without executing")
+    parser.add_argument("--generation_only", action="store_true", help="Only run generation")
+    parser.add_argument("--scoring_only", action="store_true", help="Only run scoring")
+
+    args = parser.parse_args()
+
+    config = load_config(args.config)
+
+    # Apply CLI overrides
+    for key in ["cluster", "partition", "model", "output_dir", "subtests", "max_samples"]:
+        if getattr(args, key, None) is not None:
+            config[key] = getattr(args, key)
+    if args.dry_run:
+        config["dry_run"] = True
+    if args.generation_only:
+        config["generation_only"] = True
+    if args.scoring_only:
+        config["scoring_only"] = True
+
+    # Add timestamp to output_dir if not present
+    output_dir = config.get("output_dir", "")
+    if output_dir and not any(char.isdigit() for char in Path(output_dir).name):
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        config["output_dir"] = f"{output_dir}_{timestamp}"
+
+    run_voicebench_eval(config)
+
+
+if __name__ == "__main__":
+    main()
