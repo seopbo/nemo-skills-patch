@@ -29,7 +29,7 @@ server_server_type: vllm_multimodal
 # Data and output
 data_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/experiments/voicebench_test/data_dir
 benchmark: s2s_demo.demo_20251124
-output_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/tmp/s2s_demo_eval_t4_c2
+output_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/tmp/s2s_demo_eval_t4_c3
 
 # Job settings
 expname: s2s_demo_eval

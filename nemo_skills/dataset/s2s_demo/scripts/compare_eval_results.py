@@ -1,18 +1,17 @@
 #!/usr/bin/env python3
 """
-Compare multiple S2S demo evaluation results and generate a Markdown report.
+Compare multiple S2S demo and VoiceBench evaluation results and generate a Markdown report.
 
 Usage:
     python compare_eval_results.py \
-        --eval_folders "/path/to/eval1:Model A" "/path/to/eval2:Model B" \
-        --output report.md
+        --eval_folders \
+            "host:/path/to/s2s_demo_eval:Model A" \
+            "host:/path/to/voicebench_eval:Model A" \
+            "host:/path/to/s2s_demo_eval2:Model B" \
+            "host:/path/to/voicebench_eval2:Model B" \
+        --output comparison_report.md
 
-Supports remote folders via SSH:
-    python compare_eval_results.py \
-        --eval_folders "host1:/path/to/eval1:Model A" "host2:/path/to/eval2:Model B" \
-        --output report.md
-
-Each eval folder should contain a metrics.json file.
+The script auto-detects whether each folder contains s2s_demo or voicebench results.
 """
 
 import argparse
@@ -22,46 +21,114 @@ import subprocess
 from typing import Optional
 
 
-def load_metrics_local(metrics_path: str) -> Optional[dict]:
-    """Load metrics from a local JSON file."""
-    if not os.path.exists(metrics_path):
-        print(f"Warning: {metrics_path} not found")
+def load_json_local(path: str) -> Optional[dict]:
+    """Load JSON from a local file."""
+    if not os.path.exists(path):
         return None
-    with open(metrics_path, "r") as f:
+    with open(path, "r") as f:
         return json.load(f)
 
 
-def load_metrics_remote(host: str, metrics_path: str) -> Optional[dict]:
-    """Load metrics from a remote JSON file via SSH."""
+def load_json_remote(host: str, path: str) -> Optional[dict]:
+    """Load JSON from a remote file via SSH."""
     try:
-        result = subprocess.run(["ssh", host, f"cat {metrics_path}"], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(["ssh", host, f"cat {path}"], capture_output=True, text=True, timeout=30)
         if result.returncode != 0:
-            print(f"Warning: Failed to fetch {host}:{metrics_path}")
-            print(f"  Error: {result.stderr.strip()}")
             return None
         return json.loads(result.stdout)
-    except subprocess.TimeoutExpired:
-        print(f"Warning: Timeout fetching {host}:{metrics_path}")
-        return None
-    except json.JSONDecodeError as e:
-        print(f"Warning: Invalid JSON from {host}:{metrics_path}: {e}")
-        return None
-    except Exception as e:
-        print(f"Warning: Error fetching {host}:{metrics_path}: {e}")
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, Exception):
         return None
 
 
-def load_metrics(location: str, host: Optional[str] = None) -> Optional[dict]:
-    """Load metrics from a local or remote JSON file."""
+def list_dir_remote(host: str, path: str) -> list[str]:
+    """List directory contents via SSH."""
+    try:
+        result = subprocess.run(["ssh", host, f"ls {path}"], capture_output=True, text=True, timeout=30)
+        if result.returncode != 0:
+            return []
+        return [x.strip() for x in result.stdout.strip().split("\n") if x.strip()]
+    except Exception:
+        return []
+
+
+def list_dir_local(path: str) -> list[str]:
+    """List local directory contents."""
+    if not os.path.isdir(path):
+        return []
+    return os.listdir(path)
+
+
+def count_samples_remote(host: str, path: str) -> int:
+    """Count lines in output.jsonl via SSH."""
+    try:
+        result = subprocess.run(
+            ["ssh", host, f"wc -l < {path}/output.jsonl"], capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0:
+            return int(result.stdout.strip())
+    except Exception:
+        pass
+    return 0
+
+
+def count_samples_local(path: str) -> int:
+    """Count lines in local output.jsonl."""
+    output_path = os.path.join(path, "output.jsonl")
+    if not os.path.exists(output_path):
+        return 0
+    with open(output_path) as f:
+        return sum(1 for _ in f)
+
+
+def detect_eval_type(host: Optional[str], eval_results_path: str) -> str:
+    """Detect if this is s2s_demo or voicebench based on folder names."""
     if host:
-        return load_metrics_remote(host, location)
-    return load_metrics_local(location)
+        items = list_dir_remote(host, eval_results_path)
+    else:
+        items = list_dir_local(eval_results_path)
+
+    for item in items:
+        if item.startswith("voicebench."):
+            return "voicebench"
+        if item.startswith("s2s_demo."):
+            return "s2s_demo"
+    return "unknown"
 
 
-def extract_key_metrics(metrics: dict) -> dict:
-    """Extract key metrics from the metrics dict for comparison."""
+def load_s2s_demo_metrics(host: Optional[str], folder_path: str) -> dict:
+    """Load s2s_demo metrics from folder."""
+    eval_results = folder_path + "/eval-results" if not folder_path.endswith("/") else folder_path + "eval-results"
+
+    if host:
+        items = list_dir_remote(host, eval_results)
+    else:
+        items = list_dir_local(eval_results)
+
+    # Find s2s_demo.* subfolder
+    demo_folder = None
+    for item in items:
+        if item.startswith("s2s_demo."):
+            demo_folder = item
+            break
+
+    if not demo_folder:
+        return {}
+
+    metrics_path = f"{eval_results}/{demo_folder}/metrics.json"
+    if host:
+        metrics = load_json_remote(host, metrics_path)
+    else:
+        metrics = load_json_local(metrics_path)
+
+    if not metrics:
+        return {}
+
+    return extract_s2s_demo_metrics(metrics)
+
+
+def extract_s2s_demo_metrics(metrics: dict) -> dict:
+    """Extract key metrics from s2s_demo metrics dict."""
     dm = metrics.get("dataset_metrics", metrics)
-
     tt = dm.get("turn_taking", {})
     bi = dm.get("barge_in", {})
     bc = dm.get("backchanneling", {})
@@ -71,28 +138,62 @@ def extract_key_metrics(metrics: dict) -> dict:
 
     return {
         "num_samples": dm.get("num_samples_evaluated", 0),
-        # Turn-taking
         "tt_latency_ms": tt.get("avg_latency_ms"),
         "tt_precision": tt.get("avg_precision"),
         "tt_recall": tt.get("avg_recall"),
         "tt_f1": tt.get("avg_f1"),
-        # Barge-in
         "bi_success_rate": bi.get("avg_success_rate"),
         "bi_latency_ms": bi.get("avg_latency_ms"),
-        # Backchanneling
         "bc_accuracy": bc.get("avg_accuracy"),
-        # User speech (ASR quality)
         "user_wer": us.get("avg_wer"),
         "oob_ratio": us.get("out_of_bounds_word_ratio"),
-        # Agent speech (TTS quality)
         "agent_wer": ags.get("avg_wer"),
         "agent_cer": ags.get("avg_cer"),
         "hallucination_rate": ags.get("hallucination_rate"),
-        # LLM Judge ratings (1-5 scale)
         "llm_judge_overall": llm.get("overall", {}).get("avg_rating"),
         "llm_judge_full": llm.get("full", {}).get("avg_rating"),
         "llm_judge_sounded": llm.get("sounded", {}).get("avg_rating"),
     }
+
+
+def load_voicebench_metrics(host: Optional[str], folder_path: str) -> dict:
+    """Load voicebench metrics from folder. Returns {subtest: {metric: value}}."""
+    eval_results = folder_path + "/eval-results" if not folder_path.endswith("/") else folder_path + "eval-results"
+
+    if host:
+        items = list_dir_remote(host, eval_results)
+    else:
+        items = list_dir_local(eval_results)
+
+    result = {"subtests": {}, "total_samples": 0}
+
+    for item in items:
+        if not item.startswith("voicebench."):
+            continue
+
+        subtest = item.replace("voicebench.", "")
+        subtest_path = f"{eval_results}/{item}"
+        metrics_path = f"{subtest_path}/metrics.json"
+
+        # Count samples
+        if host:
+            samples = count_samples_remote(host, subtest_path)
+            metrics = load_json_remote(host, metrics_path)
+        else:
+            samples = count_samples_local(subtest_path)
+            metrics = load_json_local(metrics_path)
+
+        result["total_samples"] += samples
+
+        if metrics:
+            # Format: {"voicebench.{subtest}": {"greedy": {...}}}
+            key = f"voicebench.{subtest}"
+            if key in metrics:
+                greedy = metrics[key].get("greedy", {})
+                if greedy:
+                    result["subtests"][subtest] = {"metrics": greedy, "samples": samples}
+
+    return result
 
 
 def format_value(value, format_spec: str = ".1f", suffix: str = "", na_str: str = "N/A") -> str:
@@ -105,111 +206,13 @@ def format_value(value, format_spec: str = ".1f", suffix: str = "", na_str: str 
         return str(value)
 
 
-def determine_best_model(models: list[tuple[str, dict]]) -> tuple[str, str]:
-    """
-    Determine which model is best based on key metrics.
-    Returns (best_model_name, explanation).
-    """
-    if len(models) == 0:
-        return "", "No models to compare."
-    if len(models) == 1:
-        return models[0][0], f"Only one model ({models[0][0]}) was evaluated."
+def generate_s2s_demo_section(models: list[tuple[str, dict]]) -> list[str]:
+    """Generate S2S Demo section of the report."""
+    if not models:
+        return []
 
-    # Scoring: higher is better for most metrics, lower is better for latency/WER
-    # Weight important metrics
-    scores = {name: 0.0 for name, _ in models}
-    comparisons = []
-
-    # Metrics where HIGHER is better
-    higher_better = [
-        ("tt_f1", "Turn-taking F1", 2.0),
-        ("tt_precision", "Turn-taking precision", 1.0),
-        ("tt_recall", "Turn-taking recall", 1.0),
-        ("bi_success_rate", "Barge-in success rate", 1.5),
-        ("bc_accuracy", "Backchanneling accuracy", 1.0),
-        ("llm_judge_overall", "LLM Judge score", 2.0),
-    ]
-
-    # Metrics where LOWER is better
-    lower_better = [
-        ("tt_latency_ms", "Turn-taking latency", 1.5),
-        ("bi_latency_ms", "Barge-in latency", 1.0),
-        ("user_wer", "User speech WER", 1.5),
-        ("agent_wer", "Agent speech WER", 1.5),
-        ("agent_cer", "Agent speech CER", 1.0),
-        ("hallucination_rate", "TTS hallucination rate", 1.5),
-        ("oob_ratio", "Out-of-bounds word ratio", 0.5),
-    ]
-
-    def get_valid_values(metric_key):
-        return [(name, m[metric_key]) for name, m in models if m.get(metric_key) is not None]
-
-    # Score higher-is-better metrics
-    for metric_key, metric_name, weight in higher_better:
-        valid = get_valid_values(metric_key)
-        if len(valid) < 2:
-            continue
-        best_val = max(v for _, v in valid)
-        worst_val = min(v for _, v in valid)
-        if best_val == worst_val:
-            continue
-        best_name = [n for n, v in valid if v == best_val][0]
-        for name, val in valid:
-            normalized = (val - worst_val) / (best_val - worst_val) if best_val != worst_val else 0.5
-            scores[name] += normalized * weight
-        comparisons.append(f"{best_name} leads in {metric_name} ({format_value(best_val)})")
-
-    # Score lower-is-better metrics
-    for metric_key, metric_name, weight in lower_better:
-        valid = get_valid_values(metric_key)
-        if len(valid) < 2:
-            continue
-        best_val = min(v for _, v in valid)  # Lower is better
-        worst_val = max(v for _, v in valid)
-        if best_val == worst_val:
-            continue
-        best_name = [n for n, v in valid if v == best_val][0]
-        for name, val in valid:
-            # Invert: lower val -> higher score
-            normalized = (worst_val - val) / (worst_val - best_val) if worst_val != best_val else 0.5
-            scores[name] += normalized * weight
-        comparisons.append(f"{best_name} leads in {metric_name} ({format_value(best_val)})")
-
-    # Find winner
-    if not any(scores.values()):
-        return "", "Unable to determine best model: insufficient comparable metrics."
-
-    sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    best_name, best_score = sorted_scores[0]
-    second_name, second_score = sorted_scores[1] if len(sorted_scores) > 1 else ("", 0)
-
-    # Check if clear winner
-    score_diff = best_score - second_score
-    total_possible = sum(w for _, _, w in higher_better + lower_better)
-
-    if score_diff < 0.1 * total_possible:
-        return "", (
-            f"No clear winner: {best_name} and {second_name} have very similar overall performance. "
-            f"Key differences: {'; '.join(comparisons[:3]) if comparisons else 'none significant'}."
-        )
-
-    return best_name, (
-        f"**{best_name}** is the best model overall based on weighted metrics analysis. "
-        f"Key advantages: {'; '.join(comparisons[:4]) if comparisons else 'balanced performance across all metrics'}."
-    )
-
-
-def generate_report(models: list[tuple[str, dict]], output_path: str):
-    """Generate a Markdown comparison report."""
     lines = []
-    lines.append("# S2S Demo Evaluation Comparison Report\n")
-    lines.append(f"Comparing {len(models)} model(s):\n")
-    for name, _ in models:
-        lines.append(f"- {name}")
-    lines.append("")
-
-    # Summary table
-    lines.append("## Metrics Comparison\n")
+    lines.append("## S2S Demo Evaluation\n")
 
     # Table header
     header = "| Metric | " + " | ".join(name for name, _ in models) + " |"
@@ -217,7 +220,6 @@ def generate_report(models: list[tuple[str, dict]], output_path: str):
     lines.append(header)
     lines.append(separator)
 
-    # Define rows with (display_name, metric_key, format_spec, suffix, higher_better)
     rows = [
         ("Samples Evaluated", "num_samples", "d", "", None),
         ("**Turn-Taking**", None, None, None, None),
@@ -232,7 +234,7 @@ def generate_report(models: list[tuple[str, dict]], output_path: str):
         ("  Accuracy (%) ↑", "bc_accuracy", ".1f", "", True),
         ("**User Speech (ASR)**", None, None, None, None),
         ("  WER (%) ↓", "user_wer", ".1f", "", False),
-        ("  OOB Ratio (words/s) ↓", "oob_ratio", ".3f", "", False),
+        ("  OOB Ratio ↓", "oob_ratio", ".3f", "", False),
         ("**Agent Speech (TTS)**", None, None, None, None),
         ("  WER (%) ↓", "agent_wer", ".1f", "", False),
         ("  CER (%) ↓", "agent_cer", ".1f", "", False),
@@ -245,7 +247,6 @@ def generate_report(models: list[tuple[str, dict]], output_path: str):
 
     for display_name, metric_key, fmt, suffix, higher_better in rows:
         if metric_key is None:
-            # Section header
             row = f"| {display_name} |" + " |" * len(models)
             lines.append(row)
             continue
@@ -257,7 +258,6 @@ def generate_report(models: list[tuple[str, dict]], output_path: str):
             raw_values.append(val)
             values.append(format_value(val, fmt, suffix))
 
-        # Highlight best value if applicable
         if higher_better is not None:
             valid_vals = [(i, v) for i, v in enumerate(raw_values) if v is not None]
             if len(valid_vals) >= 2:
@@ -271,12 +271,185 @@ def generate_report(models: list[tuple[str, dict]], output_path: str):
         lines.append(row)
 
     lines.append("")
+    return lines
 
-    # Best model analysis
-    lines.append("## Analysis\n")
-    best_name, explanation = determine_best_model(models)
-    lines.append(explanation)
+
+def generate_voicebench_section(models: list[tuple[str, dict]]) -> list[str]:
+    """Generate VoiceBench section of the report."""
+    if not models:
+        return []
+
+    lines = []
+    lines.append("## VoiceBench Evaluation\n")
+
+    # Collect all subtests across all models
+    all_subtests = set()
+    for _, vb_data in models:
+        all_subtests.update(vb_data.get("subtests", {}).keys())
+    all_subtests = sorted(all_subtests)
+
+    if not all_subtests:
+        lines.append("*No VoiceBench results available.*\n")
+        return lines
+
+    # Total samples row
+    lines.append("### Summary\n")
+    header = "| Model | Total Samples | Subtests |"
+    lines.append(header)
+    lines.append("|---|---|---|")
+    for name, vb_data in models:
+        total = vb_data.get("total_samples", 0)
+        num_subtests = len(vb_data.get("subtests", {}))
+        lines.append(f"| {name} | {total} | {num_subtests} |")
     lines.append("")
+
+    # Per-subtest metrics table
+    lines.append("### Per-Subtest Metrics\n")
+
+    # Build a unified table with all metrics
+    # First, collect all unique metric names across all subtests
+    all_metrics = set()
+    for _, vb_data in models:
+        for subtest, data in vb_data.get("subtests", {}).items():
+            all_metrics.update(data.get("metrics", {}).keys())
+
+    # Metric display info: (metric_key, higher_better)
+    metric_info = {
+        "acc": True,
+        "gpt": True,
+        "panda": True,
+        "pedant": True,
+        "bleu": True,
+        "exact_match": True,
+        "score": True,
+        "fail": False,
+        "wer": False,
+        "cer": False,
+    }
+
+    for subtest in all_subtests:
+        lines.append(f"#### {subtest}\n")
+
+        # Check which models have this subtest
+        model_data = []
+        for name, vb_data in models:
+            subtests = vb_data.get("subtests", {})
+            if subtest in subtests:
+                model_data.append((name, subtests[subtest]))
+            else:
+                model_data.append((name, None))
+
+        # Collect metrics for this subtest
+        subtest_metrics = set()
+        for _, data in model_data:
+            if data:
+                subtest_metrics.update(data.get("metrics", {}).keys())
+
+        if not subtest_metrics:
+            lines.append("*No metrics available.*\n")
+            continue
+
+        # Build table
+        header = "| Metric | " + " | ".join(name for name, _ in model_data) + " |"
+        lines.append(header)
+        lines.append("|" + "|".join(["---"] * (len(model_data) + 1)) + "|")
+
+        # Samples row
+        samples_row = "| Samples |"
+        for _, data in model_data:
+            if data:
+                samples_row += f" {data.get('samples', 'N/A')} |"
+            else:
+                samples_row += " N/A |"
+        lines.append(samples_row)
+
+        # Metric rows
+        for metric in sorted(subtest_metrics):
+            higher_better = metric_info.get(metric.lower(), True)
+            arrow = "↑" if higher_better else "↓"
+
+            values = []
+            raw_values = []
+            for _, data in model_data:
+                if data and data.get("metrics"):
+                    val = data["metrics"].get(metric)
+                else:
+                    val = None
+                raw_values.append(val)
+                values.append(format_value(val, ".2f"))
+
+            # Highlight best
+            valid_vals = [(i, v) for i, v in enumerate(raw_values) if v is not None]
+            if len(valid_vals) >= 2:
+                if higher_better:
+                    best_idx = max(valid_vals, key=lambda x: x[1])[0]
+                else:
+                    best_idx = min(valid_vals, key=lambda x: x[1])[0]
+                values[best_idx] = f"**{values[best_idx]}**"
+
+            row = f"| {metric} {arrow} | " + " | ".join(values) + " |"
+            lines.append(row)
+
+        lines.append("")
+
+    return lines
+
+
+def parse_folder_spec(spec: str) -> tuple[Optional[str], str, str]:
+    """Parse folder specification: 'path:name', 'host:path:name', 'path', 'host:path'."""
+    parts = spec.split(":")
+
+    if len(parts) == 1:
+        path = parts[0]
+        name = os.path.basename(path.rstrip("/"))
+        return None, path, name
+
+    if len(parts) == 2:
+        if parts[0].startswith("/") or parts[0].startswith("."):
+            return None, parts[0], parts[1]
+        else:
+            host, path = parts[0], parts[1]
+            name = os.path.basename(path.rstrip("/"))
+            return host, path, name
+
+    if len(parts) == 3:
+        return parts[0], parts[1], parts[2]
+
+    if len(parts) > 3:
+        host = parts[0]
+        name = parts[-1]
+        path = ":".join(parts[1:-1])
+        return host, path, name
+
+    return None, spec, os.path.basename(spec.rstrip("/"))
+
+
+def generate_report(
+    s2s_demo_models: list[tuple[str, dict]], voicebench_models: list[tuple[str, dict]], output_path: str
+):
+    """Generate the full comparison report."""
+    lines = []
+    lines.append("# Evaluation Comparison Report\n")
+
+    # Collect unique model names
+    all_models = set()
+    for name, _ in s2s_demo_models:
+        all_models.add(name)
+    for name, _ in voicebench_models:
+        all_models.add(name)
+
+    lines.append(f"Comparing {len(all_models)} model(s):\n")
+    for name in sorted(all_models):
+        lines.append(f"- {name}")
+    lines.append("")
+
+    # S2S Demo section
+    if s2s_demo_models:
+        lines.extend(generate_s2s_demo_section(s2s_demo_models))
+
+    # VoiceBench section
+    if voicebench_models:
+        lines.extend(generate_voicebench_section(voicebench_models))
 
     # Legend
     lines.append("---")
@@ -292,77 +465,22 @@ def generate_report(models: list[tuple[str, dict]], output_path: str):
     print(report)
 
 
-def parse_folder_spec(spec: str) -> tuple[Optional[str], str, str]:
-    """
-    Parse folder specification in format:
-      - 'path:name' (local)
-      - 'path' (local, auto-name)
-      - 'host:path:name' (remote)
-      - 'host:path' (remote, auto-name)
-
-    Returns (host, path, name). host is None for local paths.
-    """
-    parts = spec.split(":")
-
-    if len(parts) == 1:
-        # Just path, local
-        path = parts[0]
-        name = os.path.basename(path.rstrip("/"))
-        return None, path, name
-
-    if len(parts) == 2:
-        # Could be "path:name" (local) or "host:path" (remote)
-        # Heuristic: if first part looks like a path (starts with / or .), it's local
-        if parts[0].startswith("/") or parts[0].startswith("."):
-            # Local: path:name
-            return None, parts[0], parts[1]
-        else:
-            # Remote: host:path (auto-name)
-            host, path = parts[0], parts[1]
-            name = os.path.basename(path.rstrip("/"))
-            return host, path, name
-
-    if len(parts) == 3:
-        # host:path:name (remote with explicit name)
-        return parts[0], parts[1], parts[2]
-
-    if len(parts) > 3:
-        # host:path:name where path might have colons... unlikely but handle it
-        # Assume last part is name, first part is host, middle is path
-        host = parts[0]
-        name = parts[-1]
-        path = ":".join(parts[1:-1])
-        return host, path, name
-
-    # Fallback
-    return None, spec, os.path.basename(spec.rstrip("/"))
-
-
 def main():
     parser = argparse.ArgumentParser(
-        description="Compare S2S demo evaluation results from multiple folders",
+        description="Compare S2S demo and VoiceBench evaluation results",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-    # Local folders:
+    # Compare s2s_demo and voicebench results for two models:
     python compare_eval_results.py \\
-        --eval_folders "/path/to/eval1:Model A" "/path/to/eval2:Model B" \\
+        --eval_folders \\
+            "host:/path/to/model_a/s2s_demo:Model A" \\
+            "host:/path/to/model_a/voicebench:Model A" \\
+            "host:/path/to/model_b/s2s_demo:Model B" \\
+            "host:/path/to/model_b/voicebench:Model B" \\
         --output comparison_report.md
 
-    # Remote folders (via SSH):
-    python compare_eval_results.py \\
-        --eval_folders "cluster1:/path/to/eval1:Model A" "cluster2:/path/to/eval2:Model B" \\
-        --output comparison_report.md
-
-    # Mixed local and remote:
-    python compare_eval_results.py \\
-        --eval_folders "/local/path:Local Model" "remote-host:/remote/path:Remote Model" \\
-        --output comparison_report.md
-
-Each eval folder should contain a metrics.json file.
-Format:
-  - Local:  "/path/to/folder:Display Name" or "/path/to/folder"
-  - Remote: "hostname:/path/to/folder:Display Name" or "hostname:/path/to/folder"
+Each folder should contain eval-results/ with either s2s_demo.* or voicebench.* subfolders.
         """,
     )
     parser.add_argument(
@@ -371,40 +489,48 @@ Format:
         required=True,
         help="Evaluation folders: 'path:name', 'host:path:name', or just 'path' / 'host:path'",
     )
-    parser.add_argument("--output", type=str, default="comparison_report.md", help="Output Markdown file path")
-    parser.add_argument(
-        "--metrics_file", type=str, default="metrics.json", help="Name of the metrics file in each folder"
-    )
+    parser.add_argument("--output", type=str, default="comparison_report.md", help="Output Markdown file")
 
     args = parser.parse_args()
 
-    # Load all metrics
-    models = []
+    s2s_demo_models = []
+    voicebench_models = []
+
     for spec in args.eval_folders:
         host, folder_path, model_name = parse_folder_spec(spec)
+        eval_results_path = (
+            folder_path + "/eval-results" if not folder_path.endswith("/") else folder_path + "eval-results"
+        )
 
-        # Build metrics path (use / for remote paths too)
-        if folder_path.endswith("/"):
-            metrics_path = folder_path + args.metrics_file
+        location_str = f"{host}:{folder_path}" if host else folder_path
+
+        eval_type = detect_eval_type(host, eval_results_path)
+
+        if eval_type == "s2s_demo":
+            metrics = load_s2s_demo_metrics(host, folder_path)
+            if metrics:
+                s2s_demo_models.append((model_name, metrics))
+                print(f"Loaded s2s_demo metrics for {model_name} from {location_str}")
+            else:
+                print(f"Warning: No s2s_demo metrics found in {location_str}")
+
+        elif eval_type == "voicebench":
+            metrics = load_voicebench_metrics(host, folder_path)
+            if metrics.get("subtests"):
+                voicebench_models.append((model_name, metrics))
+                n_subtests = len(metrics["subtests"])
+                print(f"Loaded voicebench metrics for {model_name} from {location_str} ({n_subtests} subtests)")
+            else:
+                print(f"Warning: No voicebench metrics found in {location_str}")
+
         else:
-            metrics_path = folder_path + "/" + args.metrics_file
+            print(f"Warning: Could not detect eval type for {location_str}")
 
-        location_str = f"{host}:{metrics_path}" if host else metrics_path
-
-        metrics = load_metrics(metrics_path, host=host)
-        if metrics is None:
-            print(f"Skipping {model_name}: could not load metrics from {location_str}")
-            continue
-
-        key_metrics = extract_key_metrics(metrics)
-        models.append((model_name, key_metrics))
-        print(f"Loaded metrics for {model_name} from {location_str}")
-
-    if not models:
-        print("Error: No valid metrics files found.")
+    if not s2s_demo_models and not voicebench_models:
+        print("Error: No valid metrics found.")
         return 1
 
-    generate_report(models, args.output)
+    generate_report(s2s_demo_models, voicebench_models, args.output)
     return 0
 
 
