@@ -43,6 +43,7 @@ import logging
 import os
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Callable, Coroutine, Protocol
 
 import requests
@@ -631,6 +632,8 @@ def create_skills_proxy_app(
     return_token_id_information: bool = True,
     vllm_base_url: str | None = None,
     model_name: str | None = None,
+    evaluator_type: str | None = None,
+    evaluator_config: dict | None = None,
 ) -> FastAPI:
     """
     Create a FastAPI application for NeMo-Gym integration.
@@ -657,6 +660,9 @@ def create_skills_proxy_app(
         vllm_base_url: The vLLM server base URL for tokenize calls. If None, will be
                       auto-discovered from generation_task or environment.
         model_name: The model name for tokenize calls. If None, will be auto-discovered.
+        evaluator_type: Type of evaluator to use for reward calculation (e.g., "math", "code_exec").
+                       If None, reward will be 0.0.
+        evaluator_config: Configuration dict for the evaluator (optional).
 
     Returns:
         FastAPI application with NeMo-Gym compatible endpoints.
@@ -683,6 +689,23 @@ def create_skills_proxy_app(
     else:
         _generation_key = generation_key
         _process_fn = process_fn
+
+    # Initialize evaluator if provided (check environment variable first)
+    _evaluator = None
+    _evaluator_type = evaluator_type or os.environ.get("NEMO_SKILLS_EVALUATOR_TYPE")
+
+    if _evaluator_type:
+        from nemo_skills.evaluation.evaluator import EVALUATOR_CLASS_MAP
+
+        if _evaluator_type not in EVALUATOR_CLASS_MAP:
+            raise ValueError(
+                f"Unknown evaluator type: {_evaluator_type}. Available types: {list(EVALUATOR_CLASS_MAP.keys())}"
+            )
+
+        evaluator_class = EVALUATOR_CLASS_MAP[_evaluator_type]
+        eval_config = evaluator_config or {}
+        _evaluator = evaluator_class(config=eval_config)
+        LOG.info(f"Initialized {_evaluator_type} evaluator for reward calculation")
 
     # Get vLLM base URL and model name for tokenize calls
     _vllm_base_url = vllm_base_url
@@ -891,8 +914,36 @@ def create_skills_proxy_app(
                 f"gen_tokens={len(generation_token_ids)}, logprobs={len(generation_log_probs)}"
             )
 
+            # Calculate reward using evaluator if available
+            reward = 0.0
+            eval_result = None
+            if _evaluator is not None:
+                try:
+                    # Prepare data point for evaluation
+                    eval_data = {
+                        "generation": generation_text,
+                        "expected_answer": request_body.get("expected_answer", ""),
+                        **{k: v for k, v in request_body.items() if k not in ["responses_create_params"]},
+                    }
+
+                    # Run evaluation
+                    eval_result = await _evaluator.eval_single(eval_data)
+
+                    # Extract reward from evaluation result
+                    # MathEvaluator returns "symbolic_correct" (bool)
+                    # Convert to reward: 1.0 if correct, 0.0 otherwise
+                    if "symbolic_correct" in eval_result:
+                        reward = 1.0 if eval_result["symbolic_correct"] else 0.0
+                        LOG.info(f"Reward calculated: {reward} (symbolic_correct={eval_result['symbolic_correct']})")
+                    else:
+                        LOG.warning("Evaluator did not return 'symbolic_correct', using reward=0.0")
+                except Exception as e:
+                    LOG.error(f"Error calculating reward: {e}", exc_info=True)
+                    reward = 0.0
+                    eval_result = None
+
             nemo_gym_response = {
-                "reward": 0.0,  # Reward will be calculated by MathEnvironment or set to 0
+                "reward": reward,
                 "response": {
                     "id": f"resp-{uuid.uuid4().hex[:8]}",
                     "output": [
@@ -915,6 +966,32 @@ def create_skills_proxy_app(
                 # Pass through the original request fields
                 **{k: v for k, v in request_body.items() if k not in ["responses_create_params"]},
             }
+
+            # Save generation log to jsonl for inspection
+            try:
+                log_entry = {
+                    "timestamp": datetime.now().isoformat(),
+                    "rowidx": request_body.get("_rowidx", -1),
+                    "problem": request_body.get("problem", request_body.get("question", "")),
+                    "expected_answer": request_body.get("expected_answer", ""),
+                    "generation": generation_text,
+                    "reward": reward,
+                    "prompt_tokens": len(prompt_token_ids),
+                    "generation_tokens": len(generation_token_ids),
+                    "difficulty": request_body.get("difficulty", ""),
+                    "category": request_body.get("category", ""),
+                }
+
+                # Add evaluation details if available
+                if eval_result is not None:
+                    log_entry["symbolic_correct"] = eval_result.get("symbolic_correct", False)
+                    log_entry["predicted_answer"] = eval_result.get("predicted_answer", "")
+
+                log_file = os.environ.get("NEMO_SKILLS_PROXY_LOG", "/tmp/nemo_skills_proxy_generations.jsonl")
+                with open(log_file, "a") as f:
+                    f.write(json.dumps(log_entry) + "\n")
+            except Exception as log_error:
+                LOG.warning(f"Failed to write generation log: {log_error}")
 
             return JSONResponse(content=nemo_gym_response)
 

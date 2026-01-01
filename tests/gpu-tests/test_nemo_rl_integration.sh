@@ -34,7 +34,12 @@ PROXY_URL="http://localhost:${PROXY_PORT}/v1"
 # Kill any leftover processes on the port
 fuser -k ${PROXY_PORT}/tcp 2>/dev/null || true
 
-echo '{"problem": "What is 2+2?", "expected_answer": "4", "difficulty": "easy", "solution": "2 + 2 = 4", "category": "arithmetic", "steps": ["Add 2 and 2"], "task_name": "math"}' > "$DATA_FILE"
+# Create test data with multiple examples to verify reward calculation
+cat > "$DATA_FILE" << 'EOF'
+{"problem": "What is 1 + 1?", "expected_answer": "2", "difficulty": "easy", "category": "arithmetic", "task_name": "math"}
+{"problem": "What is 3 + 2?", "expected_answer": "5", "difficulty": "easy", "category": "arithmetic", "task_name": "math"}
+{"problem": "What is 10 - 3?", "expected_answer": "8", "difficulty": "easy", "category": "arithmetic", "task_name": "math"}
+EOF
 
 cleanup() {
     echo "Cleaning up..."
