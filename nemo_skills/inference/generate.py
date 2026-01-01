@@ -146,7 +146,7 @@ class GenerateSolutionsConfig:
     dry_run: bool = False
 
     # Evaluator configuration for reward calculation (used in NeMo-RL integration)
-    evaluator: dict = field(default_factory=dict)  # e.g., {"type": "math", "config": {...}}
+    evaluator: dict = field(default_factory=dict)  # e.g., type: math, config: dict with evaluator params
 
     # set to True if code execution needs to be supported
     code_execution: bool = False
