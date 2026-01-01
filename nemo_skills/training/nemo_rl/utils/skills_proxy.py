@@ -805,10 +805,17 @@ def create_skills_proxy_app(
 
             # Process through NeMo-Skills pipeline
             data_point = {"messages": messages}
-            # Pass through extra fields that might be needed (like expected_answer)
-            for key in ["question", "expected_answer", "problem"]:
-                if key in request_body:
-                    data_point[key] = request_body[key]
+
+            # Pass through all extra fields from request_body, excluding internal NeMo-Gym fields
+            # This preserves metadata like expected_answer, problem, difficulty, category, etc.
+            EXCLUDED_KEYS = {
+                "responses_create_params",  # NeMo-Gym API format
+                "agent_ref",  # Agent routing information
+                "_rowidx",  # Internal ordering
+            }
+            for key, value in request_body.items():
+                if key not in EXCLUDED_KEYS:
+                    data_point[key] = value
 
             # Pass through sampling parameters from responses_create_params
             # This is critical for NeMo-RL integration where vLLM asserts temperature matches
@@ -828,13 +835,6 @@ def create_skills_proxy_app(
                 data_point["_request_logprobs"] = True
                 data_point["_request_return_tokens_as_token_ids"] = True
 
-            LOG.debug(
-                f"/run request params: temperature={data_point.get('_request_temperature')}, "
-                f"top_p={data_point.get('_request_top_p')}, "
-                f"max_tokens={data_point.get('_request_max_tokens')}, "
-                f"logprobs={data_point.get('_request_logprobs')}"
-            )
-
             output = await _process_fn(data_point, [])
 
             generation_text = output.get(_generation_key, output.get("generation", ""))
@@ -846,14 +846,9 @@ def create_skills_proxy_app(
 
             if _return_token_id_information:
                 # Extract generation token IDs from logprobs in the output
-                LOG.info(
-                    f"Token ID extraction: output keys={list(output.keys())}, "
-                    f"has_logprobs={'logprobs' in output}, has_tokens={'tokens' in output}"
-                )
                 if "logprobs" in output and "tokens" in output:
                     # Logprobs were returned - extract token IDs
                     tokens = output.get("tokens", [])
-                    LOG.info(f"Extracting from {len(tokens)} tokens")
                     logprobs = output.get("logprobs", [])
 
                     for i, token in enumerate(tokens):
@@ -877,7 +872,6 @@ def create_skills_proxy_app(
 
                 # Get prompt token IDs via /tokenize endpoint
                 if _vllm_base_url and _model_name:
-                    LOG.info(f"Calling tokenize: url={_vllm_base_url}, model={_model_name}")
                     prompt_token_ids = (
                         await tokenize_messages(
                             base_url=_vllm_base_url,
@@ -887,7 +881,6 @@ def create_skills_proxy_app(
                         )
                         or []
                     )
-                    LOG.info(f"Tokenize returned {len(prompt_token_ids)} prompt tokens")
                 else:
                     LOG.warning(f"Cannot tokenize: vllm_url={_vllm_base_url}, model={_model_name}")
 

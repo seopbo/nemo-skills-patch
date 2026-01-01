@@ -18,6 +18,7 @@ import argparse
 import copy
 import importlib
 import json
+import logging
 import os
 import pprint
 from collections import defaultdict
@@ -41,7 +42,9 @@ from omegaconf import OmegaConf
 from transformers import PreTrainedTokenizerBase
 
 from nemo_skills.prompt.utils import get_prompt
-from nemo_skills.utils import setup_make_sequence_length_divisible_by
+from nemo_skills.utils import get_logger_name, setup_make_sequence_length_divisible_by
+
+LOG = logging.getLogger(get_logger_name(__file__))
 
 # NeMo-Gym imports (optional - only needed when using NeMo-Gym)
 _NEMO_GYM_IMPORT_ERROR = None
@@ -247,14 +250,19 @@ def create_nemo_gym_data_processor(agent_name: str = "math_with_judge_simple_age
             examples_type=prompt_spec["examples_type"],
             config_dir=prompt_spec["config_dir"],
         )
-        user_message = prompt.fill(datum_dict, format_as_string=True)
-        message_log = [
-            {
-                "role": "user",
-                "content": user_message,
-                "token_ids": tokenizer([user_message], return_tensors="pt", add_special_tokens=False)["input_ids"][0],
-            }
-        ]
+        user_message = prompt.fill(datum_dict, format_as_string=False)
+
+        message_log = []
+        for msg in user_message:
+            message_log.append(
+                {
+                    "role": msg["role"],
+                    "content": msg["content"],
+                    "token_ids": tokenizer([msg["content"]], return_tensors="pt", add_special_tokens=False)[
+                        "input_ids"
+                    ][0],
+                }
+            )
 
         length = sum(len(m["token_ids"]) for m in message_log)
 
@@ -267,7 +275,7 @@ def create_nemo_gym_data_processor(agent_name: str = "math_with_judge_simple_age
         # NeMo-Gym specific fields (required by rollout_collection.py)
         # These fields are used by NemoGym.run_rollouts() to make agent calls
         extra_env_info["responses_create_params"] = {
-            "input": [{"role": "user", "content": user_message}],
+            "input": user_message,  # Already in list[dict] format from prompt.fill()
             "tools": [],  # No tools for basic math
         }
         # Agent ref tells NeMo-Gym which agent server to call

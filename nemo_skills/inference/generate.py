@@ -622,7 +622,6 @@ class GenerationTask:
         LOG.debug(
             f"fill_prompt called with prompt_format={self.cfg.prompt_format}, data_point keys={list(data_point.keys())}"
         )
-
         # Handle openai format or data that has messages (e.g., from proxy endpoint)
         # TODO the second clause here is definitely a hack and should be removed
         if self.cfg.prompt_format == "openai" or ("messages" in data_point and self.prompt is None):
@@ -645,12 +644,13 @@ class GenerationTask:
                         "Text completion endpoint requires a tokenizer to apply chat template. "
                         "Set tokenizer parameter or ensure server.model is configured."
                     )
-                return self.hf_tokenizer.apply_chat_template(
+                templated_prompt = self.hf_tokenizer.apply_chat_template(
                     messages,
                     tokenize=False,
                     add_generation_prompt=True,
                     **(self.cfg.chat_template_kwargs or {}),
                 )
+                return templated_prompt
 
             return messages
 
@@ -772,7 +772,6 @@ class GenerationTask:
                 extra_body = generation_params.get("extra_body", {}) or {}
                 extra_body["return_tokens_as_token_ids"] = True
                 generation_params["extra_body"] = extra_body
-            LOG.info(f"Requesting logprobs: top_logprobs=1, extra_body={generation_params.get('extra_body')}")
 
         if self.cfg.code_execution:
             if self.cfg.override_max_code_executions and self.cfg.total_code_executions_in_prompt is not None:

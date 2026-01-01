@@ -34,7 +34,7 @@ PROXY_URL="http://localhost:${PROXY_PORT}/v1"
 # Kill any leftover processes on the port
 fuser -k ${PROXY_PORT}/tcp 2>/dev/null || true
 
-echo '{"problem": "What is 2+2?", "expected_answer": "4"}' > "$DATA_FILE"
+echo '{"problem": "What is 2+2?", "expected_answer": "4", "difficulty": "easy", "solution": "2 + 2 = 4", "category": "arithmetic", "steps": ["Add 2 and 2"], "task_name": "math"}' > "$DATA_FILE"
 
 cleanup() {
     echo "Cleaning up..."
