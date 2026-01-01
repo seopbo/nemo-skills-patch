@@ -109,7 +109,8 @@ ns run_cmd --cluster test-local --config_dir "$SCRIPT_DIR" --container nemo-skil
         ++inference.temperature=-1 \
         ++inference.top_p=-1 \
         ++generate_port=$PROXY_PORT \
-        ++prompt_format=openai" \
+        ++prompt_format=openai \
+        ++evaluator.type=math" \
     2>&1 | tee /tmp/nemo-skills.log &
 PROXY_PID=$!
 

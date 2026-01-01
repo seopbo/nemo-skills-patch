@@ -15,6 +15,7 @@
 import asyncio
 import json
 import logging
+import os
 import random
 import shutil
 import sys
@@ -143,6 +144,9 @@ class GenerateSolutionsConfig:
     # can add this flag to just print the first prompt instead of running generation
     # useful to double check that your data can be loaded and prompt has what you expect
     dry_run: bool = False
+
+    # Evaluator configuration for reward calculation (used in NeMo-RL integration)
+    evaluator: dict = field(default_factory=dict)  # e.g., {"type": "math", "config": {...}}
 
     # set to True if code execution needs to be supported
     code_execution: bool = False
@@ -912,7 +916,18 @@ class GenerationTask:
         Uses the skills_proxy module for OpenAI-compatible API implementation.
         """
         LOG.info(f"Server mode config: prompt_format={self.cfg.prompt_format}, prompt_config={self.cfg.prompt_config}")
-        app = create_skills_proxy_app(generation_task=self)
+
+        # Get evaluator config from cfg.evaluator or environment variable
+        evaluator_type = self.cfg.evaluator.get("type") if self.cfg.evaluator else None
+        evaluator_config = self.cfg.evaluator.get("config") if self.cfg.evaluator else None
+
+        # Fallback to environment variable if not set in config
+        if not evaluator_type:
+            evaluator_type = os.environ.get("NEMO_SKILLS_EVALUATOR_TYPE")
+
+        app = create_skills_proxy_app(
+            generation_task=self, evaluator_type=evaluator_type, evaluator_config=evaluator_config
+        )
 
         LOG.info(
             f"Starting FastAPI server on {self.cfg.generate_host}:{self.cfg.generate_port}. "
