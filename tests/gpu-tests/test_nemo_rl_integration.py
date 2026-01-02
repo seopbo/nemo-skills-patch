@@ -75,9 +75,13 @@ class NemoRLTestConfig:
 
 
 def wait_for_url_in_log(
-    log_file: Path, pattern: str = r"Starting server on (http://[\d.]+:\d+/v1)", timeout: int = 720
+    log_file: Path, pattern: str = r"vLLM Base URLs: \['(http://[\d.]+:\d+/v1)'\]", timeout: int = 720
 ) -> str | None:
-    """Wait for a URL to appear in a log file."""
+    """Wait for a URL to appear in a log file.
+
+    Default pattern matches NeMo-RL/NeMo-Gym vLLM Base URLs format:
+        vLLM Base URLs: ['http://10.110.40.219:50651/v1']
+    """
     regex = re.compile(pattern)
     start_time = time.time()
 
