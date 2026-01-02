@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import os
 import re
 import subprocess
 import tempfile
@@ -32,6 +33,8 @@ class NemoRLTestConfig:
     All parameters can be configured at creation time:
     - vllm_discovery_timeout: vLLM server discovery timeout in seconds (default: 720)
     - proxy_ready_timeout: Proxy server ready timeout in seconds (default: 120)
+    - config_dir: Path to cluster config directory (default: tests/gpu-tests/)
+                  Can be overridden via NEMO_SKILLS_TEST_CONFIG_DIR environment variable
 
     Example:
         # Use defaults
@@ -45,6 +48,10 @@ class NemoRLTestConfig:
             vllm_discovery_timeout=1800,  # 30 minutes
             proxy_ready_timeout=300,       # 5 minutes
         )
+
+        # Use external config (e.g., /home/wedu/test-local.yaml)
+        export NEMO_SKILLS_TEST_CONFIG_DIR=/home/wedu
+        pytest tests/gpu-tests/test_nemo_rl_integration.py
     """
 
     model: str
@@ -53,7 +60,18 @@ class NemoRLTestConfig:
     vllm_discovery_timeout: int = 720  # 12 minutes - can be overridden at creation
     proxy_ready_timeout: int = 120  # 2 minutes - can be overridden at creation
     cluster: str = "test-local"
-    config_dir: Path = Path(__file__).absolute().parent
+    config_dir: Path | None = None  # Will be set from env or default
+
+    def __post_init__(self):
+        """Set config_dir from environment variable if not provided."""
+        if self.config_dir is None:
+            # Check for external config directory (e.g., /home/wedu/)
+            env_config_dir = os.environ.get("NEMO_SKILLS_TEST_CONFIG_DIR")
+            if env_config_dir:
+                self.config_dir = Path(env_config_dir)
+            else:
+                # Default to test directory
+                self.config_dir = Path(__file__).absolute().parent
 
 
 def wait_for_url_in_log(
