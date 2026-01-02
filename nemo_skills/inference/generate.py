@@ -434,12 +434,18 @@ class GenerationTask:
         self.cfg.server["server_type"] = "vllm"
         self.cfg.server["host"] = vllm_config.host
         self.cfg.server["port"] = vllm_config.port
-        # Use a placeholder - will be updated in _discover_model_name_from_vllm()
-        self.cfg.server["model"] = "__pending_discovery__"
+        # Only set placeholder if model not explicitly provided
+        if not self.cfg.server.get("model"):
+            self.cfg.server["model"] = "__pending_discovery__"
         OmegaConf.set_struct(self.cfg.server, True)
 
         # Store the base_url for later model name discovery
         self._vllm_base_url = vllm_config.base_url
+
+        # If model is explicitly provided, store it immediately
+        if self.cfg.server.get("model") and self.cfg.server.get("model") != "__pending_discovery__":
+            self._model_name = self.cfg.server.get("model")
+            LOG.info(f"Using explicitly configured model: {self._model_name}")
 
     def _discover_model_name_from_vllm(self):
         """Discover the model name from explicit config, head server, or vLLM."""
