@@ -165,8 +165,8 @@ def test_nemo_rl_integration():
 
     # NemoGym bug patch - server returns YAML but client expects JSON
     nemo_gym_patch = (
-        'sed -i "s/return OmegaConf.to_yaml(get_global_config_dict())/'
-        'import json; return json.dumps(OmegaConf.to_container(get_global_config_dict()))/" '
+        "sed -i 's/return OmegaConf\\.to_yaml(get_global_config_dict())"
+        "/import json; return json.dumps(OmegaConf.to_container(get_global_config_dict()))/' "
         "/opt/nemo_rl_venv/lib/python3.12/site-packages/nemo_gym/server_utils.py"
     )
 
