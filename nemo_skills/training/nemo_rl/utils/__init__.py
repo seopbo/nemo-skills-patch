@@ -13,19 +13,21 @@
 # limitations under the License.
 
 from nemo_skills.training.nemo_rl.utils.skills_proxy import (
-    # Discovery utilities
+    # Configuration
+    SkillsProxyConfig,
     VLLMServerConfig,
     # Proxy server factory
     create_skills_proxy_app,
+    # Discovery utilities
     discover_vllm_server,
-    set_vllm_server_url,
 )
 
 __all__ = [
+    # Configuration
+    "SkillsProxyConfig",
     # Proxy server factory
     "create_skills_proxy_app",
     # Discovery utilities
     "VLLMServerConfig",
     "discover_vllm_server",
-    "set_vllm_server_url",
 ]

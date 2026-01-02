@@ -410,14 +410,20 @@ class GenerationTask:
             LOG.info(f"Server already configured with type: {self.cfg.server['server_type']}")
             return
 
+        # Get explicit base_url from config if provided (replaces old environment variable pattern)
+        explicit_base_url = None
+        if self.cfg.server.get("base_url") and self.cfg.server.get("base_url") != "None":
+            explicit_base_url = self.cfg.server.get("base_url")
+
         # Discover the vLLM server URL (skip model discovery - server may not be ready)
-        vllm_config = discover_vllm_server(skip_model_discovery=True)
+        # Pass explicit_base_url if available - it takes highest priority in discovery
+        vllm_config = discover_vllm_server(explicit_base_url=explicit_base_url, skip_model_discovery=True)
 
         if vllm_config is None:
             raise ValueError(
                 "start_server=True requires a vLLM backend. "
-                "Either configure server.server_type and server.base_url, "
-                "or set NEMO_RL_VLLM_URL environment variable."
+                "Please configure server.base_url and server.model explicitly, "
+                "or ensure the proxy can discover the server via Ray or NeMo-Gym head server."
             )
 
         LOG.info(f"Discovered vLLM backend at {vllm_config.base_url} (via {vllm_config.source})")
@@ -436,8 +442,7 @@ class GenerationTask:
         self._vllm_base_url = vllm_config.base_url
 
     def _discover_model_name_from_vllm(self):
-        """Discover the model name from environment, head server, or vLLM."""
-        import os
+        """Discover the model name from explicit config, head server, or vLLM."""
 
         import requests
 
@@ -447,10 +452,13 @@ class GenerationTask:
 
         model_name = None
 
-        # First check environment variable (simplest way to pass from NeMo-RL)
-        model_name = os.environ.get("NEMO_RL_MODEL_NAME")
-        if model_name:
-            LOG.info(f"Using model from NEMO_RL_MODEL_NAME: {model_name}")
+        # First check if explicitly provided via ++server.model
+        if self.cfg.server and self.cfg.server.get("model"):
+            explicit_model = self.cfg.server.get("model")
+            # Skip the placeholder value
+            if explicit_model and explicit_model != "__pending_discovery__":
+                model_name = explicit_model
+                LOG.info(f"Using explicitly configured model: {model_name}")
 
         # Try NeMo-Gym head server
         if not model_name:
@@ -917,17 +925,28 @@ class GenerationTask:
         """
         LOG.info(f"Server mode config: prompt_format={self.cfg.prompt_format}, prompt_config={self.cfg.prompt_config}")
 
-        # Get evaluator config from cfg.evaluator or environment variable
-        evaluator_type = self.cfg.evaluator.get("type") if self.cfg.evaluator else None
-        evaluator_config = self.cfg.evaluator.get("config") if self.cfg.evaluator else None
+        # Build SkillsProxyConfig from discovered/configured values
+        from nemo_skills.training.nemo_rl.utils.skills_proxy import SkillsProxyConfig
 
-        # Fallback to environment variable if not set in config
-        if not evaluator_type:
-            evaluator_type = os.environ.get("NEMO_SKILLS_EVALUATOR_TYPE")
+        vllm_base_url = getattr(self, "_vllm_base_url", None)
+        model_name = getattr(self, "_model_name", None)
 
-        app = create_skills_proxy_app(
-            generation_task=self, evaluator_type=evaluator_type, evaluator_config=evaluator_config
+        if not vllm_base_url or not model_name:
+            raise ValueError(
+                "vLLM base URL and model name are required to start the proxy server. "
+                "Please ensure discovery succeeded or provide them explicitly via "
+                "++server.base_url and ++server.model"
+            )
+
+        proxy_config = SkillsProxyConfig(
+            vllm_base_url=vllm_base_url,
+            model_name=model_name,
+            proxy_port=self.cfg.generate_port,
+            evaluator_type=self.cfg.evaluator.get("type") if self.cfg.evaluator else None,
+            evaluator_config=self.cfg.evaluator.get("config") if self.cfg.evaluator else None,
         )
+
+        app = create_skills_proxy_app(generation_task=self, config=proxy_config)
 
         LOG.info(
             f"Starting FastAPI server on {self.cfg.generate_host}:{self.cfg.generate_port}. "

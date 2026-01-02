@@ -68,20 +68,13 @@ LOG = logging.getLogger(get_logger_name(__file__))
 # 3. NeMo-Gym head server query (if head server address is known)
 
 
-# Environment variables for vLLM server discovery
-VLLM_URL_ENV_VARS = [
-    "NEMO_RL_VLLM_URL",  # Set by NeMo-RL when expose_http_server=true
-    "NEMO_SKILLS_MODEL_SERVER_URL",  # General-purpose model server URL
-    "VLLM_BASE_URL",  # Common vLLM URL variable
-]
-
-# Environment variables for Ray cluster address
+# Environment variables for Ray cluster address (kept for legitimate service discovery)
 RAY_ADDRESS_ENV_VARS = [
     "RAY_ADDRESS",  # Standard Ray address variable
     "RAY_HEAD_ADDRESS",  # Alternative Ray head address
 ]
 
-# Environment variable for NeMo-Gym head server
+# Environment variable for NeMo-Gym head server (kept for legitimate service discovery)
 NEMO_GYM_HEAD_SERVER_ENV_VAR = "NEMO_GYM_HEAD_SERVER_URL"
 
 # Ray named value key for vLLM server URL
@@ -108,6 +101,46 @@ class VLLMServerConfig:
     source: str  # How the server was discovered
     model_name: str | None = None  # The model name served by vLLM
     generation_config: VLLMGenerationConfig | None = None  # Generation parameters from server
+
+
+@dataclass
+class SkillsProxyConfig:
+    """Configuration for Skills Proxy server.
+
+    This class centralizes all configuration parameters for the proxy server,
+    replacing environment variable dependencies with explicit configuration.
+
+    Args:
+        vllm_base_url: The vLLM server base URL (e.g., "http://localhost:5000/v1").
+                      Required for tokenization and health checks.
+        model_name: The model name served by vLLM (e.g., "Qwen/Qwen3-0.6B").
+                   Required for tokenization.
+        proxy_port: Port for the proxy server to listen on (default: 7000).
+        return_token_id_information: If True, request and return token IDs and logprobs
+                                    for NeMo-RL training (default: True).
+        evaluator_type: Type of evaluator for reward calculation (e.g., "math", "code_exec").
+                       If None, reward will be 0.0.
+        evaluator_config: Configuration dict for the evaluator (optional).
+        title: Title for the FastAPI application (default: "NeMo Skills Generation Server").
+
+    Example:
+        # Explicit configuration for pipeline
+        config = SkillsProxyConfig(
+            vllm_base_url="http://192.168.1.10:5000/v1",
+            model_name="Qwen/Qwen3-0.6B",
+            proxy_port=7000,
+            evaluator_type="math",
+        )
+        app = create_skills_proxy_app(config=config, generation_task=task)
+    """
+
+    vllm_base_url: str
+    model_name: str
+    proxy_port: int = 7000
+    return_token_id_information: bool = True
+    evaluator_type: str | None = None
+    evaluator_config: dict | None = None
+    title: str = "NeMo Skills Generation Server"
 
 
 def get_vllm_model_name(base_url: str, timeout: float = 5.0) -> str | None:
@@ -315,20 +348,22 @@ def extract_token_ids_from_logprobs(logprobs_content: list[dict]) -> tuple[list[
 
 
 def discover_vllm_server(
+    explicit_base_url: str | None = None,
     ray_address: str | None = None,
     head_server_url: str | None = None,
     timeout: float = 5.0,
     skip_model_discovery: bool = False,
 ) -> VLLMServerConfig | None:
     """
-    Discover the vLLM HTTP server address using multiple methods.
+    Discover the vLLM HTTP server address using service discovery methods.
 
     This function attempts to find the vLLM server that NeMo-RL exposes when
     running with `expose_http_server: true`. It tries the following methods
     in order:
 
-    1. **Environment variables**: Checks NEMO_RL_VLLM_URL, NEMO_SKILLS_MODEL_SERVER_URL,
-       and VLLM_BASE_URL for a configured URL.
+    1. **Explicit URL**: If explicit_base_url is provided (e.g., from command-line
+       configuration via ++server.base_url), use it directly. This replaces the
+       old environment variable-based discovery.
 
     2. **Ray named values**: If connected to a Ray cluster, checks for the
        server URL stored under a known key.
@@ -336,7 +371,13 @@ def discover_vllm_server(
     3. **NeMo-Gym head server**: If the head server URL is known, queries it
        for the model server configuration.
 
+    Note: For pipeline-level configuration, use explicit vllm_base_url parameter
+    in create_skills_proxy_app() instead of relying on discovery.
+
     Args:
+        explicit_base_url: Explicit vLLM base URL (e.g., "http://192.168.1.10:5000/v1").
+                          If provided, this takes precedence over all discovery methods.
+                          This replaces the old NEMO_RL_VLLM_URL environment variable.
         ray_address: Optional Ray cluster address. If None, will try to get from
                     environment or connect to an existing cluster.
         head_server_url: Optional NeMo-Gym head server URL (e.g., "http://localhost:11000").
@@ -349,7 +390,10 @@ def discover_vllm_server(
         VLLMServerConfig if found, None otherwise.
 
     Example:
-        # Simple discovery
+        # Explicit URL (replaces environment variable pattern)
+        config = discover_vllm_server(explicit_base_url="http://192.168.1.10:5000/v1")
+
+        # Discovery from Ray cluster
         config = discover_vllm_server()
         if config:
             print(f"Found vLLM server at {config.base_url} (via {config.source})")
@@ -363,15 +407,26 @@ def discover_vllm_server(
         # URL discovery only (when server might not be ready)
         config = discover_vllm_server(skip_model_discovery=True)
     """
-    # Method 1: Environment variables
-    config = _discover_from_env()
-    if config:
-        if not skip_model_discovery:
-            config.model_name = get_vllm_model_name(config.base_url, timeout)
-            config.generation_config = get_vllm_generation_config(head_server_url, timeout)
-        return config
+    # Method 0: Explicit URL (replaces old environment variable discovery)
+    if explicit_base_url:
+        parsed = _parse_url(explicit_base_url)
+        if parsed:
+            host, port = parsed
+            LOG.info(f"Using explicit vLLM URL: {explicit_base_url}")
+            config = VLLMServerConfig(
+                base_url=explicit_base_url,
+                host=host,
+                port=port,
+                source="explicit",
+            )
+            if not skip_model_discovery:
+                config.model_name = get_vllm_model_name(config.base_url, timeout)
+                config.generation_config = get_vllm_generation_config(head_server_url, timeout)
+            return config
+        else:
+            LOG.warning(f"Failed to parse explicit_base_url: {explicit_base_url}")
 
-    # Method 2: Ray named values
+    # Method 1: Ray named values
     config = _discover_from_ray(ray_address)
     if config:
         if not skip_model_discovery:
@@ -379,7 +434,7 @@ def discover_vllm_server(
             config.generation_config = get_vllm_generation_config(head_server_url, timeout)
         return config
 
-    # Method 3: NeMo-Gym head server
+    # Method 2: NeMo-Gym head server
     config = _discover_from_head_server(head_server_url, timeout)
     if config:
         if not skip_model_discovery:
@@ -387,6 +442,7 @@ def discover_vllm_server(
             config.generation_config = get_vllm_generation_config(head_server_url, timeout)
         return config
 
+    LOG.debug("Could not discover vLLM server using any method")
     return None
 
 
@@ -407,23 +463,9 @@ def _parse_url(url: str) -> tuple[str, int] | None:
         return None
 
 
-def _discover_from_env() -> VLLMServerConfig | None:
-    """Try to discover vLLM server from environment variables."""
-    for env_var in VLLM_URL_ENV_VARS:
-        url = os.environ.get(env_var)
-        if url:
-            parsed = _parse_url(url)
-            if parsed:
-                host, port = parsed
-                base_url = f"http://{host}:{port}"
-                LOG.info(f"Discovered vLLM server from {env_var}: {base_url}")
-                return VLLMServerConfig(
-                    base_url=base_url,
-                    host=host,
-                    port=port,
-                    source=f"env:{env_var}",
-                )
-    return None
+# Removed _discover_from_env() - use explicit configuration instead
+# For pipeline-level config, pass vllm_base_url directly to create_skills_proxy_app()
+# For service discovery, use Ray or NeMo-Gym head server methods
 
 
 def _discover_from_ray(ray_address: str | None = None) -> VLLMServerConfig | None:
@@ -577,24 +619,8 @@ def _discover_from_head_server(head_server_url: str | None = None, timeout: floa
     return None
 
 
-def set_vllm_server_url(url: str, env_var: str = "NEMO_RL_VLLM_URL") -> None:
-    """
-    Set the vLLM server URL in the environment for discovery.
-
-    This is useful when starting NeMo-RL training to make the vLLM URL
-    discoverable by NeMo-Skills proxy servers.
-
-    Args:
-        url: The vLLM server URL (e.g., "http://localhost:5000")
-        env_var: The environment variable to set (default: NEMO_RL_VLLM_URL)
-
-    Example:
-        # In NeMo-RL training script
-        vllm_port = start_vllm_http_server()
-        set_vllm_server_url(f"http://localhost:{vllm_port}")
-    """
-    os.environ[env_var] = url
-    LOG.info(f"Set {env_var}={url}")
+# Removed set_vllm_server_url() - use explicit configuration instead
+# Pass vllm_base_url directly to create_skills_proxy_app() or use service discovery
 
 
 # =============================================================================
@@ -628,12 +654,7 @@ def create_skills_proxy_app(
     generation_task: GenerationTaskProtocol | None = None,
     process_fn: ProcessFn | None = None,
     generation_key: str = "generation",
-    title: str = "NeMo Skills Generation Server",
-    return_token_id_information: bool = True,
-    vllm_base_url: str | None = None,
-    model_name: str | None = None,
-    evaluator_type: str | None = None,
-    evaluator_config: dict | None = None,
+    config: SkillsProxyConfig | None = None,
 ) -> FastAPI:
     """
     Create a FastAPI application for NeMo-Gym integration.
@@ -653,34 +674,39 @@ def create_skills_proxy_app(
                    data points. Signature: async (data_point: dict, all_data: list) -> dict
         generation_key: The key in the output dict that contains the generation.
                        Only used if process_fn is provided.
-        title: Title for the FastAPI application.
-        return_token_id_information: If True (default), request logprobs from vLLM and
-                                    return prompt_token_ids, generation_token_ids, and
-                                    generation_log_probs in responses. Required for NeMo-RL training.
-        vllm_base_url: The vLLM server base URL for tokenize calls. If None, will be
-                      auto-discovered from generation_task or environment.
-        model_name: The model name for tokenize calls. If None, will be auto-discovered.
-        evaluator_type: Type of evaluator to use for reward calculation (e.g., "math", "code_exec").
-                       If None, reward will be 0.0.
-        evaluator_config: Configuration dict for the evaluator (optional).
+        config: SkillsProxyConfig instance with all configuration parameters (required).
 
     Returns:
         FastAPI application with NeMo-Gym compatible endpoints.
 
     Example:
-        # Using with GenerationTask
+        # Create config with required parameters
+        config = SkillsProxyConfig(
+            vllm_base_url="http://localhost:5000/v1",
+            model_name="Qwen/Qwen3-0.6B",
+            evaluator_type="math",  # Optional
+            proxy_port=7000,  # Optional, has default
+        )
         task = GenerationTask(cfg)
-        app = create_skills_proxy_app(generation_task=task)
-        uvicorn.run(app, host="0.0.0.0", port=7000)
-
-        # Using with custom process function
-        async def my_process(data_point, all_data):
-            return {"generation": "Hello!", "num_generated_tokens": 1}
-
-        app = create_skills_proxy_app(process_fn=my_process)
+        app = create_skills_proxy_app(generation_task=task, config=config)
+        uvicorn.run(app, host="0.0.0.0", port=config.proxy_port)
     """
     if generation_task is None and process_fn is None:
         raise ValueError("Either generation_task or process_fn must be provided")
+
+    if config is None:
+        raise ValueError(
+            "config parameter is required. Please provide a SkillsProxyConfig instance. "
+            "Example: config = SkillsProxyConfig(vllm_base_url='http://...', model_name='...')"
+        )
+
+    # Extract configuration from config object
+    _title = config.title
+    _return_token_id_information = config.return_token_id_information
+    _vllm_base_url = config.vllm_base_url
+    _model_name = config.model_name
+    _evaluator_type = config.evaluator_type
+    _evaluator_config = config.evaluator_config or {}
 
     # Get configuration from task or use defaults
     if generation_task is not None:
@@ -690,10 +716,8 @@ def create_skills_proxy_app(
         _generation_key = generation_key
         _process_fn = process_fn
 
-    # Initialize evaluator if provided (check environment variable first)
+    # Initialize evaluator if provided
     _evaluator = None
-    _evaluator_type = evaluator_type or os.environ.get("NEMO_SKILLS_EVALUATOR_TYPE")
-
     if _evaluator_type:
         from nemo_skills.evaluation.evaluator import EVALUATOR_CLASS_MAP
 
@@ -703,39 +727,16 @@ def create_skills_proxy_app(
             )
 
         evaluator_class = EVALUATOR_CLASS_MAP[_evaluator_type]
-        eval_config = evaluator_config or {}
-        _evaluator = evaluator_class(config=eval_config)
+        _evaluator = evaluator_class(config=_evaluator_config)
         LOG.info(f"Initialized {_evaluator_type} evaluator for reward calculation")
 
-    # Get vLLM base URL and model name for tokenize calls
-    _vllm_base_url = vllm_base_url
-    _model_name = model_name
-    _return_token_id_information = return_token_id_information
-
-    if _vllm_base_url is None and generation_task is not None:
-        # Try to get from generation_task
-        if hasattr(generation_task, "_vllm_base_url"):
-            _vllm_base_url = generation_task._vllm_base_url
-        elif hasattr(generation_task.cfg, "server"):
-            server_cfg = generation_task.cfg.server
-            host = server_cfg.get("host")
-            port = server_cfg.get("port")
-            if host and port:
-                _vllm_base_url = f"http://{host}:{port}/v1"
-
-    if _model_name is None and generation_task is not None:
-        if hasattr(generation_task.cfg, "server"):
-            _model_name = generation_task.cfg.server.get("model")
-
-    # Also check environment
-    if _model_name is None:
-        _model_name = os.environ.get("NEMO_RL_MODEL_NAME")
-
+    # Log configuration
+    LOG.info(f"Skills Proxy configured with vLLM URL: {_vllm_base_url}, model: {_model_name}")
     if _return_token_id_information:
-        LOG.info(f"Token ID information enabled. vLLM URL: {_vllm_base_url}, model: {_model_name}")
+        LOG.info("Token ID information enabled for NeMo-RL training")
 
     app = FastAPI(
-        title=title,
+        title=_title,
         description="Proxy server that adds NeMo-Skills prompting logic to model generations. "
         "Compatible with OpenAI API for seamless integration with NeMo-Gym/NeMo-RL.",
     )
