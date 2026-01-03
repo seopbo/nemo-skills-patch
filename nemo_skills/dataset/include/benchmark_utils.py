@@ -89,10 +89,7 @@ QUESTION_TEMPLATE = (
 FEWSHOT_DELIMITER = "\n\n"
 ENG_COT_PREFIX = "Let's think step by step."
 ENG_ZERO_SHOT_DESCRIPTION = "The following is multiple-choice question about {subject}."
-ENG_FEWSHOT_DESCRIPTION = (
-    "The following are multiple-choice questions (with answers) about {subject}."
-)
-ENG_INSTRUCTION = "Now answer the following question. Think step by step and then finish your answer with the letter of the correct answer (A., B., C., D.)."
+ENG_FEWSHOT_DESCRIPTION = "The following are multiple-choice questions (with answers) about {subject}."
 LATTER_REGEX = r"\b\(?\s*([ABCD])\s*\)?\.?\b"
 EXTRACT_REGEX = r"[\s\S]*" + LATTER_REGEX
 
@@ -168,6 +165,61 @@ def copy_other_fields(entry):
     }
 
 
+def create_zero_shot_context(target_question, target_options, language, subject, il_prompts):
+    eng_prompt = il_prompts == False
+    if eng_prompt:
+        zero_shot_prompt = ENG_ZERO_SHOT_DESCRIPTION.format(subject=subject)
+    else:
+        zero_shot_prompt = DESCRIPTION_TEMPLATES[language].format(subject=subject)
+    
+    zero_shot_prompt += FEWSHOT_DELIMITER
+    zero_shot_prompt += QUESTION_TEMPLATE.format(
+        question=target_question,
+        option_a=target_options["A"],
+        option_b=target_options["B"],
+        option_c=target_options["C"],
+        option_d=target_options["D"],
+    )
+    if eng_prompt:
+        zero_shot_prompt += ENG_COT_PREFIX
+    return zero_shot_prompt
+
+
+def create_few_shot_context(target_question, target_options, language, subject, il_prompts, num_fewshot, few_shot_examples):
+    eng_prompt = il_prompts == False
+    shots = retrieve_few_shot_examples(
+            few_shot_examples, language, subject, num_fewshot
+        )
+    shot_answers = [digit_to_letter(shot[Schema.ANSWER]) for shot in shots]
+    shots = [
+        QUESTION_TEMPLATE.format(
+            question=shot[Schema.QUESTION],
+            option_a=shot[Schema.OPTIONS[0]],
+            option_b=shot[Schema.OPTIONS[1]],
+            option_c=shot[Schema.OPTIONS[2]],
+            option_d=shot[Schema.OPTIONS[3]],
+        )
+        + f"{answer}."
+        for shot, answer in zip(shots, shot_answers)
+    ]
+    if eng_prompt:
+        few_shot_prompt = ENG_FEWSHOT_DESCRIPTION.format(subject=subject)
+    else:
+        few_shot_prompt = DESCRIPTION_TEMPLATES[language].format(subject=subject)
+    few_shot_prompt += FEWSHOT_DELIMITER
+    few_shot_prompt += FEWSHOT_DELIMITER.join(shots)
+    few_shot_prompt += FEWSHOT_DELIMITER
+    few_shot_prompt += QUESTION_TEMPLATE.format(
+        question=target_question,
+        option_a=target_options["A"],
+        option_b=target_options["B"],
+        option_c=target_options["C"],
+        option_d=target_options["D"],
+    )
+    return few_shot_prompt
+
+
+
 def get_mcq_fields(
     target_question,
     target_options,
@@ -183,53 +235,8 @@ def get_mcq_fields(
     target_options_text = "\n".join(
         f"{letter}. {option}" for letter, option in target_options_dict.items()
     )
-
-    eng_prompt = il_prompts == False
     if num_fewshot == 0:
-        if eng_prompt:
-            prompt = ENG_ZERO_SHOT_DESCRIPTION.format(subject=subject)
-        else:
-            prompt = DESCRIPTION_TEMPLATES[language].format(subject=subject)
-        prompt += FEWSHOT_DELIMITER
-        prompt += QUESTION_TEMPLATE.format(
-            question=target_question,
-            option_a=target_options_dict["A"],
-            option_b=target_options_dict["B"],
-            option_c=target_options_dict["C"],
-            option_d=target_options_dict["D"],
-        )
-        if eng_prompt:
-            prompt += ENG_COT_PREFIX
+        prompt = create_zero_shot_context(target_question, target_options_dict, language, subject, il_prompts)
     else:
-        shots = retrieve_few_shot_examples(
-            few_shot_examples, language, subject, num_fewshot
-        )
-        shot_answers = [digit_to_letter(shot[Schema.ANSWER]) for shot in shots]
-        shots = [
-            QUESTION_TEMPLATE.format(
-                question=shot[Schema.QUESTION],
-                option_a=shot[Schema.OPTIONS[0]],
-                option_b=shot[Schema.OPTIONS[1]],
-                option_c=shot[Schema.OPTIONS[2]],
-                option_d=shot[Schema.OPTIONS[3]],
-            )
-            + f"{answer}."
-            for shot, answer in zip(shots, shot_answers)
-        ]
-        if eng_prompt:
-            prompt = ENG_FEWSHOT_DESCRIPTION.format(subject=subject)
-        else:
-            prompt = DESCRIPTION_TEMPLATES[language].format(subject=subject)
-        prompt += FEWSHOT_DELIMITER
-        prompt += FEWSHOT_DELIMITER.join(shots)
-        prompt += FEWSHOT_DELIMITER
-        prompt += ENG_INSTRUCTION
-        prompt += FEWSHOT_DELIMITER
-        prompt += QUESTION_TEMPLATE.format(
-            question=target_question,
-            option_a=target_options_dict["A"],
-            option_b=target_options_dict["B"],
-            option_c=target_options_dict["C"],
-            option_d=target_options_dict["D"],
-        )
+        prompt = create_few_shot_context(target_question, target_options_dict, language, subject, il_prompts, num_fewshot, few_shot_examples)
     return {"question": prompt, "options": target_options_text, **target_options_dict}
