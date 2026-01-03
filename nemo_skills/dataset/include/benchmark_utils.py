@@ -77,8 +77,8 @@ def retrieve_few_shot_examples(few_shot_examples, language, subject, num_fewshot
     # If we still need more examples, print a warning
     if len(retrieved_examples) < num_fewshot:
         print(
-            f"Warning: Only {len(retrieved_examples)} few-shot examples found for {subject} in {language}"
-            "Try decreasing the number of few-shot examples."
+            f"Warning: Only {len(retrieved_examples)} few-shot examples found for {subject} in {language}."
+            " Try decreasing the number of few-shot examples or use another few-shot split."
         )
     return retrieved_examples
 
@@ -182,7 +182,7 @@ def create_zero_shot_context(target_question, target_options, language, subject,
     )
     if eng_prompt:
         zero_shot_prompt += ENG_COT_PREFIX
-    return zero_shot_prompt
+    return zero_shot_prompt.strip()
 
 
 def create_few_shot_context(target_question, target_options, language, subject, il_prompts, num_fewshot, few_shot_examples):
@@ -199,7 +199,7 @@ def create_few_shot_context(target_question, target_options, language, subject, 
             option_c=shot[Schema.OPTIONS[2]],
             option_d=shot[Schema.OPTIONS[3]],
         )
-        + f"{answer}."
+        + answer
         for shot, answer in zip(shots, shot_answers)
     ]
     if eng_prompt:
@@ -216,7 +216,7 @@ def create_few_shot_context(target_question, target_options, language, subject, 
         option_c=target_options["C"],
         option_d=target_options["D"],
     )
-    return few_shot_prompt
+    return few_shot_prompt.strip()
 
 
 
