@@ -16,24 +16,25 @@ import argparse
 import json
 from pathlib import Path
 
-from benchmark_utils import (EXTRACT_REGEX, SUPPORTED_LANGUAGES, Schema,
-                             copy_other_fields, digit_to_letter,
-                             get_mcq_fields, load_few_shot_split,
-                             load_include_datasets, normalize_entry_field)
+from benchmark_utils import (
+    EXTRACT_REGEX,
+    SUPPORTED_LANGUAGES,
+    Schema,
+    copy_other_fields,
+    digit_to_letter,
+    get_mcq_fields,
+    load_few_shot_split,
+    load_include_datasets,
+    normalize_entry_field,
+)
 from tqdm import tqdm
 
 
-def format_entry(
-    entry, subset, language, il_prompts, category, num_fewshot, few_shot_examples
-):
-    target_options = (
-        entry[Schema.CHOICES]
-        if subset == "lite"
-        else [entry[v] for v in Schema.OPTIONS]
-    )
+def format_entry(entry, language, il_prompts, category, num_fewshot, few_shot_examples):
+    target_options = [entry[v] for v in Schema.OPTIONS]
     target_question = entry[Schema.QUESTION]
     subject = entry[Schema.SUBJECT]
-    expected_answer = digit_to_letter(entry[Schema.ANSWER])  
+    expected_answer = digit_to_letter(entry[Schema.ANSWER])
     category = normalize_entry_field(entry, category)
     return {
         "expected_answer": expected_answer,
@@ -59,12 +60,9 @@ def write_data_to_file(args, datasets, few_shot_examples):
     output_file = data_dir / f"{args.split}.jsonl"
     with open(output_file, "wt", encoding="utf-8") as fout:
         for dataset, lang in zip(datasets, args.languages):
-            for entry in tqdm(
-                dataset, desc=f"Preparing {lang} dataset ({args.subset} subset)"
-            ):
+            for entry in tqdm(dataset, desc=f"Preparing {lang} dataset"):
                 entry = format_entry(
                     entry=entry,
-                    subset=args.subset,
                     language=lang,
                     il_prompts=args.il_prompts,
                     category=args.category,
@@ -80,10 +78,10 @@ def main(args):
     if invalid:
         raise ValueError(f"Unsupported languages: {invalid}")
 
-    datasets = load_include_datasets(args.languages, args.subset, args.split)
+    datasets = load_include_datasets(args.languages, args.split)
     few_shot_examples = {}
     if args.num_fewshot > 0:
-        few_shot_examples = load_few_shot_split(args.languages)
+        few_shot_examples = load_few_shot_split(args.languages, datasets)
     write_data_to_file(
         args=args, datasets=datasets, few_shot_examples=few_shot_examples
     )
@@ -96,12 +94,6 @@ if __name__ == "__main__":
         default="test",
         choices=("test",),
         help="Dataset split to process.",
-    )
-    parser.add_argument(
-        "--subset",
-        default="base",
-        choices=("base", "lite"),
-        help="Subset of the dataset to process.",
     )
     parser.add_argument(
         "--languages",

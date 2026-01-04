@@ -32,21 +32,18 @@ class Schema:
         "option_b",
         "option_c",
         "option_d",
-    ]  # `option_{x}` fields are available only for base subset
-    CHOICES: str = "choices"  # `choices` field is available only for lite subset
-
-
-def load_include_datasets(languages, subset, split):
-    return [
-        load_dataset(f"CohereLabs/include-{subset}-44", lang)[split]
-        for lang in languages
     ]
 
 
-def load_few_shot_split(languages, few_shot_split="validation"):
-    val_datasets = load_include_datasets(languages, "base", few_shot_split)
+def load_include_datasets(languages, split):
+    return [
+        load_dataset(f"CohereLabs/include-base-44", lang)[split] for lang in languages
+    ]
+
+
+def load_few_shot_split(languages, few_shot_datasets):
     few_shot_examples = {}
-    for dataset, lang in zip(val_datasets, languages):
+    for dataset, lang in zip(few_shot_datasets, languages):
         subject_dict = defaultdict(list)
         for entry in dataset:
             subject_dict[entry[Schema.SUBJECT]].append(entry)
@@ -54,16 +51,18 @@ def load_few_shot_split(languages, few_shot_split="validation"):
     return few_shot_examples
 
 
-def retrieve_few_shot_examples(few_shot_examples, language, subject, num_fewshot):
+def retrieve_few_shot_examples(
+    target_question, few_shot_examples, language, subject, num_fewshot
+):
     retrieved_examples = []
-
-    # If the language is not in the few-shot examples, return an empty list
-    if language not in few_shot_examples:
-        return retrieved_examples
 
     # Prefer the subject-specific few-shot examples
     if subject in few_shot_examples[language]:
-        retrieved_examples.extend(few_shot_examples[language][subject][:num_fewshot])
+        for entry in few_shot_examples[language][subject]:
+            if entry[Schema.QUESTION] != target_question:
+                retrieved_examples.append(entry)
+            if len(retrieved_examples) >= num_fewshot:
+                break
 
     # If we still need more examples, use the other subjects
     if len(retrieved_examples) < num_fewshot:
@@ -89,7 +88,9 @@ QUESTION_TEMPLATE = (
 FEWSHOT_DELIMITER = "\n\n"
 ENG_COT_PREFIX = "Let's think step by step."
 ENG_ZERO_SHOT_DESCRIPTION = "The following is multiple-choice question about {subject}."
-ENG_FEWSHOT_DESCRIPTION = "The following are multiple-choice questions (with answers) about {subject}."
+ENG_FEWSHOT_DESCRIPTION = (
+    "The following are multiple-choice questions (with answers) about {subject}."
+)
 LATTER_REGEX = r"\b\(?\s*([ABCD])\s*\)?\.?\b"
 EXTRACT_REGEX = r"[\s\S]*" + LATTER_REGEX
 
@@ -165,13 +166,15 @@ def copy_other_fields(entry):
     }
 
 
-def create_zero_shot_context(target_question, target_options, language, subject, il_prompts):
+def create_zero_shot_context(
+    target_question, target_options, language, subject, il_prompts
+):
     eng_prompt = il_prompts == False
     if eng_prompt:
         zero_shot_prompt = ENG_ZERO_SHOT_DESCRIPTION.format(subject=subject)
     else:
         zero_shot_prompt = DESCRIPTION_TEMPLATES[language].format(subject=subject)
-    
+
     zero_shot_prompt += FEWSHOT_DELIMITER
     zero_shot_prompt += QUESTION_TEMPLATE.format(
         question=target_question,
@@ -185,11 +188,19 @@ def create_zero_shot_context(target_question, target_options, language, subject,
     return zero_shot_prompt.strip()
 
 
-def create_few_shot_context(target_question, target_options, language, subject, il_prompts, num_fewshot, few_shot_examples):
+def create_few_shot_context(
+    target_question,
+    target_options,
+    language,
+    subject,
+    il_prompts,
+    num_fewshot,
+    few_shot_examples,
+):
     eng_prompt = il_prompts == False
     shots = retrieve_few_shot_examples(
-            few_shot_examples, language, subject, num_fewshot
-        )
+        few_shot_examples, language, subject, num_fewshot
+    )
     shot_answers = [digit_to_letter(shot[Schema.ANSWER]) for shot in shots]
     shots = [
         QUESTION_TEMPLATE.format(
@@ -219,7 +230,6 @@ def create_few_shot_context(target_question, target_options, language, subject, 
     return few_shot_prompt.strip()
 
 
-
 def get_mcq_fields(
     target_question,
     target_options,
@@ -236,7 +246,17 @@ def get_mcq_fields(
         f"{letter}. {option}" for letter, option in target_options_dict.items()
     )
     if num_fewshot == 0:
-        prompt = create_zero_shot_context(target_question, target_options_dict, language, subject, il_prompts)
+        prompt = create_zero_shot_context(
+            target_question, target_options_dict, language, subject, il_prompts
+        )
     else:
-        prompt = create_few_shot_context(target_question, target_options_dict, language, subject, il_prompts, num_fewshot, few_shot_examples)
+        prompt = create_few_shot_context(
+            target_question,
+            target_options_dict,
+            language,
+            subject,
+            il_prompts,
+            num_fewshot,
+            few_shot_examples,
+        )
     return {"question": prompt, "options": target_options_text, **target_options_dict}
