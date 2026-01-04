@@ -199,7 +199,7 @@ def create_few_shot_context(
 ):
     eng_prompt = il_prompts == False
     shots = retrieve_few_shot_examples(
-        few_shot_examples, language, subject, num_fewshot
+        target_question, few_shot_examples, language, subject, num_fewshot
     )
     shot_answers = [digit_to_letter(shot[Schema.ANSWER]) for shot in shots]
     shots = [
