@@ -55,7 +55,6 @@ def retrieve_few_shot_examples(
     target_question, few_shot_examples, language, subject, num_fewshot
 ):
     retrieved_examples = []
-
     # Prefer the subject-specific few-shot examples
     if subject in few_shot_examples[language]:
         for entry in few_shot_examples[language][subject]:
@@ -66,19 +65,19 @@ def retrieve_few_shot_examples(
 
     # If we still need more examples, use the other subjects
     if len(retrieved_examples) < num_fewshot:
-        for s in few_shot_examples[language]:
-            if s != subject:
-                retrieved_examples.append(few_shot_examples[language][s][0])
-
-            if len(retrieved_examples) >= num_fewshot:
-                break
+        i = 0
+        while len(retrieved_examples) < num_fewshot:
+            for s in few_shot_examples[language]:
+                if s != subject and i < len(few_shot_examples[language][s]):
+                    retrieved_examples.append(few_shot_examples[language][s][i])
+            i+=1
 
     # If we still need more examples, print a warning
     if len(retrieved_examples) < num_fewshot:
         print(
             f"Warning: Only {len(retrieved_examples)} few-shot examples found for {subject} in {language}."
             " Try decreasing the number of few-shot examples or use another few-shot split."
-        )
+        )    
     return retrieved_examples
 
 
