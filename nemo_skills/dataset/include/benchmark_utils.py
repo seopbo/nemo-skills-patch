@@ -88,7 +88,7 @@ FEWSHOT_DELIMITER = "\n\n"
 ENG_COT_PREFIX = "Let's think step by step."
 ENG_ZERO_SHOT_DESCRIPTION = 'The following is multiple-choice question about {subject}. Think step by step and then finish your answer with "the correct answer is X" where X is the correct letter choice.'
 ENG_FEWSHOT_DESCRIPTION = (
-    "The following are multiple-choice questions (with answers) about {subject}."
+    'The following are multiple-choice questions (with answers) about {subject}. Finish your answer with "the correct answer is X" where X is the correct letter choice.'
 )
 LATTER_REGEX = r"\b\(?\s*([ABCD])\s*\)?\.?\b"
 EXTRACT_REGEX = r"[\s\S]*" + LATTER_REGEX
