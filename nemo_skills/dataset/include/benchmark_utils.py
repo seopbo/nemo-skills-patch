@@ -12,13 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-import random
 from datasets import load_dataset
 from collections import defaultdict
-
-
-SEED = 42
-random.seed(SEED)
 
 
 # Dataset schema defined in Hugging Face datasets
@@ -61,15 +56,11 @@ def retrieve_few_shot_examples(
     retrieved_examples = []
     # Prefer the subject-specific few-shot examples
     if subject in few_shot_examples[language]:
-        pool = few_shot_examples[language][subject]
-        indices = random.sample(range(len(pool)), min(num_fewshot, len(pool)))
-        for index in indices:
-            retrieved_examples.append(pool[index])
-        # for entry in few_shot_examples[language][subject]:
-        #     if entry[Schema.QUESTION] != target_question:
-        #         retrieved_examples.append(entry)
-        #     if len(retrieved_examples) >= num_fewshot:
-        #         break
+        for entry in few_shot_examples[language][subject]:
+            if entry[Schema.QUESTION] != target_question:
+                retrieved_examples.append(entry)
+            if len(retrieved_examples) >= num_fewshot:
+                break
 
     # If we still need more examples, use the other subjects
     if len(retrieved_examples) < num_fewshot:
