@@ -28,9 +28,9 @@ import logging
 import shutil
 import subprocess
 import sys
-import torch
 from pathlib import Path
 
+import torch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 LOG = logging.getLogger(__name__)
@@ -86,21 +86,17 @@ def process_file(input_file: Path, output_file: Path, comet_model, batch_size: i
     comet_list = []
     for sample in data:
         try:
-            comet_dict = {
-                "src": sample["text"],
-                "mt": sample["generation"],
-                "gt": sample["translation"]
-            }
+            comet_dict = {"src": sample["text"], "mt": sample["generation"], "gt": sample["translation"]}
             comet_list.append(comet_dict)
         except KeyError as e:
             LOG.error(f"Sample missing required field {e}: {sample}")
             raise ValueError(f"Sample missing required field: {e}")
 
     comet_scores = comet_model.predict(comet_list, batch_size).scores
-    
+
     for idx, sample in enumerate(data):
         data[idx]["comet"] = comet_scores[idx]
-    
+
     # Write results
     with open(output_file, "wt", encoding="utf-8") as fout:
         for sample in data:
@@ -112,6 +108,7 @@ def process_file(input_file: Path, output_file: Path, comet_model, batch_size: i
     done_file = Path(str(output_file) + ".done")
     done_file.touch()
     LOG.info(f"Created done marker: {done_file}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Run xCOMET-XXL evaluation")
