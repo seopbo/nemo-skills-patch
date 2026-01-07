@@ -43,10 +43,6 @@ def load_include_datasets(languages, split):
     ]
 
 
-QUESTION_TEMPLATE = (
-    "{question}\nA. {option_a}\nB. {option_b}\nC. {option_c}\nD. {option_d}\n"
-)
-DELIMITER = "\n\n"
 LATTER_REGEX = r"\b\(?\s*([ABCD])\s*\)?\.?\b"
 EXTRACT_REGEX = r"[\s\S]*" + LATTER_REGEX
 
@@ -279,6 +275,7 @@ MCQ_FORMATS = {
 }
 
 SUPPORTED_LANGUAGES = sorted(list(MCQ_FORMATS.keys()))
+SUPPORTED_LANGUAGES.remove("English")
 
 
 def digit_to_letter(digit):
@@ -303,6 +300,11 @@ def copy_other_fields(entry):
     }
 
 
+QUESTION_TEMPLATE = (
+    "{question}\nA. {option_a}\nB. {option_b}\nC. {option_c}\nD. {option_d}\n"
+)
+
+
 def create_zero_shot_context(
     target_question, target_options, language, subject, il_prompts
 ):
@@ -313,7 +315,7 @@ def create_zero_shot_context(
     prompt = mcq_format.task.format(
         subject=subject, ans_suffix=mcq_format.placeholder.format("X")
     )
-    prompt += DELIMITER
+    prompt += "\n\n"
     prompt += QUESTION_TEMPLATE.format(
         question=target_question,
         option_a=target_options["A"],
