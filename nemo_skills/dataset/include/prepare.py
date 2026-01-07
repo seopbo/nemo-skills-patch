@@ -42,11 +42,7 @@ def format_entry(entry, language, il_prompts):
         "subset_for_metrics": language,
         "category": category,
         **get_mcq_fields(
-            target_question,
-            target_options,
-            language,
-            subject,
-            il_prompts
+            target_question, target_options, language, subject, il_prompts
         ),
         **copy_other_fields(entry),
     }
