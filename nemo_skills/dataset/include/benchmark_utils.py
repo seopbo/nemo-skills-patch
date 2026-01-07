@@ -42,7 +42,7 @@ def load_include_datasets(languages, split):
         load_dataset(f"CohereLabs/include-base-44", lang)[split] for lang in languages
     ]
 
-
+# Extract the final predicted uppercase letter from {A, B, C, D}.
 LATTER_REGEX = r"\b\(?\s*([ABCD])\s*\)?\.?\b"
 EXTRACT_REGEX = r"[\s\S]*" + LATTER_REGEX
 
