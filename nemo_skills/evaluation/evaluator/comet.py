@@ -65,7 +65,7 @@ def load_comet_model(model_path: str):
     return model
 
 
-def process_file(input_file: Path, output_file: Path, comet_model, batch_size: int = 4):
+def process_file(input_file: Path, output_file: Path, comet_model, batch_size: int = 16):
     """Copy input file to output location and run xCOMET-XXL evaluation."""
     LOG.info(f"Processing {input_file} -> {output_file}")
 
@@ -85,14 +85,18 @@ def process_file(input_file: Path, output_file: Path, comet_model, batch_size: i
 
     comet_list = []
     for sample in data:
-        comet_dict = {
-            "src": sample["text"],
-            "mt": sample["generation"],
-            "gt": sample["translation"]
-        }
-        comet_list.append(comet_dict)
+        try:
+            comet_dict = {
+                "src": sample["text"],
+                "mt": sample["generation"],
+                "gt": sample["translation"]
+            }
+            comet_list.append(comet_dict)
+        except KeyError as e:
+            LOG.error(f"Sample missing required field {e}: {sample}")
+            raise ValueError(f"Sample missing required field: {e}")
 
-    comet_scores = comet_model.predict(comet_list, batch_size, gpus=1).scores
+    comet_scores = comet_model.predict(comet_list, batch_size).scores
     
     for idx, sample in enumerate(data):
         data[idx]["comet"] = comet_scores[idx]
@@ -128,6 +132,18 @@ def main():
         help="Path to output directory",
     )
     parser.add_argument(
+        "--comet-model-path",
+        type=str,
+        required=True,
+        help="Path to xCOMET-XXL model to use for evaluation",
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=16,
+        help="Batch size for xCOMET-XXL inference",
+    )
+    parser.add_argument(
         "--num-seeds",
         type=int,
         default=1,
@@ -137,12 +153,6 @@ def main():
         "--skip-install",
         action="store_true",
         help="Skip package installation (if already installed)",
-    )
-    parser.add_argument(
-        "--comet-model-path",
-        type=str,
-        required=True,
-        help="Path to xCOMET-XXL model to use for evaluation",
     )
     args = parser.parse_args()
 
@@ -174,7 +184,7 @@ def main():
     # Process all files
     LOG.info(f"Processing {len(files_to_process)} file(s)")
     for input_file, output_file in files_to_process:
-        process_file(input_file, output_file, comet_model)
+        process_file(input_file, output_file, comet_model, args.batch_size)
 
     LOG.info("All files processed successfully")
 
