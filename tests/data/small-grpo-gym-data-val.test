@@ -1,0 +1,2 @@
+{"agent_ref": {"type": "responses_api_agents", "name": "simple_agent"}, "responses_create_params": {"input": [{"role": "user", "content": "What is 5 + 6? Provide only the numerical answer."}]}, "question": "What is 5 + 6?", "expected_answer": "11"}
+{"agent_ref": {"type": "responses_api_agents", "name": "simple_agent"}, "responses_create_params": {"input": [{"role": "user", "content": "What is 9 - 3? Provide only the numerical answer."}]}, "question": "What is 9 - 3?", "expected_answer": "6"}

@@ -27,6 +27,7 @@ from nemo_skills.pipeline.generate import generate
 from nemo_skills.pipeline.megatron_lm.train import train_megatron_lm
 from nemo_skills.pipeline.nemo_evaluator import nemo_evaluator
 from nemo_skills.pipeline.nemo_rl.grpo import grpo_nemo_rl
+from nemo_skills.pipeline.nemo_rl.grpo_gym import grpo_gym_nemo_rl
 from nemo_skills.pipeline.nemo_rl.sft import sft_nemo_rl
 from nemo_skills.pipeline.prepare_data import prepare_data
 from nemo_skills.pipeline.robust_eval import robust_eval

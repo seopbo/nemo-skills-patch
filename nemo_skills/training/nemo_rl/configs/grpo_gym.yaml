@@ -1,0 +1,203 @@
+# GRPO with NemoGym integration (no proxy server)
+# Quick debugging configuration for simple tasks
+
+grpo:
+  num_prompts_per_step: 8
+  num_generations_per_prompt: 4
+  max_rollout_turns: 1
+  max_num_epochs: 1
+  max_num_steps: 100
+  normalize_rewards: true
+  use_leave_one_out_baseline: true
+  val_period: 10
+  val_at_start: false
+  overlong_filtering: false
+  max_val_samples: null  # Will be set automatically based on validation dataset size
+  val_batch_size: null   # Will be set automatically
+  seed: 42
+  use_dynamic_sampling: false
+  dynamic_sampling_max_gen_batches: 10
+  batch_multiplier: 1
+  reward_shaping:
+    enabled: false
+  reward_scaling:
+    enabled: false
+  skip_reference_policy_logprobs_calculation: true
+  async_grpo:
+    enabled: false
+
+loss_fn:
+  reference_policy_kl_penalty: 0
+  reference_policy_kl_type: "k3"
+  kl_input_clamp_value: 20.0
+  kl_output_clamp_value: 10.0
+  ratio_clip_min: 0.2
+  ratio_clip_max: 0.2
+  ratio_clip_c: null
+  use_on_policy_kl_approximation: false
+  truncated_importance_sampling_ratio: null
+  use_importance_sampling_correction: false
+  token_level_loss: true
+  force_on_policy_ratio: false
+
+checkpointing:
+  enabled: true
+  checkpoint_dir: "results/grpo_gym"
+  metric_name: "val:reward"
+  higher_is_better: true
+  keep_top_k: 5
+  save_period: 10
+  checkpoint_must_save_by: null
+
+policy:
+  model_name: "Qwen/Qwen2.5-0.5B-Instruct"
+  tokenizer:
+    name: ${policy.model_name}
+    chat_template_kwargs: null
+  train_global_batch_size: 32
+  train_micro_batch_size: 2
+  generation_batch_size: 8
+  logprob_batch_size: 2
+  max_total_sequence_length: 512
+  precision: "bfloat16"
+  fsdp_offload_enabled: false
+  activation_checkpointing_enabled: false
+  refit_buffer_size_gb: 4
+  tensor_model_parallel_size: 1
+  pipeline_model_parallel_size: 1
+  context_parallel_size: 1
+  lr: 1e-6
+  weight_decay: 0.01
+  min_lr: 1e-6
+  offload_optimizer_for_logprob: false
+
+  dtensor_cfg:
+    enabled: true
+    cpu_offload: false
+    sequence_parallel: false
+    activation_checkpointing: false
+    tensor_parallel_size: ${policy.tensor_model_parallel_size}
+    context_parallel_size: ${policy.context_parallel_size}
+    custom_parallel_plan: null
+
+  dynamic_batching:
+    enabled: true
+    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
+    logprob_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.logprob_batch_size}}
+    sequence_length_round: 64
+
+  sequence_packing:
+    enabled: false
+    train_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.train_micro_batch_size}}
+    logprob_mb_tokens: ${mul:${policy.max_total_sequence_length}, ${policy.logprob_batch_size}}
+    algorithm: "modified_first_fit_decreasing"
+    sequence_length_round: 64
+
+  make_sequence_length_divisible_by: null
+  max_grad_norm: 1.0
+
+  optimizer:
+    name: "torch.optim.AdamW"
+    kwargs:
+      lr: ${policy.lr}
+      weight_decay: ${policy.weight_decay}
+      betas: [0.9, 0.999]
+      eps: 1e-8
+      foreach: false
+      fused: false
+
+  scheduler:
+  - name: "torch.optim.lr_scheduler.LinearLR"
+    kwargs:
+      start_factor: 1.0
+      end_factor: 1.0
+      total_iters: 1
+  - name: "torch.optim.lr_scheduler.CosineAnnealingLR"
+    kwargs:
+      T_max: ${grpo.max_num_steps}
+      eta_min: ${policy.lr}
+  - milestones: [0]
+
+  megatron_cfg:
+    enabled: false
+
+  generation:
+    backend: "vllm"
+    max_new_tokens: ${policy.max_total_sequence_length}
+    temperature: 1.0
+    top_p: 1.0
+    top_k: null
+    stop_token_ids: null
+    stop_strings: null
+    vllm_cfg:
+      async_engine: true  # Required for NemoGym
+      expose_http_server: true  # Required for NemoGym
+      skip_tokenizer_init: false  # Enable tokenizer for NemoGym chat completions API
+      precision: ${policy.precision}
+      tensor_parallel_size: 1
+      pipeline_parallel_size: 1
+      expert_parallel_size: 1
+      gpu_memory_utilization: 0.5
+      max_model_len: ${policy.max_total_sequence_length}
+      enable_expert_parallel: false
+      enforce_eager: true
+      load_format: dummy
+      kv_cache_dtype: auto
+    colocated:
+      enabled: true
+      resources:
+        gpus_per_node: null
+        num_nodes: null
+
+data:
+  max_input_seq_length: ${policy.max_total_sequence_length}
+  shuffle: true
+  num_workers: 4
+  # NemoGym specific data paths
+  train_jsonl_fpath: null  # Set via CLI: ++data.train_jsonl_fpath=/path/to/train.jsonl
+  validation_jsonl_fpath: null  # Set via CLI: ++data.validation_jsonl_fpath=/path/to/val.jsonl
+
+env:
+  should_use_nemo_gym: true
+  should_log_nemo_gym_responses: true
+  nemo_gym:
+    config_paths:
+    - responses_api_models/vllm_model/configs/vllm_model_for_training.yaml
+    - resources_servers/math_with_judge/configs/math_with_judge.yaml
+    - responses_api_agents/simple_agent/configs/simple_agent.yaml
+    policy_model:
+      responses_api_models:
+        vllm_model:
+          skip_tokenizer_init: false  # Enable tokenizer for chat completions API
+          return_token_id_information: true  # Required for NeMo-RL training
+    simple_agent:
+      responses_api_agents:
+        simple_agent:
+          resources_server:
+            name: math_with_judge
+          model_server:
+            name: policy_model
+    math_with_judge:
+      resources_servers:
+        math_with_judge:
+          judge_model_server:
+            name: policy_model
+          should_use_judge: false  # Disable LLM judge for quick testing
+
+logger:
+  log_dir: "logs/grpo_gym"
+  num_val_samples_to_print: 2
+  wandb_enabled: false
+  tensorboard_enabled: false
+  mlflow_enabled: false
+  swanlab_enabled: false
+  monitor_gpus: false
+  wandb:
+    project: "nemo-skills-grpo-gym"
+    name: "grpo-gym-test"
+
+cluster:
+  gpus_per_node: 1
+  num_nodes: 1
+
+checkpoint_must_save_by: null
