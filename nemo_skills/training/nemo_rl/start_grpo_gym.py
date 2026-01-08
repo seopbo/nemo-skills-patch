@@ -23,6 +23,7 @@ import json
 import os
 import pprint
 from itertools import chain, repeat
+from math import lcm
 from typing import Optional
 
 import ray
@@ -46,7 +47,19 @@ from nemo_rl.utils.config import load_config, parse_hydra_overrides
 from nemo_rl.utils.logger import get_next_experiment_dir
 from omegaconf import OmegaConf
 
-from nemo_skills.utils import setup_make_sequence_length_divisible_by
+
+def setup_make_sequence_length_divisible_by(tensor_model_parallel_size: int, context_parallel_size: int) -> int:
+    if tensor_model_parallel_size > 1 and context_parallel_size > 1:
+        make_sequence_length_divisible_by = lcm(2 * context_parallel_size, tensor_model_parallel_size)
+    elif tensor_model_parallel_size > 1:
+        make_sequence_length_divisible_by = tensor_model_parallel_size
+    elif context_parallel_size > 1:
+        make_sequence_length_divisible_by = context_parallel_size * 2
+    else:
+        make_sequence_length_divisible_by = 1
+
+    return make_sequence_length_divisible_by
+
 
 OmegaConf.register_new_resolver("mul", lambda a, b: a * b)
 
