@@ -11,7 +11,7 @@ echo "=================================="
 # Configuration
 MODEL_PATH="${NEMO_SKILLS_TEST_HF_MODEL:-/home/wedu/Qwen3-0.6B}"
 MODEL_TYPE="${NEMO_SKILLS_TEST_MODEL_TYPE:-qwen}"
-OUTPUT_DIR="/tmp/grpo-gym-sandbox-test-$(date +%s)"
+OUTPUT_DIR="/tmp/nemo-skills-tests/${MODEL_TYPE}/test-grpo-gym-local/fsdp"
 BACKEND="fsdp"
 
 echo ""
@@ -68,7 +68,6 @@ grpo_gym_nemo_rl(
     validation_data='/nemo_run/code/tests/data/small-grpo-gym-data-val.test',
     backend='${BACKEND}',
     disable_wandb=True,
-    with_sandbox=True,  # Test sandbox support
 )
 "
 
