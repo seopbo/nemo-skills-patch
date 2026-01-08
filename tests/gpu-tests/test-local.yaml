@@ -29,6 +29,7 @@ mounts:
   # change this if the models are located in a different place
   # TODO: can we make it simpler?
   - /mnt/datadrive/nemo-skills-test-data:/mnt/datadrive/nemo-skills-test-data
+  - /home/georgea/.cursor/worktrees/nemo-rl-gym-integration__SSH__drugdiscovery8-dt.dyn.nvidia.com_/pW4eh/Gym:/opt/nemo-rl/3rdparty/Gym-workspace/Gym
 
 env_vars:
   - HF_HOME=/mnt/datadrive/nemo-skills-test-data/hf-cache
