@@ -772,6 +772,172 @@ def create_skills_proxy_app(
         }
         return json.dumps(config)
 
+    @app.get("/v1/models")
+    async def list_models():
+        """OpenAI-compatible model listing (minimal)."""
+        created = int(datetime.now().timestamp())
+        return JSONResponse(
+            content={
+                "object": "list",
+                "data": [
+                    {
+                        "id": _model_name,
+                        "object": "model",
+                        "created": created,
+                        "owned_by": "nemo-skills",
+                    }
+                ],
+            }
+        )
+
+    @app.post("/v1/responses")
+    async def create_response(request_body: dict):
+        """OpenAI Responses API (non-streaming, minimal) for NeMo-Gym resources servers (e.g., math_with_judge)."""
+        try:
+            # Extract messages from Responses API input
+            inp = request_body.get("input", [])
+
+            messages: list[dict[str, str]] = []
+            if isinstance(inp, str):
+                messages = [{"role": "user", "content": inp}]
+            elif isinstance(inp, list):
+                for item in inp:
+                    if not isinstance(item, dict):
+                        continue
+                    role = item.get("role") or "user"
+                    content = item.get("content", "")
+                    if isinstance(content, list):
+                        # Best-effort flattening for list content items
+                        parts: list[str] = []
+                        for c in content:
+                            if isinstance(c, str):
+                                parts.append(c)
+                            elif isinstance(c, dict):
+                                if "text" in c and isinstance(c["text"], str):
+                                    parts.append(c["text"])
+                                elif "content" in c and isinstance(c["content"], str):
+                                    parts.append(c["content"])
+                        content = "".join(parts)
+                    elif not isinstance(content, str):
+                        content = str(content)
+                    messages.append({"role": str(role), "content": content})
+
+            if not messages:
+                messages = [{"role": "user", "content": ""}]
+
+            data_point: dict[str, Any] = {"messages": messages}
+
+            # Pass through sampling params (critical for NeMo-RL/vLLM assertions)
+            if "temperature" in request_body:
+                data_point["_request_temperature"] = request_body["temperature"]
+            if "top_p" in request_body:
+                data_point["_request_top_p"] = request_body["top_p"]
+            if "max_output_tokens" in request_body:
+                data_point["_request_max_tokens"] = request_body["max_output_tokens"]
+            if "max_tokens" in request_body:
+                data_point["_request_max_tokens"] = request_body["max_tokens"]
+            if "stop" in request_body:
+                data_point["_request_stop"] = request_body["stop"]
+
+            # Request logprobs and token IDs for NeMo-RL training
+            if _return_token_id_information:
+                data_point["_request_logprobs"] = True
+                data_point["_request_return_tokens_as_token_ids"] = True
+
+            output = await _process_fn(data_point, [])
+            generation_text = output.get(_generation_key, output.get("generation", ""))
+
+            # Extract token ID information if enabled (needed for NeMo-RL training)
+            prompt_token_ids: list[int] = []
+            generation_token_ids: list[int] = []
+            generation_log_probs: list[float] = []
+
+            if _return_token_id_information:
+                # Extract generation token IDs from logprobs in the output
+                # Use same keys as /run endpoint: "tokens" and "logprobs"
+                if "logprobs" in output and "tokens" in output:
+                    tokens = output.get("tokens", [])
+                    logprobs = output.get("logprobs", [])
+
+                    for i, token in enumerate(tokens):
+                        if isinstance(token, str) and token.startswith("token_id:"):
+                            try:
+                                token_id = int(token.removeprefix("token_id:"))
+                                generation_token_ids.append(token_id)
+                            except ValueError:
+                                generation_token_ids.append(0)
+                        elif isinstance(token, int):
+                            generation_token_ids.append(token)
+                        else:
+                            generation_token_ids.append(-1)
+
+                        if i < len(logprobs):
+                            generation_log_probs.append(float(logprobs[i]))
+                        else:
+                            generation_log_probs.append(0.0)
+
+                # Get prompt token IDs via /tokenize endpoint
+                if _vllm_base_url and _model_name:
+                    prompt_token_ids = (
+                        await tokenize_messages(
+                            base_url=_vllm_base_url,
+                            model=_model_name,
+                            messages=messages,
+                        )
+                        or []
+                    )
+
+            # Minimal Responses API response compatible with NeMo-Gym (NeMoGymResponse.model_validate)
+            now = int(datetime.now().timestamp())
+            resp_id = f"resp_{uuid.uuid4().hex}"
+            msg_id = f"msg_{uuid.uuid4().hex}"
+
+            model = request_body.get("model") or _model_name
+            response_obj = {
+                "id": resp_id,
+                "object": "response",
+                "created_at": now,
+                "model": model,
+                "status": "completed",
+                "parallel_tool_calls": bool(request_body.get("parallel_tool_calls", True)),
+                "tool_choice": request_body.get("tool_choice", "auto"),
+                "tools": request_body.get("tools", []) or [],
+                "metadata": request_body.get("metadata"),
+                "output": [
+                    {
+                        "id": msg_id,
+                        "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": generation_text,
+                                "annotations": [],
+                            }
+                        ],
+
+                        # Token IDs for NeMo-RL training (required by NemoGym._postprocess_nemo_gym_to_nemo_rl_result)
+                        "prompt_token_ids": prompt_token_ids,
+                        "generation_token_ids": generation_token_ids,
+                        "generation_log_probs": generation_log_probs,
+                    }
+                ],
+                # Optional fields seen in OpenAI Responses API
+                "usage": {
+                    "input_tokens": 0,
+                    "output_tokens": 0,
+                    "total_tokens": 0,
+                    "input_tokens_details": {"cached_tokens": 0},
+                    "output_tokens_details": {"reasoning_tokens": 0},
+                },
+            }
+
+            return JSONResponse(content=response_obj)
+        except Exception as e:
+            LOG.exception("Error processing /v1/responses request")
+            raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
     @app.post("/run")
     async def run_agent(request_body: dict):
         """NeMo-Gym agent /run endpoint for rollout collection.
