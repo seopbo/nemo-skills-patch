@@ -323,6 +323,9 @@ def get_executor(
         srun_args.append("--overlap")
     if not cluster_config.get("disable_gpus_per_node", False) and gpus_per_node is not None:
         srun_args.append(f"--gpus-per-node={gpus_per_node}")
+        # Explicitly set --gres to override inherited job gres (important for sandbox with 0 GPUs)
+        if gpus_per_node == 0:
+            srun_args.append("--gres=gpu:0")
 
     dependency_type = cluster_config.get("dependency_type", "afterany")
     job_details_class = CustomJobDetailsRay if with_ray else CustomJobDetails
