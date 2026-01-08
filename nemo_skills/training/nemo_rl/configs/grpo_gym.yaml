@@ -143,6 +143,9 @@ policy:
       enforce_eager: true
       load_format: dummy
       kv_cache_dtype: auto
+      http_server_serving_chat_kwargs:
+        enable_auto_tools: true  # Enable automatic tool choice for tool calling
+        tool_parser: hermes  #
     colocated:
       enabled: true
       resources:
