@@ -386,8 +386,8 @@ def grpo_gym_nemo_rl(
                     reuse_code_exp=reuse_code_exp,
                     task_dependencies=[prev_task] if prev_task is not None else None,
                     sbatch_kwargs=sbatch_kwargs,
-                    heterogeneous=False,  # Keep False for Ray: sandbox will be separate job
-                    with_sandbox=with_sandbox,  # Try enabling this - sandbox as separate job
+                    heterogeneous=False,
+                    with_sandbox=with_sandbox,
                     with_ray=True,
                     installation_command=installation_command,
                     skip_hf_home_check=skip_hf_home_check,
