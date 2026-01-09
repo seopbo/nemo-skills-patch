@@ -34,6 +34,7 @@ policy:
   max_total_sequence_length: 4096
   precision: "bfloat16"
   fsdp_offload_enabled: false
+  offload_optimizer_for_logprob: false
   activation_checkpointing_enabled: false
   tensor_model_parallel_size: 1
   pipeline_model_parallel_size: 1
