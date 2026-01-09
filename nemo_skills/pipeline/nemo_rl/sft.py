@@ -118,9 +118,10 @@ class NemoRLTask:
         cmd = (
             "export PYTHONPATH=$PYTHONPATH:/nemo_run/code:/opt/nemo-rl && "
             "export UV_PROJECT=/opt/nemo-rl && "
+            "cd /opt/nemo-rl && "
             f"{nsight_cmd}"
             "echo 'Starting training' && "
-            "NRL_FORCE_REBUILD_VENVS=true uv run --active "
+            "uv run --active "
             "python /nemo_run/code/nemo_skills/training/nemo_rl/start_sft.py "
             f"{self.format_train_args()} {self.format_data_args()} "
             f"{self.logging_params} {self.extra_arguments}"
