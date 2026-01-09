@@ -29,6 +29,7 @@ mounts:
   # change this if the models are located in a different place
   # TODO: can we make it simpler?
   - /mnt/datadrive/nemo-skills-test-data:/mnt/datadrive/nemo-skills-test-data
+  - /home/wedu:/home/wedu  # For local testing with models
   - /home/wedu/nemo-rl/3rdparty/Gym-workspace/Gym:/opt/nemo-rl/3rdparty/Gym-workspace/Gym
 
 env_vars:
