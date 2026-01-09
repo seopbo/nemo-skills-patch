@@ -16,7 +16,7 @@ sft:
 checkpointing:
   enabled: true
   checkpoint_dir: "results/sft"
-  metric_name: "val_loss"
+  metric_name: "train_loss"
   higher_is_better: false
   keep_top_k: 50
   save_period: 100
