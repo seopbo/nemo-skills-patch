@@ -138,8 +138,8 @@ def main():
     parser.add_argument(
         "--backend",
         default="salm",
-        choices=["salm", "magpie_tts", "s2s", "s2s_incremental", "s2s_session"],
-        help="Backend type: salm (speech-augmented LM), magpie_tts (MagpieTTS with RTF metrics), s2s (speech-to-speech offline), s2s_incremental (frame-by-frame processing), s2s_session (session-aware multi-turn)",
+        choices=["salm", "magpie_tts", "ear_tts", "ear_tts_batch", "s2s", "s2s_incremental", "s2s_session"],
+        help="Backend type: salm (speech-augmented LM), magpie_tts (MagpieTTS with RTF metrics), ear_tts (EAR TTS streaming decode), ear_tts_batch (EAR TTS batch decode), s2s (speech-to-speech offline), s2s_incremental (frame-by-frame processing), s2s_session (session-aware multi-turn)",
     )
 
     # Backend-specific model paths
@@ -273,6 +273,10 @@ def main():
     setup_pythonpath(args.code_path)
     apply_safetensors_patch(args.hack_path)
 
+    # Store code_path for backends that may need to add paths late
+    if args.code_path:
+        os.environ["UNIFIED_SERVER_CODE_PATH"] = args.code_path
+
     # Set environment variables
     os.environ["UNIFIED_SERVER_HOST"] = args.host
     os.environ["UNIFIED_SERVER_PORT"] = str(args.port)
@@ -325,6 +329,15 @@ def main():
         if args.silence_padding_sec != 5.0:
             extra_config["silence_padding_sec"] = args.silence_padding_sec
 
+    # EAR TTS backend options
+    if args.backend in ("ear_tts", "ear_tts_batch"):
+        if args.config_path:
+            extra_config["config_path"] = args.config_path
+        if args.tts_checkpoint_path:
+            extra_config["tts_checkpoint_path"] = args.tts_checkpoint_path
+        if args.speaker_reference:
+            extra_config["speaker_reference"] = args.speaker_reference
+
     # S2S Incremental/Session backend options (shared config)
     if args.backend in ("s2s_incremental", "s2s_session"):
         if args.config_path:
@@ -375,6 +388,13 @@ def main():
                 print("  Legacy Codebooks: True")
             if args.legacy_text_conditioning:
                 print("  Legacy Text Conditioning: True")
+    if args.backend in ("ear_tts", "ear_tts_batch"):
+        if args.config_path:
+            print(f"  Config Path: {args.config_path}")
+        if args.speaker_reference:
+            print(f"  Speaker Reference: {args.speaker_reference}")
+        if args.tts_checkpoint_path:
+            print(f"  TTS Checkpoint: {args.tts_checkpoint_path}")
     if args.backend in ("s2s_incremental", "s2s_session"):
         if args.config_path:
             print(f"  Config Path: {args.config_path}")

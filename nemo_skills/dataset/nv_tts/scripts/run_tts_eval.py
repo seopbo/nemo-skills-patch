@@ -47,10 +47,10 @@ def run_generation(cfg: dict, expname: str):
     """Run generation stage using ns eval, returns experiment object."""
     gen = cfg["generation"]
 
-    # Add nemo_code_path to server_args
+    # Add generation_code_path to server_args
     server_args = gen["server_args"]
-    if cfg.get("nemo_code_path"):
-        server_args += f" --code_path {cfg['nemo_code_path']}"
+    if cfg.get("generation_code_path"):
+        server_args += f" --code_path {cfg['generation_code_path']}"
 
     # Parse extra_args for the context
     extra_args = gen.get("extra_args", "").split() if gen.get("extra_args") else []
@@ -93,7 +93,7 @@ def main():
     cfg = load_config(args.config)
     scoring = cfg.get("scoring", {})
     hf_token = os.environ.get("HF_TOKEN", "")
-    nemo_path = cfg["nemo_code_path"]
+    scoring_code_path = cfg.get("scoring_code_path", "")
     output_dir = cfg["output_dir"]
 
     gen_exp_name = None
@@ -131,7 +131,7 @@ def main():
 
             scoring_cmd = (
                 f"HF_TOKEN={hf_token} "
-                f"PYTHONPATH={nemo_path}:$PYTHONPATH "
+                f"PYTHONPATH={scoring_code_path}:$PYTHONPATH "
                 f"python -m nemo_skills.dataset.nv_tts.scripts.score "
                 f"--results_dir {output_dir} "
                 f"--benchmark {benchmark_dir} "

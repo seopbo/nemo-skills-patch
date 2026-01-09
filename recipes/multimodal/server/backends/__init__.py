@@ -18,6 +18,8 @@ Backend implementations for the Unified NeMo Inference Server.
 Available backends:
 - salm: Speech-Augmented Language Model (text output from text/audio input)
 - magpie_tts: MagpieTTS using MagpieInferenceRunner with RTF metrics (audio output from text input)
+- ear_tts: EAR TTS using NemotronVoiceChat TTS model (audio output from text input, streaming decode)
+- ear_tts_batch: EAR TTS optimized version (audio output from text input, batch decode at end)
 - s2s: Speech-to-Speech using DuplexS2S offline (text output from audio input)
 - s2s_incremental: Speech-to-Speech using NemotronVoiceChat incremental (text+audio from audio)
 - s2s_session: Speech-to-Speech with session support for multi-turn conversations
@@ -39,8 +41,10 @@ __all__ = [
 BACKEND_REGISTRY = {
     "salm": ("salm_backend", "SALMBackend"),
     "magpie_tts": ("magpie_tts_backend", "MagpieTTSBackend"),
+    "ear_tts": ("ear_tts_backend", "EarTTSBackend"),
+    "ear_tts_batch": ("ear_tts_backend", "EarTTSBatchBackend"),
     "s2s": ("s2s_backend", "S2SBackend"),
-    "s2s_incremental": ("s2s_incremental_backend", "S2SIncrementalBackend"),
+    "s2s_incremental": ("s2s_incremental_backend_c", "S2SIncrementalBackend"),
     "s2s_session": ("s2s_session_backend", "S2SSessionBackend"),
 }
 
