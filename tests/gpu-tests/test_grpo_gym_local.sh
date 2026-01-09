@@ -9,8 +9,8 @@ echo "GRPO-Gym Local Test"
 echo "=================================="
 
 # Configuration
-# MODEL_PATH="${NEMO_SKILLS_TEST_HF_MODEL:-/home/wedu/Qwen3-0.6B}"
-MODEL_PATH="${NEMO_SKILLS_TEST_HF_MODEL:-Qwen/Qwen3-0.6B}"
+MODEL_PATH="${NEMO_SKILLS_TEST_HF_MODEL:-/home/wedu/Qwen3-0.6B}"
+# MODEL_PATH="${NEMO_SKILLS_TEST_HF_MODEL:-Qwen/Qwen3-0.6B}"
 MODEL_TYPE="${NEMO_SKILLS_TEST_MODEL_TYPE:-qwen}"
 RUN_NUMBER="${RUN_NUMBER:-1}"
 OUTPUT_DIR="/tmp/nemo-skills-tests/${MODEL_TYPE}/test-grpo-gym-local-run${RUN_NUMBER}/fsdp"
