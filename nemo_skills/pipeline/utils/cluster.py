@@ -26,12 +26,13 @@ from typing import Optional
 
 try:
     import nemo_run as run
+    from nemo_run.config import set_nemorun_home
 except ImportError:
     run = None
+    set_nemorun_home = None
 import yaml
 from huggingface_hub import get_token
 from invoke import StreamWatcher
-from nemo_run.config import set_nemorun_home
 from omegaconf import DictConfig
 
 from nemo_skills.utils import get_logger_name
