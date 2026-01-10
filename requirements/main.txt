@@ -27,6 +27,7 @@ gradio
 httpx
 huggingface_hub
 hydra-core
+invoke
 ipython
 iso639-lang
 langcodes
