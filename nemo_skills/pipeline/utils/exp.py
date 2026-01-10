@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import contextlib
 import logging
 import os
@@ -100,7 +102,7 @@ def get_exp_handles(expname: str, ignore_finished=True, ignore_exp_not_exists=Tr
         return handles
 
     # if we are given an experiment object, we can directly get the handles
-    if isinstance(expname, run.Experiment):
+    if run is not None and isinstance(expname, run.Experiment):
         return _get_handles(expname)
 
     try:
@@ -481,7 +483,7 @@ def add_task(
         task_name = task_name_cut
 
     if run_after is not None and cluster_config["executor"] == "slurm":
-        if isinstance(run_after, (str, run.Experiment)):
+        if isinstance(run_after, str) or (run is not None and isinstance(run_after, run.Experiment)):
             run_after = [run_after]
         dependencies = []
         for dep_expname in run_after:

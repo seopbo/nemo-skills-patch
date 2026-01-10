@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from __future__ import annotations
+
 import json
 import logging
 import os
@@ -310,7 +312,8 @@ def read_config(config_file):
             raise ValueError("job_dir must be provided in the cluster config if ssh_tunnel is not provided.")
         if not Path(cluster_config["job_dir"]).is_absolute():
             raise ValueError("job_dir must be an absolute path.")
-        set_nemorun_home(cluster_config["job_dir"])
+        if set_nemorun_home is not None:
+            set_nemorun_home(cluster_config["job_dir"])
 
     return cluster_config
 
@@ -425,6 +428,11 @@ def _get_tunnel_cached(
     shell: str | None = None,
     pre_command: str | None = None,
 ):
+    if run is None:
+        raise ImportError(
+            "nemo_run is required for SSH tunnel operations but is not installed. "
+            "Please install it with: pip install nemo_run"
+        )
     kwargs = dict(
         host=host,
         user=user,
@@ -447,12 +455,20 @@ def _get_tunnel_cached(
 
 
 def tunnel_hash(tunnel):
-    if isinstance(tunnel, run.LocalTunnel):
+    if run is not None and isinstance(tunnel, run.LocalTunnel):
+        return "local"
+    # Fallback check for when run is None - check by attribute presence
+    if not hasattr(tunnel, "host"):
         return "local"
     return f"{tunnel.job_dir}:{tunnel.host}:{tunnel.user}:{tunnel.identity}:{tunnel.shell}:{tunnel.pre_command}"
 
 
 def get_tunnel(cluster_config):
+    if run is None:
+        raise ImportError(
+            "nemo_run is required for tunnel operations but is not installed. "
+            "Please install it with: pip install nemo_run"
+        )
     if "ssh_tunnel" not in cluster_config:
         if cluster_config["executor"] == "slurm":
             LOG.info("No ssh_tunnel configuration found, assuming we are running from the cluster already.")
