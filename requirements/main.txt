@@ -45,6 +45,7 @@ sacrebleu
 scikit-learn
 sentence_transformers # Needed for BFCLv4 
 sympy
+torchx
 tqdm
 transformers
 typer >= 0.13
