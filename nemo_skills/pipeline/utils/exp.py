@@ -28,9 +28,10 @@ try:
     from nemo_run.core.execution.slurm import SlurmJobDetails, get_packaging_job_key
 except ImportError:
     run = None
-    DockerExecutor = None
-    LocalExecutor = None
-    SlurmJobDetails = get_packaging_job_key = None
+    DockerExecutor = object
+    LocalExecutor = object
+    SlurmJobDetails = object
+    get_packaging_job_key = None
 
 
 from torchx.specs.api import AppState
