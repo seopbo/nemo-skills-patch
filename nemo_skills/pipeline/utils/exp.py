@@ -21,10 +21,18 @@ from dataclasses import dataclass, fields
 from functools import lru_cache
 from pathlib import Path
 
-import nemo_run as run
-from nemo_run.core.execution.docker import DockerExecutor
-from nemo_run.core.execution.local import LocalExecutor
-from nemo_run.core.execution.slurm import SlurmJobDetails, get_packaging_job_key
+try:
+    import nemo_run as run
+    from nemo_run.core.execution.docker import DockerExecutor
+    from nemo_run.core.execution.local import LocalExecutor
+    from nemo_run.core.execution.slurm import SlurmJobDetails, get_packaging_job_key
+except ImportError:
+    run = None
+    DockerExecutor = None
+    LocalExecutor = None
+    SlurmJobDetails = get_packaging_job_key = None
+
+
 from torchx.specs.api import AppState
 
 from nemo_skills.pipeline.utils.cluster import (
