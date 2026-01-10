@@ -16,7 +16,10 @@ import logging
 import os
 from typing import Dict, Optional
 
-import nemo_run as run
+try:
+    import nemo_run as run
+except ImportError:
+    run = None
 
 from nemo_skills.pipeline.utils.cluster import get_tunnel
 from nemo_skills.utils import get_logger_name

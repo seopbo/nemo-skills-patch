@@ -19,7 +19,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import nemo_run as run
+try:
+    import nemo_run as run
+except ImportError:
+    run = None
 
 from nemo_skills.utils import get_logger_name
 

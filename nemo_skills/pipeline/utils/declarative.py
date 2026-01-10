@@ -19,7 +19,10 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple, Union
 
-import nemo_run as run
+try:
+    import nemo_run as run
+except ImportError:
+    run = None
 
 from nemo_skills.pipeline.utils import (
     get_env_variables,

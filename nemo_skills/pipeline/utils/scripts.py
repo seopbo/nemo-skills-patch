@@ -44,7 +44,10 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple, Union
 
-import nemo_run as run
+try:
+    import nemo_run as run
+except ImportError:
+    run = None
 
 from nemo_skills.pipeline.utils.commands import sandbox_command
 from nemo_skills.pipeline.utils.exp import install_packages_wrap
