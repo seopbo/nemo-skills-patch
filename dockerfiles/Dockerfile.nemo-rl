@@ -144,3 +144,9 @@ RUN echo "This distribution includes open source which is archived at the follow
 
 RUN git clone https://github.com/NVIDIA-NeMo/Skills.git /opt/NeMo-Skills && cd /opt/NeMo-Skills && uv pip install .
 RUN git clone https://github.com/NVIDIA-NeMo/Gym.git /opt/NeMo-Gym && cd /opt/NeMo-Gym && uv pip install .
+
+# Re-pin numpy at the very end to avoid accidental upgrades caused by any editable installs above.
+# NeMo RL's workspace lock currently resolves numpy<2 (e.g., 1.26.4) due to downstream constraints
+# (e.g., Megatron), and numpy major mismatches between driver and Ray worker venvs can break
+# Ray deserialization.
+RUN uv pip install --python /opt/nemo_rl_venv/bin/python --no-cache-dir "numpy==1.26.4"
