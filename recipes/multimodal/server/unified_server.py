@@ -176,6 +176,28 @@ session_manager = None
 server_config = {}
 
 
+def compute_session_hash(messages: List[Dict[str, Any]]) -> str:
+    """Compute deterministic hash from messages for session identification.
+
+    Used for automatic session management without client-provided session_id.
+    Hash is based on message roles and content (text only, not audio data).
+    """
+    hash_parts = []
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        # For list content, extract text parts only
+        if isinstance(content, list):
+            text_parts = [
+                item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"
+            ]
+            content = " ".join(text_parts)
+        hash_parts.append(f"{role}:{content}")
+
+    combined = "|".join(hash_parts)
+    return hashlib.md5(combined.encode()).hexdigest()[:16]
+
+
 def extract_audio_from_messages(messages: List[Dict[str, Any]]) -> List[bytes]:
     """Extract all audio bytes from OpenAI-format messages.
 
@@ -195,7 +217,6 @@ def extract_audio_from_messages(messages: List[Dict[str, Any]]) -> List[bytes]:
                     if item.get("type") == "audio_url":
                         audio_url = item.get("audio_url", {})
                         url = audio_url.get("url", "")
-                        # Parse data URL: data:audio/wav;base64,<base64_data>
                         match = re.match(r"data:audio/\w+;base64,(.+)", url)
                         if match:
                             audio_list.append(base64.b64decode(match.group(1)))
@@ -473,18 +494,33 @@ def create_app(
             seed = request.get("seed")
 
             # Create generation request
-            # Use audio_bytes_list for multi-turn, or single audio_bytes for backwards compat
-            gen_request = GenerationRequest(
-                text=text if text else None,
-                system_prompt=system_prompt,
-                audio_bytes=audio_bytes_list[0] if len(audio_bytes_list) == 1 else None,
-                audio_bytes_list=audio_bytes_list if len(audio_bytes_list) > 1 else None,
-                max_new_tokens=max_tokens,
-                temperature=temperature,
-                top_p=top_p,
-                seed=seed,
-                request_id=hashlib.md5(f"{time.time()}".encode()).hexdigest()[:8],
-            )
+            # For s2s_session: use last audio only (current turn) - history is in KV cache
+            # For other backends: use audio_bytes_list for multi-turn support
+            if backend_type == "s2s_session":
+                # Session backend only needs current turn's audio (last in list)
+                current_audio = audio_bytes_list[-1] if audio_bytes_list else None
+                gen_request = GenerationRequest(
+                    text=text if text else None,
+                    system_prompt=system_prompt,
+                    audio_bytes=current_audio,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    seed=seed,
+                    request_id=hashlib.md5(f"{time.time()}".encode()).hexdigest()[:8],
+                )
+            else:
+                gen_request = GenerationRequest(
+                    text=text if text else None,
+                    system_prompt=system_prompt,
+                    audio_bytes=audio_bytes_list[0] if len(audio_bytes_list) == 1 else None,
+                    audio_bytes_list=audio_bytes_list if len(audio_bytes_list) > 1 else None,
+                    max_new_tokens=max_tokens,
+                    temperature=temperature,
+                    top_p=top_p,
+                    seed=seed,
+                    request_id=hashlib.md5(f"{time.time()}".encode()).hexdigest()[:8],
+                )
 
             # Validate request
             error = backend_instance.validate_request(gen_request)
@@ -493,9 +529,28 @@ def create_app(
 
             # Handle s2s_session backend with session support
             if backend_type == "s2s_session" and session_manager is not None:
+                # Compute session IDs from message history (OpenAI API compatible)
+                # restore_session_id: hash of messages before last (assistant, user) pair
+                # save_session_id: hash of all messages (full conversation)
+                non_system_messages = [m for m in messages if m.get("role") != "system"]
+
+                if len(non_system_messages) <= 1:
+                    # First turn: no previous session to restore
+                    restore_session_id = None
+                else:
+                    # Multi-turn: restore from previous conversation state
+                    # messages[:-2] excludes last assistant + last user
+                    prefix_messages = messages[:-2] if len(messages) >= 2 else []
+                    restore_session_id = compute_session_hash(prefix_messages) if prefix_messages else None
+
+                # Session to save after this turn (full conversation)
+                save_session_id = compute_session_hash(messages)
+
+                # Use client-provided session_id if available, otherwise use computed one
+                effective_restore_id = session_id if session_id else restore_session_id
+
                 # Get or create session
-                session_state = session_manager.get_or_create_session(session_id)
-                session_id = session_state.session_id
+                session_state = session_manager.get_or_create_session(effective_restore_id)
 
                 # Run inference with session in thread pool
                 loop = asyncio.get_event_loop()
@@ -506,9 +561,10 @@ def create_app(
                     session_state,
                 )
 
-                # Save updated session state
+                # Save updated session state under the new hash (full conversation)
                 if updated_session is not None:
-                    session_manager.save_session(session_id, updated_session)
+                    session_manager.save_session(save_session_id, updated_session)
+                session_id = save_session_id
             else:
                 # Process through batcher (non-session path)
                 result = await request_batcher.add_request(gen_request)
