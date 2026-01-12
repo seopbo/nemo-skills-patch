@@ -69,9 +69,12 @@ class OpenAIModel(BaseModel):
         assert kwargs.pop("reasoning_effort", None) is None, (
             "reasoning_effort is not supported by completion requests."
         )
-        assert kwargs.pop("top_k", -1) == -1, "`top_k` is not supported by OpenAI API, please set it to -1."
-        assert kwargs.pop("min_p", 0.0) == 0.0, "`min_p` is not supported by OpenAI API, please set it to 0.0."
-        assert kwargs.pop("repetition_penalty", 1.0) == 1.0, (
+        top_k = kwargs.pop("top_k", None)
+        assert top_k in (None, -1), "`top_k` is not supported by OpenAI API, please set it to -1."
+        min_p = kwargs.pop("min_p", None)
+        assert min_p in (None, 0, 0.0), "`min_p` is not supported by OpenAI API, please set it to 0.0."
+        repetition_penalty = kwargs.pop("repetition_penalty", None)
+        assert repetition_penalty in (None, 1.0), (
             "`repetition_penalty` is not supported by OpenAI API, please set it to 1.0."
         )
         if "tokens_to_generate" in kwargs:
@@ -81,17 +84,21 @@ class OpenAIModel(BaseModel):
             kwargs["seed"] = kwargs.pop("random_seed")
         if "stop_phrases" in kwargs:
             kwargs["stop"] = kwargs.pop("stop_phrases")
+        if kwargs.get("temperature") is None:
+            kwargs.pop("temperature", None)
+        if kwargs.get("top_p") is None:
+            kwargs.pop("top_p", None)
         return dict(kwargs)
 
     def _build_chat_request_params(
         self,
         messages: list[dict],
         tokens_to_generate: int,
-        temperature: float,
-        top_p: float,
-        top_k: int,
-        min_p: float,
-        repetition_penalty: float,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         random_seed: int,
         stop_phrases: list[str],
         timeout: int | None,
@@ -102,9 +109,9 @@ class OpenAIModel(BaseModel):
         tools: list[dict] | None = None,
     ) -> dict:
         # Validations
-        if top_k != -1:
+        if top_k not in (None, -1):
             raise ValueError("`top_k` is not supported by OpenAI API, please set it to -1.")
-        if min_p > 0:
+        if min_p not in (None, 0, 0.0):
             raise ValueError("`min_p` is not supported by OpenAI API, please set it to 0.0.")
         if stream and top_logprobs is not None:
             raise ValueError("`top_logprobs` is not supported with stream=True.")
@@ -120,15 +127,15 @@ class OpenAIModel(BaseModel):
 
         if self._is_reasoning_model(self.model):
             # Reasoning model specific validations and parameters
-            if temperature != 0.0:
+            if temperature not in (None, 0.0):
                 raise ValueError(
                     "`temperature` is not supported by reasoning models, please set it to default value `0.0`."
                 )
-            if top_p != 0.95:
+            if top_p not in (None, 0.95):
                 raise ValueError(
                     "`top_p` is not supported by reasoning models, please set it to default value `0.95`."
                 )
-            if repetition_penalty != 1.0:
+            if repetition_penalty not in (None, 1.0):
                 raise ValueError(
                     "`repetition_penalty` is not supported by reasoning models, please set it to default value `1.0`."
                 )
@@ -146,12 +153,15 @@ class OpenAIModel(BaseModel):
             # Standard model parameters
             if reasoning_effort is not None:
                 raise ValueError("`reasoning_effort` is only supported by reasoning models.")
-            params["presence_penalty"] = repetition_penalty
+            if repetition_penalty is not None:
+                params["presence_penalty"] = repetition_penalty
             params["logprobs"] = top_logprobs is not None
             params["top_logprobs"] = top_logprobs
             params["max_completion_tokens"] = tokens_to_generate
-            params["temperature"] = temperature
-            params["top_p"] = top_p
+            if temperature is not None:
+                params["temperature"] = temperature
+            if top_p is not None:
+                params["top_p"] = top_p
 
         return params
 

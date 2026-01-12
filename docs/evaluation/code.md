@@ -82,11 +82,13 @@ There are a few parameters specific to SWE-bench. They have to be specified with
 
 - **++eval_harness_repo:** URL of the repository to use for the evaluation harness. This is passed directly as an argument to `git clone`. Defaults to [`https://github.com/Kipok/SWE-bench.git`](https://github.com/Kipok/SWE-bench), our fork of SWE-bench that supports local evaluation.
 
-- **++eval_harness_commit:** The commit hash, branch or tag to checkout after cloning agent_harness_repo. Defaults to `HEAD`, i.e. the latest commit.
+- **++eval_harness_commit:** The commit hash, branch or tag to checkout after cloning eval_harness_repo. Defaults to `HEAD`, i.e. the latest commit.
+
+- **++setup_timeout:** The timeout for downloading & installing the agent framework and the evaluation harness, in seconds. Defaults to 1200, i.e. 20 minutes.
 
 - **++swebench_tests_timeout:** The timeout for tests after applying the generated patch during evaluation, in seconds. Defaults to 1800, i.e. 30 minutes.
 
-- **++max_retries:** How many times to try running inference and evaluation until a valid output file is produced. Defaults to 3.
+- **++max_retries:** How many times to try running setup, inference and evaluation until a valid output file is produced. Defaults to 3.
 
 - **++min_retry_interval, ++max_retry_interval:** The interval between retries, in seconds. Selected randomly between min and max on each retry. Defaults to 60 and 180 respectively.
 
@@ -183,10 +185,10 @@ We currently support IOI24 and are working to support IOI25 for evaluation. The 
 
 #### Data Preparation
 
-First, prepare the dataset by running the `ns prepare_data` command. The arguments below will generate `test.jsonl` and `test_metadata.json`.
+First, prepare the dataset by running the `ns prepare_data` command. The arguments below will generate `ioi24.jsonl` and `ioi24_metadata.json`.
 
 ```
-ns prepare_data ioi24
+ns prepare_data ioi
 ```
 
 #### Running the Evaluation
@@ -207,10 +209,11 @@ ns eval \
     --server_gpus=8 \
     --benchmarks=ioi24:50 \
     --with_sandbox \
-    --split=test \
+    --split=ioi24 \
     --data_dir=<DATA_DIR> \
     --output_dir=<OUTPUT_DIR> \
-    --extra_eval_args="++eval_config.test_file=<PATH_TO_METADATA_TEST_FILE>" \
+    --eval_subfolder=eval-results/ioi24/ \ # set the folder if you want to differentiate subsets.
+    --extra_eval_args="++eval_config.test_file=<PATH_TO_METADATA_TEST_DIR>/ioi24_metadata.json" \
     ++inference.temperature=0.6 \
     ++inference.top_p=0.95 \
     ++inference.tokens_to_generate=65536
@@ -218,13 +221,12 @@ ns eval \
 
 ##### Verifying Results
 
-After all jobs are complete, you can check the results in `<OUTPUT_DIR>/eval-results/ioi24/metrics.json`. You can also take a look at `<OUTPUT_DIR>/eval-results/ioi24/summarized-results/main_*`. They should look something like this:
+After all jobs are complete, you can check the results in `<OUTPUT_DIR>/eval-results/ioi24/ioi/metrics.json`. You can also take a look at `<OUTPUT_DIR>/eval-results/ioi24/ioi/summarized-results/main_*`. They should look something like this:
 
 ```
------------------------------------------------------- ioi24 ------------------------------------------------------
-evaluation_mode   | num_entries | avg_tokens | gen_seconds | correct       | total_score        | round_robin_score
-pass@1[avg-of-50] | 39          | 40387      | 7410        | 0.51% ± 1.04% | 303.47             | 261.01
-pass@50           | 39          | 40387      | 7410        | 2.56%         | 303.47             | 261.01
+------------------------------------ ioi24 -------------------------------------
+evaluation_mode | num_entries | avg_tokens | gen_seconds | correct | total_score
+pass@50          | 39          | 52225      | 99630       | 23.08%  | 500
 ```
 
 ### livecodebench
@@ -314,6 +316,46 @@ Due to variance between runs, you can automatically repeat the evaluation and av
 --benchmarks=livecodebench:3
 ```
 
+### BIRD
+
+The [BIRD benchmark](https://bird-bench.github.io/) is currently the only text-to-SQL benchmark that is supported. Evaluation is based on the SQL evaluation accuracy calculated in [this file](https://github.com/AlibabaResearch/DAMO-ConvAI/blob/main/bird/llm/src/evaluation.py) provided in the BIRD GitHub repository.
+
+#### Data Preparation
+
+
+First, the data must be downloaded and prepared, which you can do by running:
+```bash
+ns prepare_data birdbench --cluster=<CLUSTER_NAME> --data_dir=<DATA_DIR>
+```
+
+This will download and unpack a file into `<DATA_DIR>/birdbench/dev_20240627`, which contains the BIRD dev manifest, table information, and database schemas.
+The script will also process the original manifest into `<DATA_DIR>/birdbench/dev.jsonl`, which will be the input for evaluation.
+`<DATA_DIR>` should be a path to the mount point where you want this data to be stored.
+
+See [the "Using data on cluster" documentation](./index.md#Using-data-on-cluster) for more information.
+
+#### Running the Evaluation
+
+The following command runs an evaluation of [Qwen3-8B](https://huggingface.co/Qwen/Qwen3-8B) on a Slurm cluster.
+
+```bash
+ns eval \
+     --cluster=<CLUSTER_NAME> \
+     --server_type='sglang' \
+     --server_gpus=8 \
+     --model=Qwen/Qwen3-8B \
+     --benchmarks=birdbench \
+     --data_dir=<DATA_DIR> \
+     --output_dir=<OUTPUT_DIR> \
+     ++inference.tokens_to_generate=10000 \
+     ++inference.temperature=0.6 \
+     ++inference.top_p=0.95 \
+     ++inference.top_k=20 \
+     ++max_concurrent_requests=1024 \
+```
+You should specify: `<CLUSTER_NAME>`, which should match your cluster config name; `<DATA_DIR>`, which should be the location where your dataset is mounted from the cluster; and `<OUTPUT_DIR>`.
+The former two arguments should match what you used in `prepare_data`.
+
 ### livecodebench-cpp
 
 - Benchmark is defined in [`nemo_skills/dataset/livecodebench-cpp/__init__.py`](https://github.com/NVIDIA-NeMo/Skills/blob/main/nemo_skills/dataset/livecodebench-cpp/__init__.py)
@@ -325,6 +367,38 @@ Due to variance between runs, you can automatically repeat the evaluation and av
 
 - Benchmark is defined in [`nemo_skills/dataset/livecodebench-pro/__init__.py`](https://github.com/NVIDIA-NeMo/Skills/blob/main/nemo_skills/dataset/livecodebench-pro/__init__.py)
 - Original benchmark source is [here](https://github.com/GavinZhengOI/LiveCodeBench-Pro).
+
+#### Data Preparation
+
+First, prepare the dataset by running the `ns prepare_data` command. The arguments below will generate `test_24q4.jsonl`, `test_25q1.jsonl`, `test_25q2.jsonl`, and `test_25q3.jsonl` files.
+
+```
+ns prepare_data livecodebench-pro --cluster=local --data_dir=/workspace/ns-data
+```
+
+Note that, this will also download testcases and keep it at `/workspace/ns-data/livecodebench-pro/testcases`. We recommend using a cluster data location since the testcases directory would be of size 15GB.
+
+#### Running the Evaluation
+
+```
+ns eval \
+    --cluster=<CLUSTER_NAME> \
+    --model=nvidia/OpenReasoning-Nemotron-32B \
+    --server_type=vllm \
+    --server_args="--async-scheduling" \
+    --server_nodes=1 \
+    --server_gpus=8 \
+    --benchmarks=livecodebench-pro \
+    --split=test_25q2 \
+    --data_dir=/workspace/ns-data/livecodebench-pro \
+    --output_dir=<OUTPUT_DIR> \
+    ++parse_reasoning=True \
+    ++eval_config.test_file=/workspace/ns-data/livecodebench-pro/test_25q2.jsonl \
+    ++eval_config.test_dir=/workspace/ns-data/livecodebench-pro/testcases \
+    ++inference.temperature=0.6 \
+    ++inference.top_p=0.95 \
+    ++inference.tokens_to_generate=65536
+```
 
 ### human-eval
 

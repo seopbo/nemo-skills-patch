@@ -19,7 +19,9 @@ from nemo_skills.dataset.utils import import_from_path
 from nemo_skills.evaluation.metrics.aalcr_metrics import AALCRMetrics
 from nemo_skills.evaluation.metrics.answer_judgement_metrics import AnswerJudgementMetrics
 from nemo_skills.evaluation.metrics.arena_metrics import ArenaMetrics
+from nemo_skills.evaluation.metrics.audio_metrics import AudioMetrics
 from nemo_skills.evaluation.metrics.bfcl_metrics import BFCLMetrics
+from nemo_skills.evaluation.metrics.bird_metrics import BirdMetrics
 from nemo_skills.evaluation.metrics.code_metrics import (
     BigCodeBenchMetrics,
     EvalPlusMetrics,
@@ -47,7 +49,9 @@ METRICS_MAP = {
     "lean4-statement": Lean4Metrics,
     "answer-judgement": AnswerJudgementMetrics,
     "arena": ArenaMetrics,
+    "audio": AudioMetrics,
     "bfcl": BFCLMetrics,
+    "bird": BirdMetrics,
     "evalplus": EvalPlusMetrics,
     "if": IFMetrics,
     "ioi": IOIMetrics,
@@ -55,6 +59,7 @@ METRICS_MAP = {
     "multichoice": MathMetrics,
     "ruler": RulerMetrics,
     "livecodebench": LiveCodeBenchMetrics,
+    "livecodebench_pro": LiveCodeBenchMetrics,
     "swe-bench": SweBenchMetrics,
     "scicode": SciCodeMetrics,
     "bigcodebench": BigCodeBenchMetrics,

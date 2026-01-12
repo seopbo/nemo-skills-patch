@@ -53,11 +53,11 @@ class CodeExecutionWrapper:
         code_output_end: str,
         code_output_format: str,
         tokens_to_generate: int,
-        temperature: float,
-        top_p: float,
-        top_k: int,
-        min_p: float,
-        repetition_penalty: float,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         random_seed: int,
         stop_phrases: list[str] | None = None,
         top_logprobs: int | None = None,
@@ -66,6 +66,7 @@ class CodeExecutionWrapper:
         stream: bool = False,
         extra_body: dict = None,
         endpoint_type: EndpointType = None,
+        reasoning_effort: str | None = None,
     ):
         # Handle OpenAI-style dictionary prompts
         is_openai_format = not isinstance(prompt, str)
@@ -93,6 +94,7 @@ class CodeExecutionWrapper:
                 timeout=timeout,
                 max_code_executions=max_code_executions,
                 extra_body=extra_body,
+                reasoning_effort=reasoning_effort,
             )
 
         effective_max_code_executions = self.config.max_code_executions
@@ -122,6 +124,7 @@ class CodeExecutionWrapper:
             "stop_phrases": stop_phrases + [code_end],
             "timeout": timeout,
             "extra_body": extra_body,
+            "reasoning_effort": reasoning_effort,
         }
         session_id = None
         code_rounds_executed = 0
@@ -246,12 +249,12 @@ class CodeExecutionWrapper:
         code_output_begin: str,
         code_output_end: str,
         code_output_format: str,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         tokens_to_generate: int | None = None,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
-        top_k: int = -1,
-        min_p: float = 0.0,
-        repetition_penalty: float = 1.0,
         random_seed: int = 0,
         stop_phrases: list[str] | None = None,
         remove_stop_phrases: bool = True,
@@ -261,6 +264,7 @@ class CodeExecutionWrapper:
         stream: bool = False,
         extra_body: dict = None,
         endpoint_type: EndpointType = None,
+        reasoning_effort: str | None = None,
     ) -> list[dict]:
         """For any generation parameter you can specify a list of values that needs to match the number of prompts.
 
@@ -288,6 +292,7 @@ class CodeExecutionWrapper:
             "max_code_executions": max_code_executions,
             "stream": stream,
             "extra_body": extra_body,
+            "reasoning_effort": reasoning_effort,
         }
 
         request = {key: value for key, value in kwargs.items()}
@@ -309,18 +314,19 @@ class CodeExecutionWrapper:
         code_output_begin: str,
         code_output_end: str,
         code_output_format: str,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         tokens_to_generate: int = 512,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
-        top_k: int = -1,
-        min_p: float = 0.0,
-        repetition_penalty: float = 1.0,
         random_seed: int = 0,
         stop_phrases: list[str] | None = None,
         timeout: float | int | None = 14400,  # None is 10min,
         max_code_executions: int | None = None,
         extra_body: dict = None,
         endpoint_type: EndpointType = None,
+        reasoning_effort: str | None = None,
     ):
         """
         Helper method, that implements streaming generation.
@@ -347,6 +353,7 @@ class CodeExecutionWrapper:
             "tokens_to_generate": tokens_to_generate,
             "stream": True,
             "extra_body": extra_body,
+            "reasoning_effort": reasoning_effort,
         }
 
         current_full_prompt = copy.deepcopy(prompt)

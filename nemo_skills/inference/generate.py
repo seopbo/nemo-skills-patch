@@ -69,14 +69,16 @@ class InferenceConfig:
     # You can override tokenizer with tokenizer parameter.
     # "responses": for responses api format.
     endpoint_type: EndpointType = EndpointType.chat
-    temperature: float = 0.0  # Temperature of 0 means greedy decoding
-    top_k: int = -1
-    top_p: float | None = 0.95  # Set to None to exclude from vllm requests (e.g., for ifbench)
-    min_p: float = 0.0
-    random_seed: int = 0
+    # None means we don't send this in the request (so whatever is default is used)
+    temperature: float | None = None  # set to 0 for greedy
+    top_k: int | None = None
+    top_p: float | None = None
+    min_p: float | None = None
     tokens_to_generate: int | None = None
-    repetition_penalty: float = 1.0
+    repetition_penalty: float | None = None
     top_logprobs: int | None = None
+    reasoning_effort: str | None = None
+    random_seed: int | None = None
     timeout: int | None = 14400  # Timeout for each individual LLM call in seconds
 
     extra_body: dict = field(default_factory=dict)  # Any other extra params passed with extra_body argument
@@ -176,6 +178,25 @@ class GenerateSolutionsConfig:
     #     - Set an ExampleTool server-only arg:
     #         ++tool_overrides.ExampleTool.foo_argument='[TEST] '
     tool_overrides: dict | None = field(default_factory=dict)
+    #
+    #   Schema overrides allow customizing tool schemas shown to the model.
+    #   Dict keyed by provider class name (like tool_overrides), then tool name.
+    #   Format: ProviderClassName -> tool_name -> (name, description, parameters)
+    #
+    #   Example YAML configuration (config.yaml):
+    #     schema_overrides:
+    #       PythonTool:
+    #         stateful_python_code_exec:
+    #           name: "python_executor"
+    #           description: "Evaluate Python code interactively"
+    #           parameters:
+    #             code:
+    #               name: "script"
+    #               description: "Python code to execute"
+    #
+    #   To use this config with Hydra, launch your script with:
+    #      --config-path /path/to/configs --config-name config
+    schema_overrides: dict | None = field(default_factory=dict)
 
     # if True, will move full generation to _full_generation key and keep cfg.generation_key without thinking tokens
     # IMPORTANT: do not set this for non-reasoning models as it will make the generations empty!
@@ -318,7 +339,7 @@ class GenerationTask:
         # Setup hf_tokenizer for counting prompt tokens
         self.hf_tokenizer = None
         if self.cfg.count_prompt_tokens:
-            self.hf_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
+            self.hf_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer, trust_remote_code=True)
 
             if self.hf_tokenizer is None:
                 raise ValueError("Tokenizer could not be initialized. Needed for counting prompt tokens.")
@@ -336,6 +357,9 @@ class GenerationTask:
             if supports_single_eval(self.cfg.eval_type, self.cfg.eval_config):
                 LOG.info("Evaluator supports per-datapoint evals, will interleave evaluation with generation.")
                 self.evaluator = get_evaluator_class(self.cfg.eval_type, self.cfg.eval_config)
+
+        # Track whether we've shown the reasoning warning
+        self._reasoning_warning_shown = False
 
         LOG.info(
             "Async loop is maintaining %d generations in parallel. "
@@ -376,18 +400,35 @@ class GenerationTask:
     def setup_llm(self):
         self.sandbox = get_sandbox(**self.cfg.sandbox) if self.cfg.sandbox is not None else None
 
+        self.data_dir = None
+        if "data_dir" in self.cfg.eval_config and not isinstance(self.cfg.eval_config.get("data_dir"), type(None)):
+            self.data_dir = self.cfg.eval_config["data_dir"]
+
+        output_dir = str(Path(self.cfg.output_file).parent)
+
         if self.cfg.code_execution:
-            llm = get_code_execution_model(**self.cfg.server, tokenizer=self.tokenizer, sandbox=self.sandbox)
+            llm = get_code_execution_model(
+                **self.cfg.server,
+                tokenizer=self.tokenizer,
+                sandbox=self.sandbox,
+                data_dir=self.data_dir or "",
+                output_dir=output_dir,
+            )
         elif self.cfg.tool_modules is not None:
             llm = get_tool_calling_model(
                 **self.cfg.server,
                 tool_modules=self.cfg.tool_modules,
                 tool_overrides=self.cfg.tool_overrides,
+                schema_overrides=self.cfg.schema_overrides,
                 tokenizer=self.tokenizer,
                 additional_config={"sandbox": self.cfg.sandbox},
+                data_dir=self.data_dir or "",
+                output_dir=output_dir,
             )
         else:
-            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
+            llm = get_model(
+                **self.cfg.server, tokenizer=self.tokenizer, data_dir=self.data_dir or "", output_dir=output_dir
+            )
 
         if self.cfg.parallel_thinking.mode is not None:
             # We don't want to override these key variables which overlap with self.cfg
@@ -542,6 +583,16 @@ class GenerationTask:
                 self.cfg.generation_key,
                 self.cfg.end_reasoning_string,
             )
+
+        # Warn once if reasoning detected but not being parsed
+        if not self.cfg.parse_reasoning and not self._reasoning_warning_shown:
+            gen = output.get(self.cfg.generation_key)
+            if isinstance(gen, str) and self.cfg.end_reasoning_string in gen:
+                LOG.warning(
+                    f"Detected '{self.cfg.end_reasoning_string}' in generation but parse_reasoning=False. "
+                    "For reasoning models, set ++parse_reasoning=True to avoid incorrect code extraction."
+                )
+                self._reasoning_warning_shown = True
 
     def prefill_generation(self, data_point) -> dict | None:
         """Prefill generation in case LLM is not required."""

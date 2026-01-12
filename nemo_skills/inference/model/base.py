@@ -75,9 +75,14 @@ class BaseModel:
         enable_soft_fail: bool = False,
         context_limit_retry_strategy: str | None = None,
         num_special_tokens_budget: int = 100,
+        # Directory paths for data and output
+        data_dir: str = "",
+        output_dir: str | None = None,
     ):
         self._tunnel = None
         self.model_name_or_path = model
+        self.data_dir = data_dir
+        self.output_dir = output_dir
         self.server_host = host
         self.server_port = port
         self.ssh_server = ssh_server
@@ -213,13 +218,13 @@ class BaseModel:
     async def generate_async(
         self,
         prompt: str | list[dict],
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         endpoint_type: EndpointType = None,
         tokens_to_generate: int | None = None,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
-        top_k: int = -1,
-        min_p: float = 0.0,
-        repetition_penalty: float = 1.0,
         random_seed: int = None,
         stop_phrases: list[str] | None = None,
         top_logprobs: int | None = None,
@@ -308,7 +313,12 @@ class BaseModel:
                             continue
 
                         LOG.error(f"BadRequestError after {max_retries} retries, returning empty response: {e}")
-                        return {"generation": "", "reasoning_content": "", "num_generated_tokens": 0}
+                        return {
+                            "generation": "",
+                            "reasoning_content": "",
+                            "num_generated_tokens": 0,
+                            "serialized_output": [],
+                        }
                     else:
                         raise e
 

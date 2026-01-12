@@ -151,12 +151,12 @@ class ASRNIMModel:
         prompt: str,
         # Unused generation parameters – they are accepted so that the wrapper
         # is API-compatible with ``BaseModel``.
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         tokens_to_generate: int = 0,
-        temperature: float = 0.0,
-        top_p: float = 0.0,
-        top_k: int = 0,
-        min_p: float = 0.0,
-        repetition_penalty: float = 1.0,
         random_seed: int = 0,
         stop_phrases: List[str] | None = None,
         top_logprobs: int | None = None,

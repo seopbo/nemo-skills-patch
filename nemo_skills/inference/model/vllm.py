@@ -47,12 +47,14 @@ class VLLMModel(BaseModel):
 
     def _build_request_body(self, top_k, min_p, repetition_penalty, extra_body: dict = None):
         full_extra_body = {
-            "min_p": min_p,
-            "repetition_penalty": repetition_penalty,
             "spaces_between_special_tokens": False,
         }
 
-        if top_k > 0:
+        if min_p is not None:
+            full_extra_body["min_p"] = min_p
+        if repetition_penalty is not None:
+            full_extra_body["repetition_penalty"] = repetition_penalty
+        if top_k is not None and top_k > 0:
             full_extra_body["top_k"] = top_k
 
         if extra_body:
@@ -63,12 +65,12 @@ class VLLMModel(BaseModel):
     def _build_completion_request_params(
         self,
         prompt: str,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         tokens_to_generate: int = 512,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
-        top_k: int = -1,
-        min_p: float = 0.0,
-        repetition_penalty: float = 1.0,
         random_seed: int = None,
         top_logprobs: int | None = None,
         timeout: int | None = None,
@@ -80,11 +82,10 @@ class VLLMModel(BaseModel):
     ) -> dict:
         assert reasoning_effort is None, "reasoning_effort is not supported for text completion requests"
         assert tools is None, "tools are not supported for text completion requests"
-        
+
         request = {
             "prompt": prompt,
             "max_tokens": tokens_to_generate,
-            "temperature": temperature,
             "seed": random_seed,
             "stop": stop_phrases or None,
             "logprobs": top_logprobs,
@@ -98,23 +99,25 @@ class VLLMModel(BaseModel):
             "timeout": timeout,
             "extra_body": self._build_request_body(top_k, min_p, repetition_penalty, extra_body=extra_body),
         }
-        
+
+        if temperature is not None:
+            request["temperature"] = temperature
         # Only include top_p if it's not None (allows conditional exclusion for specific benchmarks)
         if top_p is not None:
             request["top_p"] = top_p
-        
+
         return request
 
     def _build_chat_request_params(
         self,
         messages: list[dict],
         stream: bool,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         tokens_to_generate: int = 512,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
-        top_k: int = -1,
-        min_p: float = 0.0,
-        repetition_penalty: float = 1.0,
         random_seed: int = 0,
         stop_phrases: list[str] | None = None,
         timeout: int | None = None,
@@ -126,7 +129,6 @@ class VLLMModel(BaseModel):
         request = {
             "messages": messages,
             "max_tokens": tokens_to_generate,
-            "temperature": temperature,
             "seed": random_seed,
             "stop": stop_phrases or None,
             "logprobs": top_logprobs is not None,
@@ -139,11 +141,13 @@ class VLLMModel(BaseModel):
             "extra_body": self._build_request_body(top_k, min_p, repetition_penalty, extra_body=extra_body),
             "tools": tools,
         }
-        
+
+        if temperature is not None:
+            request["temperature"] = temperature
         # Only include top_p if it's not None (allows conditional exclusion for specific benchmarks)
         if top_p is not None:
             request["top_p"] = top_p
-        
+
         if reasoning_effort:
             request["allowed_openai_params"] = ["reasoning_effort"]
             request["reasoning_effort"] = reasoning_effort

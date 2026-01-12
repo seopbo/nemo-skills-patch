@@ -105,7 +105,7 @@ class ParallelThinkingTask:
             raise ValueError(f"Invalid parallel thinking mode: {self.cfg.mode}")
 
         if self.cfg.count_prompt_tokens:
-            self.hf_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
+            self.hf_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer, trust_remote_code=True)
             if self.hf_tokenizer is None:
                 raise ValueError("Tokenizer could not be initialized. Needed for counting prompt tokens.")
 
@@ -300,6 +300,10 @@ class ParallelThinkingTask:
             kwargs.pop(duplicate_key, None)
 
         LOG.info(f"kwargs: {kwargs}")
+        top_p = kwargs.pop("top_p", None)
+        top_k = kwargs.pop("top_k", None)
+        min_p = kwargs.pop("min_p", None)
+        repetition_penalty = kwargs.pop("repetition_penalty", None)
         kwargs["endpoint_type"] = self.cfg.endpoint_type
 
         output_dict.update(
@@ -308,6 +312,10 @@ class ParallelThinkingTask:
                 # Overriding the tokens_to_generate, temperature
                 tokens_to_generate=self.cfg.tokens_to_generate,
                 temperature=self.cfg.temperature,
+                top_p=top_p,
+                top_k=top_k,
+                min_p=min_p,
+                repetition_penalty=repetition_penalty,
                 **kwargs,
             )
         )
@@ -428,7 +436,7 @@ class ParallelThinkingTask:
             parallel_thinking_result = output_dict["parallel_thinking_result"]
         else:
             # GenSynthesis
-            output_dict = await self._run_gensynthesis(prompt_str, solutions, local_random)
+            output_dict = await self._run_gensynthesis(prompt_str, solutions, local_random, **kwargs)
             parallel_thinking_result = output_dict["parallel_thinking_result"]
 
         result[f"{self.cfg.mode}_comparison"] = parallel_thinking_result["generation"]

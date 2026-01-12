@@ -26,12 +26,12 @@ class MegatronModel(BaseModel):
         self,
         messages: list[dict],
         stream: bool,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         tokens_to_generate: int = 512,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
-        top_k: int = -1,
-        min_p: float = 0.0,
-        repetition_penalty: float = 1.0,
         random_seed: int = None,
         stop_phrases: list[str] | None = None,
         timeout: int | None = None,
@@ -41,19 +41,17 @@ class MegatronModel(BaseModel):
         # Validations
         if stream:
             raise NotImplementedError("Megatron server does not support streaming.")
-        if min_p > 0:
+        if min_p not in (None, 0, 0.0):
             raise NotImplementedError("Megatron server does not support min_p parameter.")
-        if repetition_penalty != 1.0:
+        if repetition_penalty not in (None, 1.0):
             raise NotImplementedError("Megatron server does not support repetition_penalty parameter.")
-        if top_k != -1:
+        if top_k not in (None, -1):
             raise NotImplementedError("Megatron server does not support top_k parameter.")
         assert kwargs.get("tools") is None, "Megatron server does not support tools parameter."
 
         params = {
             "messages": messages,
             "max_tokens": tokens_to_generate,
-            "temperature": temperature,
-            "top_p": top_p,
             "seed": random_seed,
             "stop": stop_phrases or None,
             "logprobs": top_logprobs,
@@ -65,18 +63,22 @@ class MegatronModel(BaseModel):
             "presence_penalty": 0.0,
             "timeout": timeout,
         }
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
         return params
 
     def _build_completion_request_params(
         self,
         prompt: str,
         stream: bool,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         tokens_to_generate: int = 512,
-        temperature: float = 0.0,
-        top_p: float = 0.95,
-        top_k: int = -1,
-        min_p: float = 0.0,
-        repetition_penalty: float = 1.0,
         random_seed: int = None,
         stop_phrases: list[str] | None = None,
         timeout: int | None = None,
@@ -86,19 +88,17 @@ class MegatronModel(BaseModel):
         # Parameter validation specific to Megatron
         if stream:
             raise NotImplementedError("Megatron server does not support streaming.")
-        if min_p > 0:
+        if min_p not in (None, 0, 0.0):
             raise NotImplementedError("Megatron server does not support min_p parameter.")
-        if repetition_penalty != 1.0:
+        if repetition_penalty not in (None, 1.0):
             raise NotImplementedError("Megatron server does not support repetition_penalty parameter.")
-        if top_k != -1:
+        if top_k not in (None, -1):
             raise NotImplementedError("Megatron server does not support top_k parameter.")
         assert kwargs.get("tools") is None, "Megatron server does not support tools parameter."
 
-        return {
+        params = {
             "prompt": prompt,
             "max_tokens": tokens_to_generate,
-            "temperature": temperature,
-            "top_p": top_p,
             "seed": random_seed,
             "stop": stop_phrases or None,
             "logprobs": top_logprobs,
@@ -110,6 +110,11 @@ class MegatronModel(BaseModel):
             "presence_penalty": 0.0,
             "timeout": timeout,
         }
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+        return params
 
     def _parse_completion_response(
         self,

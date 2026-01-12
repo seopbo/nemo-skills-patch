@@ -42,11 +42,11 @@ class GeminiModel(BaseModel):
         self,
         messages: list[dict],
         tokens_to_generate: int,
-        temperature: float,
-        top_p: float,
-        top_k: int,
-        min_p: float,
-        repetition_penalty: float,
+        temperature: float | None = None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        min_p: float | None = None,
+        repetition_penalty: float | None = None,
         random_seed: int,
         stop_phrases: list[str],
         timeout: int | None,
@@ -65,8 +65,8 @@ class GeminiModel(BaseModel):
             - high: maximum thinking budget tokens: 4096 (env var: DEFAULT_REASONING_EFFORT_HIGH_THINKING_BUDGET)
             - dynamic: maximum thinking budget tokens: -1
         """
-        assert min_p == 0.0, "`min_p` is not supported by Gemini API, please set it to 0.0."
-        assert repetition_penalty == 1.0, (
+        assert min_p in (None, 0, 0.0), "`min_p` is not supported by Gemini API, please set it to 0.0."
+        assert repetition_penalty in (None, 1.0), (
             "`repetition_penalty` is not supported by Gemini API, please set it to default value `1.0`."
         )
         assert not extra_body, "`extra_body` is not supported by Gemini API, please set it to None or empty dict"
@@ -81,14 +81,17 @@ class GeminiModel(BaseModel):
             "stream": stream,
             "tools": tools,
             "max_completion_tokens": tokens_to_generate,
-            "temperature": temperature,
-            "top_p": top_p,
             "logprobs": top_logprobs is not None,
-            "top_k": top_k if top_k > 0 else None,
             "seed": random_seed,
             "top_logprobs": top_logprobs,
             "allowed_openai_params": ["top_k", "seed", "top_logprobs"],
         }
+        if temperature is not None:
+            params["temperature"] = temperature
+        if top_p is not None:
+            params["top_p"] = top_p
+        if top_k is not None and top_k > 0:
+            params["top_k"] = top_k
 
         if reasoning_effort is None:
             # https://github.com/BerriAI/litellm/blob/v1.75.0-nightly/litellm/llms/vertex_ai/gemini/vertex_and_google_ai_studio_gemini.py#L438-L442
