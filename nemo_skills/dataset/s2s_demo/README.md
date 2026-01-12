@@ -64,6 +64,50 @@ source .venv/bin/activate && \
 NEMO_SKILLS_DISABLE_UNCOMMITTED_CHANGES_CHECK=1 python nemo_skills/dataset/voicebench/scripts/generate_from_api_and_score_official.py --config nemo_skills/dataset/voicebench/scripts/voicebench_s2s_session_full_config.yaml
 ```
 
+## Running the Server Only (for Manual Testing)
+
+If you want to run just the unified server for manual testing or integration with external clients (e.g., AU-Harness), you can start it directly without installing nemo-skills. Just copy the `ns_eval` folder to the cluster.
+
+**On draco_oci:**
+
+```bash
+srun --partition=batch_block1,batch_block3,batch_block4 \
+     --account=convai_convaird_nemo-speech \
+     --nodes=1 \
+     --gpus=1 \
+     --time=02:00:00 \
+     --container-image=/lustre/fsw/portfolios/convai/users/ecasanova/docker_images/nemo_duplex_november_eartts.sqsh \
+     --container-mounts="/lustre:/lustre,/path/to/your/workspace:/workspace" \
+     --pty \
+     bash -c 'cd /workspace && \
+     export PYTHONPATH="/workspace/ns_eval:$PYTHONPATH" && \
+     export HF_HOME=/lustre/fsw/portfolios/llmservice/users/vmendelev/.cache/huggingface && \
+     export INCLUDE_DEBUG_INFO=false && \
+     python -m nemo_skills.inference.server.serve_unified \
+       --backend s2s_session \
+       --model /lustre/fsw/portfolios/convai/users/ecasanova/Checkpoints/Nemotron-VoiceChat-november/duplex-eartts-2mim_sw_et_eos_dp_eos_dup_fp32-stt-3-december_stt_edresson_model_R_digits_norm_eip_0.1_EA_model_step_9005 \
+       --config_path /lustre/fsw/portfolios/convai/users/ecasanova/S2S-Duplex-new-codebase/scripts/configs/inference/nanov2_demo_model_eartts_updated.yaml \
+       --code_path /lustre/fsw/portfolios/convai/users/kevinhu/S2S-Duplex-new-codebase/branches/NeMo-release_not_rebased \
+       --ignore_system_prompt \
+       --num_frames_per_inference 2 \
+       --silence_padding_sec 0.0 \
+       --session_artifacts_dir /lustre/fsw/portfolios/llmservice/users/vmendelev/tmp/test_session/artifacts \
+       --no_decode_audio \
+       --response_end_detection_mode eos \
+       --eos_detection_window 10 \
+       --port 8000'
+```
+
+**Notes:**
+- Replace `/path/to/your/workspace` with your actual workspace path containing the `ns_eval` folder
+- The server exposes OpenAI-compatible `/v1/chat/completions` endpoint
+- `--no_decode_audio` runs in text-only mode (no TTS output)
+- `--response_end_detection_mode eos` stops generation after consecutive PAD tokens
+- `INCLUDE_DEBUG_INFO=false` disables debug info in responses
+- The server supports multi-turn conversations with automatic session management based on conversation history hashing
+
+Once running, the server will print which node it's on (e.g., `batch-block1-3196:8000`). You can then send requests from the login node or any machine that can reach the compute node.
+
 ## Incremental and Session Backends
 
 The demo test is run with incremental backend which assumes silences already in the test audio or you can use `silence_padding_sec` to add trailing pause automatically.
