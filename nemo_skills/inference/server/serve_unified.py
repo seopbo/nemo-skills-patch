@@ -221,6 +221,19 @@ def main():
         action="store_true",
         help="Disable audio output (s2s_incremental backend)",
     )
+    parser.add_argument(
+        "--response_end_detection_mode",
+        type=str,
+        default="audio_energy",
+        choices=["audio_energy", "eos"],
+        help="Response end detection mode: audio_energy (TTS silence) or eos (consecutive PAD tokens)",
+    )
+    parser.add_argument(
+        "--eos_detection_window",
+        type=int,
+        default=10,
+        help="Number of consecutive PAD tokens to detect end of response (used when mode=eos)",
+    )
 
     # Session management options (s2s_session backend)
     parser.add_argument(
@@ -315,6 +328,9 @@ def main():
             extra_config["num_frames_per_inference"] = args.num_frames_per_inference
         if args.no_decode_audio:
             extra_config["decode_audio"] = False
+        # Response end detection (text-only mode uses eos)
+        extra_config["response_end_detection_mode"] = args.response_end_detection_mode
+        extra_config["eos_detection_window"] = args.eos_detection_window
         # Artifacts and alignment (available for both backends)
         if args.session_artifacts_dir:
             extra_config["session_artifacts_dir"] = args.session_artifacts_dir
@@ -349,6 +365,9 @@ def main():
             print(f"  Speaker Reference: {args.speaker_reference}")
         print(f"  Frames per Inference: {args.num_frames_per_inference}")
         print(f"  Decode Audio: {not args.no_decode_audio}")
+        print(f"  Response End Mode: {args.response_end_detection_mode}")
+        if args.response_end_detection_mode == "eos":
+            print(f"  EOS Detection Window: {args.eos_detection_window} frames")
         print(f"  Save Artifacts: {not args.no_save_session_artifacts}")
         if args.session_artifacts_dir:
             print(f"  Artifacts Dir: {args.session_artifacts_dir}")
