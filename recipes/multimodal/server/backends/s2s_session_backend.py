@@ -603,24 +603,31 @@ class S2SSessionBackend(S2SIncrementalBackend):
 
         # Prepare outputs
         total_frames = final_frame_idx
-        gen_text_trimmed = gen_text[:, :total_frames]
-        gen_asr_text_trimmed = gen_asr_text[:, :total_frames]
-        lengths = torch.tensor([total_frames], dtype=torch.long, device=device)
+
+        # For current turn text output: decode only the new frames from this turn
+        current_turn_frames = final_frame_idx - start_frame_idx
+        gen_text_current_turn = gen_text[:, start_frame_idx:final_frame_idx]
+        gen_asr_text_current_turn = gen_asr_text[:, start_frame_idx:final_frame_idx]
+        current_turn_lengths = torch.tensor([current_turn_frames], dtype=torch.long, device=device)
 
         text_output = tokens_to_str(
-            gen_text_trimmed,
-            lengths,
+            gen_text_current_turn,
+            current_turn_lengths,
             tokenizer=self._tokenizer,
             pad_id=self._model.stt_model.text_pad_id,
             eval_text_turn_taking=True,
         )
         asr_text_output = tokens_to_str(
-            gen_asr_text_trimmed,
-            lengths,
+            gen_asr_text_current_turn,
+            current_turn_lengths,
             tokenizer=self._tokenizer,
             pad_id=self._model.stt_model.text_pad_id,
             eval_text_turn_taking=True,
         )
+
+        # Keep full trimmed tensors for session state (needed for next turn)
+        gen_text_trimmed = gen_text[:, :total_frames]
+        lengths = torch.tensor([total_frames], dtype=torch.long, device=device)
 
         output_audio = None
         if audio_segments:
