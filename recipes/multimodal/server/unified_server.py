@@ -65,6 +65,7 @@ TOP_P = float(os.getenv("UNIFIED_SERVER_TOP_P", "1.0"))
 
 # Debug
 DEBUG = os.getenv("DEBUG", "").lower() in ("true", "1", "yes", "on")
+INCLUDE_DEBUG_INFO = os.getenv("INCLUDE_DEBUG_INFO", "true").lower() in ("true", "1", "yes", "on")
 
 
 @dataclass
@@ -633,7 +634,7 @@ def create_app(
 
             # Embed debug_info in content as JSON (OpenAI-compatible)
             final_content = message_content
-            if result.debug_info:
+            if result.debug_info and INCLUDE_DEBUG_INFO:
                 final_content = f"{message_content}\n<debug_info>{json.dumps(result.debug_info)}</debug_info>"
 
             response = {
@@ -663,7 +664,7 @@ def create_app(
                 response["choices"][0]["message"]["audio"] = audio_output
 
             # Add debug info at top level too (for non-litellm clients)
-            if result.debug_info:
+            if result.debug_info and INCLUDE_DEBUG_INFO:
                 response["debug_info"] = result.debug_info
 
             # Add saved file paths if available
