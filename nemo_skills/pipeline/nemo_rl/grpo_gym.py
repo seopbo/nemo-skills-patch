@@ -224,6 +224,7 @@ def grpo_gym_nemo_rl(
     validation_data: str = typer.Option(..., help="Path to the NemoGym validation data (JSONL)"),
     num_nodes: int = typer.Option(1, help="Number of nodes"),
     num_gpus: int = typer.Option(..., help="Number of GPUs per node"),
+    dependent_jobs: int = typer.Option(0, help="Number of dependent jobs"),
     conversion_step: str = typer.Option(
         default="last",
         help=(
@@ -341,6 +342,8 @@ def grpo_gym_nemo_rl(
                 "You can set it in your cluster config like this:\n"
                 '  env_vars: ["HF_HOME=/your/path/to/hf_home"]'
             )
+    if run_conversion_only:
+        dependent_jobs = -1
 
     train_cmd = get_training_cmd(
         cluster_config=cluster_config,
@@ -369,11 +372,11 @@ def grpo_gym_nemo_rl(
     with get_exp(expname, cluster_config, _reuse_exp) as exp:
         prev_task = _task_dependencies
         with temporary_env_update(cluster_config, env_update):
-            if not run_conversion_only:
+            for job_id in range(dependent_jobs + 1):
                 prev_task = add_task(
                     exp,
                     cmd=train_cmd,
-                    task_name=f"{expname}-grpo-gym",
+                    task_name=f"{expname}-grpo-gym-{job_id}",
                     log_dir=f"{log_dir}/training-logs",
                     container=cluster_config["containers"]["nemo-rl"],
                     num_gpus=num_gpus,
@@ -386,7 +389,7 @@ def grpo_gym_nemo_rl(
                     reuse_code_exp=reuse_code_exp,
                     task_dependencies=[prev_task] if prev_task is not None else None,
                     sbatch_kwargs=sbatch_kwargs,
-                    heterogeneous=False,
+                    heterogeneous=True if server_config is not None else False,
                     with_sandbox=with_sandbox,
                     with_ray=True,
                     installation_command=installation_command,
@@ -418,7 +421,7 @@ def grpo_gym_nemo_rl(
             installation_command=installation_command,
             skip_hf_home_check=skip_hf_home_check,
         )
-
+        # explicitly setting sequential to False since we set dependencies directly
         run_exp(exp, cluster_config, sequential=False, dry_run=dry_run)
 
     if _reuse_exp:

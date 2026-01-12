@@ -116,8 +116,8 @@ class NemoRLTask:
 
         nsight_cmd = get_nsight_cmd(self.profile_step_range)
         cmd = (
-            "export PYTHONPATH=$PYTHONPATH:/nemo_run/code:/opt/NeMo-RL && "
-            "export UV_PROJECT=/opt/NeMo-RL && "
+            f"export PYTHONPATH=$PYTHONPATH:/nemo_run/code:/opt/nemo-rl && "
+            f"export UV_PROJECT=/opt/nemo-rl && "
             f"{nsight_cmd}"
             "echo 'Starting training' && "
             "NRL_FORCE_REBUILD_VENVS=true uv run --active "
