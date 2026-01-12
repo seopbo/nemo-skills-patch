@@ -179,23 +179,33 @@ server_config = {}
 def extract_audio_from_messages(messages: List[Dict[str, Any]]) -> List[bytes]:
     """Extract all audio bytes from OpenAI-format messages.
 
-    Looks for audio_url in message content with format:
-    {"type": "audio_url", "audio_url": {"url": "data:audio/wav;base64,..."}}
+    Supports two formats:
+    1. audio_url: {"type": "audio_url", "audio_url": {"url": "data:audio/wav;base64,..."}}
+    2. input_audio: {"type": "input_audio", "input_audio": {"data": "...", "format": "wav"}}
 
-    Returns a list of audio bytes (one per audio_url found), preserving message order.
+    Returns a list of audio bytes (one per audio found), preserving message order.
     """
     audio_list = []
     for message in messages:
         content = message.get("content")
         if isinstance(content, list):
             for item in content:
-                if isinstance(item, dict) and item.get("type") == "audio_url":
-                    audio_url = item.get("audio_url", {})
-                    url = audio_url.get("url", "")
-                    # Parse data URL: data:audio/wav;base64,<base64_data>
-                    match = re.match(r"data:audio/\w+;base64,(.+)", url)
-                    if match:
-                        audio_list.append(base64.b64decode(match.group(1)))
+                if isinstance(item, dict):
+                    # Format 1: audio_url (data URL style)
+                    if item.get("type") == "audio_url":
+                        audio_url = item.get("audio_url", {})
+                        url = audio_url.get("url", "")
+                        # Parse data URL: data:audio/wav;base64,<base64_data>
+                        match = re.match(r"data:audio/\w+;base64,(.+)", url)
+                        if match:
+                            audio_list.append(base64.b64decode(match.group(1)))
+
+                    # Format 2: input_audio (OpenAI native style)
+                    elif item.get("type") == "input_audio":
+                        input_audio = item.get("input_audio", {})
+                        data = input_audio.get("data", "")
+                        if data:
+                            audio_list.append(base64.b64decode(data))
     return audio_list
 
 
