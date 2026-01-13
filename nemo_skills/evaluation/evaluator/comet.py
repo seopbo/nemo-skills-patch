@@ -73,6 +73,8 @@ def process_file(input_file: Path, output_file: Path, comet_model, batch_size: i
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Copy input file to output location
+    if not input_file.exists():
+        raise FileNotFoundError(f"Input file not found: {input_file}")
     shutil.copy(input_file, output_file)
     LOG.info(f"Copied {input_file} to {output_file}")
 
@@ -160,14 +162,14 @@ def main():
     if args.input_file:
         # Single file mode
         input_file = Path(args.input_file)
-        output_file = output_dir / "output_comet.jsonl"
+        output_file = output_dir / "output.jsonl"
         files_to_process.append((input_file, output_file))
     elif args.input_dir:
         # Multiple seeds mode
         input_dir = Path(args.input_dir)
         for seed in range(args.num_seeds):
-            input_file = input_dir / f"output-rs{seed}_comet.jsonl"
-            output_file = output_dir / f"output-rs{seed}_comet.jsonl"
+            input_file = input_dir / f"output-rs{seed}.jsonl"
+            output_file = output_dir / f"output-rs{seed}.jsonl"
             files_to_process.append((input_file, output_file))
     else:
         LOG.error("Either --input-file or --input-dir must be specified")

@@ -100,10 +100,9 @@ def _create_comet_judge_tasks(
     else:
         script_args.append(f"--input-file {input_file}")
 
-    run_cmd = "pip3 uninstall numpy -y && "
     run_cmd = f"python3 -I /nemo_run/code/nemo_skills/evaluation/evaluator/comet.py {' '.join(script_args)}"
 
-    # Create task with GPU support for NVEmbed
+    # Create task with GPU support for Comet
     judge_task = pipeline_utils.add_task(
         exp,
         cmd=run_cmd,
