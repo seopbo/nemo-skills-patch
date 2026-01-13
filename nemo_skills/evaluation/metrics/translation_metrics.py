@@ -13,7 +13,9 @@
 # limitations under the License.
 
 from collections import defaultdict
+
 from sacrebleu import corpus_bleu
+
 from nemo_skills.evaluation.metrics.base import BaseMetrics, as_float
 
 
@@ -52,7 +54,9 @@ class TranslationMetrics(BaseMetrics):
         for key in self.bleu_aggregation_dict:
             metrics_dict[key] = {"bleu": sum(self.bleu_aggregation_dict[key]) / len(self.bleu_aggregation_dict[key])}
             if self.comet_aggregation_dict:
-                metrics_dict[key]["comet"] = sum(self.comet_aggregation_dict[key]) / len(self.comet_aggregation_dict[key])
+                metrics_dict[key]["comet"] = sum(self.comet_aggregation_dict[key]) / len(
+                    self.comet_aggregation_dict[key]
+                )
 
         return metrics_dict
 
