@@ -70,19 +70,23 @@ If you want to run just the unified server for manual testing or integration wit
 
 **On draco_oci:**
 
+### Option 1: Text-only mode (no TTS)
+
+Create `run_server.sbatch`:
 ```bash
-srun --partition=batch_block1,batch_block3,batch_block4 \
-     --account=convai_convaird_nemo-speech \
-     --nodes=1 \
-     --gpus=1 \
-     --time=02:00:00 \
-     --container-image=/lustre/fsw/portfolios/convai/users/ecasanova/docker_images/nemo_duplex_november_eartts.sqsh \
+#!/bin/bash
+#SBATCH --partition=batch_block1,batch_block3,batch_block4
+#SBATCH --account=convai_convaird_nemo-speech
+#SBATCH --nodes=1
+#SBATCH --gpus=1
+#SBATCH --time=02:00:00
+#SBATCH --output=server_%j.log
+
+srun --container-image=/lustre/fsw/portfolios/convai/users/ecasanova/docker_images/nemo_duplex_november_eartts.sqsh \
      --container-mounts="/lustre:/lustre,/path/to/your/workspace:/workspace" \
-     --pty \
      bash -c 'cd /workspace && \
      export PYTHONPATH="/workspace/ns_eval:$PYTHONPATH" && \
      export HF_HOME=/lustre/fsw/portfolios/llmservice/users/YOUR_USER/.cache/huggingface && \
-     export S2S_SAVE_DIR=/lustre/fsw/portfolios/llmservice/users/YOUR_USER/tmp/s2s_output && \
      export INCLUDE_DEBUG_INFO=true && \
      python -m nemo_skills.inference.server.serve_unified \
        --backend s2s_session \
@@ -99,17 +103,48 @@ srun --partition=batch_block1,batch_block3,batch_block4 \
        --port 8000'
 ```
 
+### Option 2: With audio output (TTS enabled)
+
+Create `run_server_sound.sbatch`:
+```bash
+#!/bin/bash
+#SBATCH --partition=batch_block1,batch_block3,batch_block4
+#SBATCH --account=convai_convaird_nemo-speech
+#SBATCH --nodes=1
+#SBATCH --gpus=1
+#SBATCH --time=02:00:00
+#SBATCH --output=server_%j.log
+
+srun --container-image=/lustre/fsw/portfolios/convai/users/ecasanova/docker_images/nemo_duplex_november_eartts.sqsh \
+     --container-mounts="/lustre:/lustre,/path/to/your/workspace:/workspace" \
+     bash -c 'cd /workspace && \
+     export PYTHONPATH="/workspace/ns_eval:$PYTHONPATH" && \
+     export HF_HOME=/lustre/fsw/portfolios/llmservice/users/YOUR_USER/.cache/huggingface && \
+     export INCLUDE_DEBUG_INFO=true && \
+     python -m nemo_skills.inference.server.serve_unified \
+       --backend s2s_session \
+       --model /lustre/fsw/portfolios/convai/users/ecasanova/Checkpoints/Nemotron-VoiceChat-november/duplex-eartts-2mim_sw_et_eos_dp_eos_dup_fp32-stt-3-december_stt_edresson_model_R_digits_norm_eip_0.1_EA_model_step_9005 \
+       --config_path /lustre/fsw/portfolios/convai/users/ecasanova/S2S-Duplex-new-codebase/scripts/configs/inference/nanov2_demo_model_eartts_updated.yaml \
+       --code_path /lustre/fsw/portfolios/convai/users/kevinhu/S2S-Duplex-new-codebase/branches/NeMo-release_not_rebased \
+       --ignore_system_prompt \
+       --num_frames_per_inference 2 \
+       --silence_padding_sec 0.0 \
+       --session_artifacts_dir /lustre/fsw/portfolios/llmservice/users/YOUR_USER/tmp/s2s_artifacts \
+       --port 8001'
+```
+
+Submit with `sbatch run_server.sbatch` or `sbatch run_server_sound.sbatch`.
+
 **Notes:**
 - Replace `YOUR_USER` with your username and `/path/to/your/workspace` with your workspace path containing the code
-- `S2S_SAVE_DIR` - where JSON responses are saved (set to your writable directory)
 - `--session_artifacts_dir` - where session audio artifacts are saved
 - `INCLUDE_DEBUG_INFO=true` - includes debug info (with ASR transcription) in responses; set to `false` to disable
-- `--no_decode_audio` runs in text-only mode (no TTS output)
-- `--response_end_detection_mode eos` stops generation after consecutive PAD tokens
+- Text-only mode uses `--no_decode_audio`, `--response_end_detection_mode eos` (stops after consecutive PAD tokens)
+- Audio mode uses default energy-based response end detection (TTS silence)
 - The server exposes OpenAI-compatible `/v1/chat/completions` endpoint
 - The server supports multi-turn conversations with automatic session management based on conversation history hashing
 
-Once running, the server will print which node it's on (e.g., `batch-block1-3196:8000`). You can then send requests from the login node or any machine that can reach the compute node.
+Check `server_<jobid>.log` for server output. Once running, the log will show which node it's on (e.g., `batch-block1-3196:8000`). You can then send requests from the login node or any machine that can reach the compute node.
 
 ## Incremental and Session Backends
 
