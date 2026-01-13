@@ -66,7 +66,7 @@ NEMO_SKILLS_DISABLE_UNCOMMITTED_CHANGES_CHECK=1 python nemo_skills/dataset/voice
 
 ## Running the Server Only (for Manual Testing)
 
-If you want to run just the unified server for manual testing or integration with external clients (e.g., AU-Harness), you can start it directly without installing nemo-skills. Just copy the `ns_eval` folder to the cluster.
+If you want to run just the unified server for manual testing or integration with external clients (e.g., AU-Harness), you can start it directly without installing nemo-skills. Just copy the code folder to the cluster.
 
 **On draco_oci:**
 
@@ -81,8 +81,9 @@ srun --partition=batch_block1,batch_block3,batch_block4 \
      --pty \
      bash -c 'cd /workspace && \
      export PYTHONPATH="/workspace/ns_eval:$PYTHONPATH" && \
-     export HF_HOME=/lustre/fsw/portfolios/llmservice/users/vmendelev/.cache/huggingface && \
-     export INCLUDE_DEBUG_INFO=false && \
+     export HF_HOME=/lustre/fsw/portfolios/llmservice/users/YOUR_USER/.cache/huggingface && \
+     export S2S_SAVE_DIR=/lustre/fsw/portfolios/llmservice/users/YOUR_USER/tmp/s2s_output && \
+     export INCLUDE_DEBUG_INFO=true && \
      python -m nemo_skills.inference.server.serve_unified \
        --backend s2s_session \
        --model /lustre/fsw/portfolios/convai/users/ecasanova/Checkpoints/Nemotron-VoiceChat-november/duplex-eartts-2mim_sw_et_eos_dp_eos_dup_fp32-stt-3-december_stt_edresson_model_R_digits_norm_eip_0.1_EA_model_step_9005 \
@@ -91,7 +92,7 @@ srun --partition=batch_block1,batch_block3,batch_block4 \
        --ignore_system_prompt \
        --num_frames_per_inference 2 \
        --silence_padding_sec 0.0 \
-       --session_artifacts_dir /lustre/fsw/portfolios/llmservice/users/vmendelev/tmp/test_session/artifacts \
+       --session_artifacts_dir /lustre/fsw/portfolios/llmservice/users/YOUR_USER/tmp/s2s_artifacts \
        --no_decode_audio \
        --response_end_detection_mode eos \
        --eos_detection_window 10 \
@@ -99,11 +100,13 @@ srun --partition=batch_block1,batch_block3,batch_block4 \
 ```
 
 **Notes:**
-- Replace `/path/to/your/workspace` with your actual workspace path containing the `ns_eval` folder
-- The server exposes OpenAI-compatible `/v1/chat/completions` endpoint
+- Replace `YOUR_USER` with your username and `/path/to/your/workspace` with your workspace path containing the code
+- `S2S_SAVE_DIR` - where JSON responses are saved (set to your writable directory)
+- `--session_artifacts_dir` - where session audio artifacts are saved
+- `INCLUDE_DEBUG_INFO=true` - includes debug info (with ASR transcription) in responses; set to `false` to disable
 - `--no_decode_audio` runs in text-only mode (no TTS output)
 - `--response_end_detection_mode eos` stops generation after consecutive PAD tokens
-- `INCLUDE_DEBUG_INFO=false` disables debug info in responses
+- The server exposes OpenAI-compatible `/v1/chat/completions` endpoint
 - The server supports multi-turn conversations with automatic session management based on conversation history hashing
 
 Once running, the server will print which node it's on (e.g., `batch-block1-3196:8000`). You can then send requests from the login node or any machine that can reach the compute node.

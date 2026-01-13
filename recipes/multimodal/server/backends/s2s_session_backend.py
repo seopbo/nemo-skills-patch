@@ -817,6 +817,10 @@ class S2SSessionBackend(S2SIncrementalBackend):
             if updated_session is not None and updated_session.turns:
                 debug_info["turn_texts"] = [t.agent_text for t in updated_session.turns]
 
+            # Add ASR text (user speech transcription) to debug_info
+            asr_text_output = output.get("asr_text", [""])[0] if output.get("asr_text") else ""
+            debug_info["asr_text"] = asr_text_output
+
             result = GenerationResult(
                 text=output_text,
                 audio_bytes=response_audio_bytes,
