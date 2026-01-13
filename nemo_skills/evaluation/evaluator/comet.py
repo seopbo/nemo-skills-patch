@@ -92,7 +92,7 @@ def process_file(input_file: Path, output_file: Path, comet_model, batch_size: i
             LOG.error(f"Sample missing required field {e}: {sample}")
             raise ValueError(f"Sample missing required field: {e}")
 
-    comet_scores = comet_model.predict(comet_list, batch_size).scores
+    comet_scores = comet_model.predict(comet_list, batch_size=batch_size).scores
 
     for idx, sample in enumerate(data):
         data[idx]["comet"] = comet_scores[idx]
