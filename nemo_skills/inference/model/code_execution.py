@@ -58,7 +58,7 @@ class CodeExecutionWrapper:
         top_k: int | None = None,
         min_p: float | None = None,
         repetition_penalty: float | None = None,
-        random_seed: int,
+        random_seed: int | None = None,
         stop_phrases: list[str] | None = None,
         top_logprobs: int | None = None,
         timeout: float | int | None = 14400,  # None is 10min
