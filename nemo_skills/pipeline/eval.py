@@ -100,7 +100,7 @@ def _create_comet_judge_tasks(
     else:
         script_args.append(f"--input-file {input_file}")
 
-    run_cmd = f"python3 -I /nemo_run/code/nemo_skills/evaluation/evaluator/comet.py {' '.join(script_args)}"
+    run_cmd = f"pip install unbabel-comet && python3 -I /nemo_run/code/nemo_skills/evaluation/evaluator/comet.py {' '.join(script_args)}"
 
     # Create task with GPU support for Comet
     judge_task = pipeline_utils.add_task(
@@ -108,7 +108,7 @@ def _create_comet_judge_tasks(
         cmd=run_cmd,
         task_name=f"{expname}-{benchmark}-comet-judge",
         log_dir=log_dir + "/judge",
-        container=cluster_config["containers"]["megatron"],
+        container=cluster_config["containers"]["vllm"],
         cluster_config=cluster_config,
         num_gpus=judge_server_gpus or 1,
         num_nodes=judge_server_nodes or 1,

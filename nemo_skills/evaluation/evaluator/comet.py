@@ -16,17 +16,15 @@
 Comet judge evaluation script for computing xCOMET-XXL machine translation metrics.
 
 This script handles:
-1. Installing required packages (unbabel-comet)
-2. Copying generation output files to judge output directory
-3. Running xCOMET-XXL model for machine translation evaluation
-4. Creating .done markers for completed evaluations
+1. Copying generation output files to judge output directory
+2. Running xCOMET-XXL model for machine translation evaluation
+3. Creating .done markers for completed evaluations
 """
 
 import argparse
 import json
 import logging
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -34,23 +32,6 @@ import torch
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 LOG = logging.getLogger(__name__)
-
-
-def install_packages():
-    """Install required packages for COMET evaluation."""
-    LOG.info("Installing required packages...")
-    subprocess.run(
-        ["pip", "install", "-q", "unbabel-comet"],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    LOG.info("Packages installed successfully")
-
-    # Verify PyTorch and CUDA availability
-    LOG.info(
-        f"PyTorch {torch.__version__} with CUDA {torch.version.cuda}, CUDA available: {torch.cuda.is_available()}"
-    )
 
 
 def load_comet_model(model_path: str):
@@ -148,11 +129,6 @@ def main():
         default=1,
         help="Number of random seeds (for multiple seeds mode)",
     )
-    parser.add_argument(
-        "--skip-install",
-        action="store_true",
-        help="Skip package installation (if already installed)",
-    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -174,10 +150,6 @@ def main():
     else:
         LOG.error("Either --input-file or --input-dir must be specified")
         sys.exit(1)
-
-    # Install packages unless skipped
-    if not args.skip_install:
-        install_packages()
 
     comet_model = load_comet_model(args.comet_model_path)
     # Process all files
