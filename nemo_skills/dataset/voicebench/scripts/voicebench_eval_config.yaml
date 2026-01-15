@@ -1,0 +1,56 @@
+# VoiceBench evaluation configuration
+# Copy and modify this file for your setup
+
+# Cluster settings
+cluster: oci_iad
+partition: batch_block1,batch_block3,batch_block4
+cpu_partition: cpu  # For scoring jobs (no GPU needed)
+
+# Model and server
+model: Qwen/Qwen2.5-Omni-3B
+server_type: vllm
+server_gpus: 1
+num_chunks: 1
+server_container: /lustre/fsw/portfolios/llmservice/users/nkarpov/workspace/containers/vllm-openai-audio.sqsh
+server_args: ""  # e.g., "--hf_token YOUR_TOKEN"
+
+# Paths
+data_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/experiments/voicebench_test/data_dir
+output_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/experiments/voicebench_test/runs/voicebench
+voicebench_repo_path: /lustre/fsw/portfolios/llmservice/users/vmendelev/code/VoiceBench
+
+# Subtests to evaluate (list or "all")
+# Available: advbench, alpacaeval, alpacaeval_full, alpacaeval_speaker, bbh,
+#            commoneval, ifeval, mmsu, mtbench, openbookqa, sd_qa, wildvoice
+subtests:
+  - sd_qa          # QA with PEDANT + GPT judge
+  - alpacaeval     # Open-ended with GPT judge
+  - alpacaeval_full
+  - alpacaeval_speaker
+  - commoneval
+  - wildvoice
+  - mtbench        # Multi-turn with GPT judge
+  - advbench       # Safety evaluation
+  - ifeval         # Instruction following
+  - openbookqa     # MCQ
+  - mmsu           # MCQ
+  - bbh            # Big Bench Hard
+  
+
+# Scoring settings
+api_type: nvidia  # "openai" or "nvidia"
+nvidia_model: meta/llama-3.1-70b-instruct
+
+# Installation commands
+installation_command: ""  # For generation phase (if needed)
+scoring_installation_command: "pip install sacrebleu qa_metrics"  # For scoring phase
+
+# Experiment settings
+expname: voicebench
+max_samples: null  # Set to integer for testing (e.g., 10)
+
+# Run modes
+generation_only: false
+scoring_only: false
+dry_run: false
+
