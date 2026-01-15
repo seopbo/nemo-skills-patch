@@ -109,21 +109,28 @@ class VLLMModel(BaseModel):
         if "audio" in message or "audios" in message:
             content = message["content"]
             if isinstance(content, str):
-                message["content"] = [{"type": "text", "text": content}]
+                message["content"] = [{"type": "text", "text": content}] if content else []
             elif isinstance(content, list):
                 message["content"] = content
             else:
                 raise TypeError(str(content))
 
         if "audio" in message:
-            audio = message["audio"]
-            base64_audio = audio_file_to_base64(os.path.join(self.data_dir, audio["path"]))
-            audio_message = {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
+            audio = message.pop("audio")  # Remove the original audio key
+            audio_path = os.path.join(self.data_dir, audio["path"])
+            base64_audio = audio_file_to_base64(audio_path)
+            # Detect format from file extension
+            audio_format = os.path.splitext(audio_path)[1].lstrip('.').lower() or "wav"
+            # OpenAI input_audio format
+            audio_message = {"type": "input_audio", "input_audio": {"data": base64_audio, "format": audio_format}}
             message["content"].append(audio_message)
         elif "audios" in message:
-            for audio in message["audios"]:
-                base64_audio = audio_file_to_base64(os.path.join(self.data_dir, audio["path"]))
-                audio_message = {"type": "audio_url", "audio_url": {"url": f"data:audio/wav;base64,{base64_audio}"}}
+            audios = message.pop("audios")  # Remove the original audios key
+            for audio in audios:
+                audio_path = os.path.join(self.data_dir, audio["path"])
+                base64_audio = audio_file_to_base64(audio_path)
+                audio_format = os.path.splitext(audio_path)[1].lstrip('.').lower() or "wav"
+                audio_message = {"type": "input_audio", "input_audio": {"data": base64_audio, "format": audio_format}}
                 message["content"].append(audio_message)
         return message
 
