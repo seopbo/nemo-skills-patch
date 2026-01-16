@@ -112,6 +112,8 @@ def run_voicebench_eval(config: dict):
         base_extra_args.append(f"++max_samples={config['max_samples']}")
     if config.get("server_server_type"):
         base_extra_args.append(f"++server.server_type={config['server_server_type']}")
+    if config.get("api_key_env_var"):
+        base_extra_args.append(f"++server.api_key_env_var={config['api_key_env_var']}")
 
     for subtest in subtests:
         extra_args_str = " ".join(base_extra_args)
@@ -125,6 +127,9 @@ def run_voicebench_eval(config: dict):
         # Generation phase
         if not scoring_only:
             print("\n--- Running generation ---")
+            server_gpus = config.get("server_gpus", 1)
+            # Use cpu_partition when not self-hosting (external API)
+            partition = config.get("cpu_partition") if server_gpus == 0 else config.get("partition")
             nemo_eval(
                 ctx=wrap_arguments(extra_args_str),
                 cluster=config["cluster"],
@@ -132,14 +137,15 @@ def run_voicebench_eval(config: dict):
                 benchmarks=benchmark,
                 model=config["model"],
                 server_type=config.get("server_type", "vllm"),
-                server_gpus=config.get("server_gpus", 1),
+                server_gpus=server_gpus,
+                server_address=config.get("server_address"),
                 num_chunks=config.get("num_chunks", 1),
                 server_container=config.get("server_container"),
                 server_entrypoint=config.get("server_entrypoint"),
                 data_dir=config.get("data_dir"),
                 server_args=config.get("server_args", ""),
                 installation_command=config.get("installation_command"),
-                partition=config.get("partition"),
+                partition=partition,
                 expname=expname,
                 auto_summarize_results=False,
                 dry_run=dry_run,
