@@ -15,7 +15,7 @@ cpu_partition: cpu  # For scoring jobs (no GPU needed)
 model: /lustre/fsw/portfolios/convai/users/ecasanova/Checkpoints/Nemotron-VoiceChat-november/duplex-eartts-fp32-stt-22-november_stt_v2_fp32
 server_type: vllm
 server_gpus: 1
-num_chunks: 32
+num_chunks: 1
 
 # Use serve_unified with S2S session backend (no silence padding)
 server_entrypoint: "-m nemo_skills.inference.server.serve_unified"
@@ -38,7 +38,7 @@ server_server_type: vllm_multimodal
 
 # Paths
 data_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/experiments/voicebench_test/data_dir
-output_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/experiments/voicebench_s2s_session_full/runs/voicebench_20251230_113223
+output_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/experiments/voicebench_demo/runs/voicebench
 voicebench_repo_path: /lustre/fsw/portfolios/llmservice/users/vmendelev/code/VoiceBench
 
 # Subtests to evaluate
@@ -60,10 +60,10 @@ installation_command: ""
 scoring_installation_command: "pip install sacrebleu qa_metrics"
 
 # Experiment settings
-expname: voicebench_s2s_session_full
-# max_samples: 10  # Uncomment to limit samples for testing
+expname: voicebench
+max_samples: 10  # Uncomment to limit samples for testing
 
 # Run modes
 generation_only: false
-scoring_only: true
+scoring_only: false
 dry_run: false

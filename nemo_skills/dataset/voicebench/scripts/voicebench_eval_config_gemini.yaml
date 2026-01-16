@@ -7,12 +7,15 @@ partition: batch_block1,batch_block3,batch_block4
 cpu_partition: cpu  # For scoring jobs (no GPU needed)
 
 # Model and server
-model: Qwen/Qwen2.5-Omni-3B
-server_type: vllm
-server_gpus: 1
+model: gcp/google/gemini-2.5-pro
+server_server_type: vllm  # Model class with audio handling
+server_type: openai       # Pipeline routing (CPU partition, external API)
+server_gpus: 0            # Not self-hosting, using external API
 num_chunks: 1
-server_container: /lustre/fsw/portfolios/llmservice/users/nkarpov/workspace/containers/vllm-openai-audio.sqsh
-server_args: ""  # e.g., "--hf_token YOUR_TOKEN"
+server_address: https://inference-api.nvidia.com/v1
+api_key_env_var: NVIDIA_API_KEY  # Tell VLLMModel which env var has the API key
+# server_container: not needed for external API
+server_args: ""
 
 # Paths
 data_dir: /lustre/fsw/portfolios/llmservice/users/vmendelev/experiments/voicebench_test/data_dir
@@ -24,6 +27,7 @@ voicebench_repo_path: /lustre/fsw/portfolios/llmservice/users/vmendelev/code/Voi
 #            commoneval, ifeval, mmsu, mtbench, openbookqa, sd_qa, wildvoice
 subtests:
   - sd_qa          # QA with PEDANT + GPT judge
+
   
 
 # Scoring settings

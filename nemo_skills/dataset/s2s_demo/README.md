@@ -19,6 +19,10 @@ Currently different scripts are used to run demo and Voicebench. The configs are
 
 1. Go to https://inference.nvidia.com/ to get API key.
 2. Clone this branch.
+```bash
+git clone git@github.com:NVIDIA-NeMo/Skills.git nemo-skills
+git checkout vmendelev/2512_s2s_eval
+```
 3. Create a `.venv` and install nemo-skills:
 
 ```bash
