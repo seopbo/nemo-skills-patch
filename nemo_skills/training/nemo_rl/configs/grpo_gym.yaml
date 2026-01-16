@@ -3,23 +3,24 @@ grpo:
   num_generations_per_prompt: 16
   num_val_generations_per_prompt: 4
   max_rollout_turns: 1 # for multi-turn rollouts. Math Environments just have 1 turn (answering the question)
-  max_num_epochs: 1
+  max_num_epochs: 10
   max_num_steps: 1000000
   normalize_rewards: true
   use_leave_one_out_baseline: true
-  val_period: 5
-  val_at_start: False
-  overlong_filtering: false
+  val_period: 100
+  val_at_start: false
+  overlong_filtering: true
   max_val_samples: null
   val_batch_size: 256
   seed: 42
   async_grpo:
-    enabled: false # Set to true to enable async training mode
-    # Max age (in training steps) for trajectories used in training
+    enabled: false
     max_trajectory_age_steps: 1
+    in_flight_weight_updates: false
+    recompute_kv_cache_after_weight_updates: false
 
   # Best@k training configuration (optional - set use_best_at_k to true to enable)
-  use_best_at_k: False  # Enable Best@k training to optimize for best reward among k samples
+  use_best_at_k: false  # Enable Best@k training to optimize for best reward among k samples
   best_at_k_k: 8  # Number of samples per bootstrap group (should be <= num_generations_per_prompt)
   best_at_k_m: 1000  # Number of bootstrap groups (will use C(n,k) if smaller)
   # Note: With num_generations_per_prompt=16 and k=8, C(16,8)=12870
@@ -54,30 +55,31 @@ loss_fn:
   ratio_clip_max: 0.28
   ratio_clip_c: null
   # (default off) loss formulation improvements (docs/guides/grpo.md#loss)
-  use_on_policy_kl_approximation: True
-  use_importance_sampling_correction: True
-  sequence_level_importance_ratios: False
-  token_level_loss: True
+  use_on_policy_kl_approximation: true
+  use_importance_sampling_correction: true
+  sequence_level_importance_ratios: false
+  token_level_loss: true
   truncated_importance_sampling_ratio: null
 
 checkpointing:
   enabled: true
   checkpoint_dir: "results/grpo"
-  metric_name: "val:total_reward/mean"
+  metric_name: "val_reward"
   higher_is_better: true
-  keep_top_k: 1000000
-  save_period: 10
-  checkpoint_must_save_by: "00:03:40:00"
+  keep_top_k: 4
+  save_period: 5
+  checkpoint_must_save_by: "00:03:35:00"
 
 policy:
-  model_name: "/path/to/hf_checkpoint"
+  #model_name: "/lustre/fs2/portfolios/llmservice/users/lvega/models/NVIDIA-Nemotron-Nano-31B-A3-v3"
+  model_name: "/lustre/fsw/portfolios/llmservice/users/tkonuk/models/nano-v3-base"
   tokenizer:
     name: ${policy.model_name} ## specify if you'd like to use a tokenizer different from the model's default
-  train_global_batch_size: 2048
+  train_global_batch_size: 1024
   train_micro_batch_size: 1
   generation_batch_size: 64 # Only used when generating using HF backend
-  logprob_batch_size: 1
-  max_total_sequence_length: 49152
+  logprob_batch_size: 4
+  max_total_sequence_length: 8192
   precision: "bfloat16"
   logprob_chunk_size: 2048
 
@@ -97,25 +99,24 @@ policy:
     activation_checkpointing: true
     bias_activation_fusion: False
       # converter_type: "Qwen2ForCausalLM"
-    tensor_model_parallel_size: 8
-    expert_model_parallel_size: 8
-    context_parallel_size: 8
+    tensor_model_parallel_size: 2
     expert_tensor_parallel_size: 1
-    pipeline_model_parallel_size: 1
+    expert_model_parallel_size: 8
+    pipeline_model_parallel_size: 2
     num_layers_in_first_pipeline_stage: null
     num_layers_in_last_pipeline_stage: null
-
+    context_parallel_size: 4
     pipeline_dtype: ${policy.precision}
     sequence_parallel: true
     freeze_moe_router: true
       # moe_router_dtype: "fp64"
     moe_router_dtype: "fp32"
     moe_router_load_balancing_type: "none" # "seq_aux_loss" causes logprob error divergence for grpo
-    moe_router_bias_update_rate: 1e-3
+    moe_router_bias_update_rate: 1e-3 # by default, disable bias updates for grpo
     moe_permute_fusion: true
     moe_enable_deepep: false
     moe_token_dispatcher_type: "alltoall"
-    moe_aux_loss_coeff: 0.0
+    moe_aux_loss_coeff: 0
     moe_router_enable_expert_bias: true
     #gives ~20% training perf speedup with sequence packing
     apply_rope_fusion: True
@@ -129,9 +130,9 @@ policy:
 
     optimizer:
       optimizer: "adam"
-      lr: 3e-6
-      min_lr: 3e-6
-      weight_decay: 0.0
+      lr: 3.0e-6
+      min_lr: 0.9999e-6
+      weight_decay: 0
       bf16: true
       fp16: false
       params_dtype: "float32"
@@ -144,11 +145,11 @@ policy:
       #sgd
       sgd_momentum: 0.9
 
-      clip_grad: ${policy.max_grad_norm}
-
       #distributed optimizer
       use_distributed_optimizer: true
       use_precision_aware_optimizer: true
+
+      clip_grad: ${policy.max_grad_norm}
 
       optimizer_cpu_offload: False
       optimizer_offload_fraction: 0
@@ -160,7 +161,7 @@ policy:
       lr_decay_style: "constant"
       lr_decay_iters: null
       lr_warmup_iters: 10
-      lr_warmup_init: 0.3e-7
+      lr_warmup_init: 0.0
 
     distributed_data_parallel_config:
       grad_reduce_in_fp32: false
@@ -206,16 +207,16 @@ policy:
     stop_token_ids: null
     stop_strings: null
     vllm_cfg:
-      # NB: can re-enable prefix cache on vllm >= 0.11.2.
+      # NB: can re-enable prefix cache on vllm >= 0.11.2
       # enable_prefix_caching: false
       async_engine: false
-      kv_cache_dtype: auto
       precision: ${policy.precision}
       tensor_parallel_size: 4
       pipeline_parallel_size: 1
       expert_parallel_size: 1  # When EP > 1, EP must be a multiple of TP since vLLM's EP = DP * TP
       gpu_memory_utilization: 0.5
       max_model_len: ${policy.max_total_sequence_length}
+      kv_cache_dtype: auto
       # when enforce_eager is False, it is optional to set ++policy.generation.vllm_kwargs.compilation_config.use_inductor=False for better accuracy,
       # with the flag, vllm will use the custom CUDA kernels instead of the Triton kernels generated by torch.compile
       # for more details, see convergence issue https://github.com/NVIDIA-NeMo/RL/issues/998
@@ -244,40 +245,46 @@ policy:
       resources:
         gpus_per_node: null # Decides num gpus to be dedicated to generation when there is one node in the cluster i.e cluster.num_nodes == 1
         num_nodes: null # Decides number of nodes to be dedicated to generation
+
 data:
-  max_input_seq_length: ${policy.max_total_sequence_length}
-  shuffle: true
-  num_workers: 4
-  # NemoGym specific data paths
-  train_jsonl_fpath: null  # Set via CLI: ++data.train_jsonl_fpath=/path/to/train.jsonl
-  validation_jsonl_fpath: null  # Set via CLI: ++data.validation_jsonl_fpath=/path/to/val.jsonl
+  train_jsonl_fpath: train.jsonl
+  validation_jsonl_fpath: validation.jsonl
+  shuffle: false
+  num_workers: 1
 
 env:
   should_use_nemo_gym: true
-  should_log_nemo_gym_responses: true
   nemo_gym:
     config_paths:
-    - responses_api_models/vllm_model/configs/vllm_model_for_training.yaml
+    - responses_api_models/vllm_model/configs/vllm_model_for_training.yaml  # Required! And it must be *for_training
     - resources_servers/math_with_judge/configs/math_with_judge.yaml
-    - responses_api_agents/simple_agent/configs/simple_agent.yaml
-    policy_model:
-      responses_api_models:
-        vllm_model:
-          skip_tokenizer_init: false  # Enable tokenizer for chat completions API
-          return_token_id_information: true  # Required for NeMo-RL training
-    simple_agent:
-      responses_api_agents:
-        simple_agent:
-          resources_server:
-            name: math_with_judge
-          model_server:
-            name: policy_model
     math_with_judge:
       resources_servers:
         math_with_judge:
           judge_model_server:
             name: policy_model
-          should_use_judge: false  # Disable LLM judge for quick testing
+          should_use_judge: false
+
+  genrm_rlhf:
+    num_workers: 2 # Number of parallel GenRM workers
+    model_name: null
+    tensor_parallel_size: 4 # TP size for the GenRM model (requires substantial GPU memory)
+    gpu_memory_utilization: 0.95 # GPU memory utilization for GenRM model
+    max_model_len: 40000 # Max sequence length for GenRM model
+    num_generations_per_prompt: ${grpo.num_generations_per_prompt} # The expected number of responses to generate per prompt during training
+    num_val_generations_per_prompt: ${grpo.num_val_generations_per_prompt} # The expected number of responses per prompt during validation
+    num_judges_per_comparison: 1 # Number of independent GenRM passes per pairwise comparison (for majority voting)
+    temperature: 0.0 # GenRM temperature (usually 0 for deterministic evaluation)
+    top_p: 1.0 # Optional sampling parameter for vLLM
+    max_tokens: 32768 # Max tokens for GenRM's comparison output
+    stop: null # Stop strings for GenRM evaluation
+    reasoning_split_word: "</think>" # The word to split the response into reasoning and answer
+    max_concurrency: 16 # Maximum concurrent step calls for the environment actor
+    # Comparison strategy configuration
+    comparison_strategy: "all_pairs" # Options: "all_pairs" (C(n,2) comparisons, default) or "circular" (n comparisons, faster)
+    # Reward aggregation configuration
+    aggregator_method: "simple_tiebreaker" # Options: "weighted_win_loss", "simple_tiebreaker", "individual_scores"
+
 
 logger:
   log_dir: "logs"  # Base directory for all logs
@@ -300,4 +307,4 @@ logger:
 
 cluster:
   gpus_per_node: 8
-  num_nodes: 32
+  num_nodes: 1

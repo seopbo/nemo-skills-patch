@@ -122,7 +122,7 @@ class NemoRLGymTask:
         self.logging_params = self.format_wandb_args()
         nsight_cmd = get_nsight_cmd(self.profile_step_range)
         cmd = (
-            f"export PYTHONPATH=$PYTHONPATH:/nemo_run/code:/opt/nemo-rl && "
+            f"export PYTHONPATH=$PYTHONPATH:/opt/nemo-rl && "
             f"export UV_PROJECT=/opt/nemo-rl && "
             f"{nsight_cmd}"
             f"echo 'Starting GRPO training with NemoGym' && "
