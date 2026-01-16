@@ -13,8 +13,8 @@ MODEL_PATH="${NEMO_SKILLS_TEST_HF_MODEL:-/home/wedu/Qwen3-0.6B}"
 # MODEL_PATH="${NEMO_SKILLS_TEST_HF_MODEL:-Qwen/Qwen3-0.6B}"
 MODEL_TYPE="${NEMO_SKILLS_TEST_MODEL_TYPE:-qwen}"
 RUN_NUMBER="${RUN_NUMBER:-1}"
-OUTPUT_DIR="/tmp/nemo-skills-tests/${MODEL_TYPE}/test-grpo-gym-local-run${RUN_NUMBER}/fsdp"
-BACKEND="fsdp"
+OUTPUT_DIR="/tmp/nemo-skills-tests/${MODEL_TYPE}/test-grpo-gym-local-run${RUN_NUMBER}/megatron"
+BACKEND="megatron"
 
 echo ""
 echo "Configuration:"
@@ -53,12 +53,22 @@ grpo_gym_nemo_rl(
         '++grpo.max_num_steps=3 '
         '++grpo.num_prompts_per_step=2 '
         '++policy.max_total_sequence_length=256 '
-        '++policy.dtensor_cfg.tensor_parallel_size=1 '
         '++checkpointing.save_period=2 '
         '++policy.train_global_batch_size=2 '
         '++policy.train_micro_batch_size=1 '
-        '++policy.optimizer.kwargs.lr=1e-6 '
         '++policy.generation.vllm_cfg.tensor_parallel_size=1 '
+        # Megatron backend configuration - set all parallelism to 1
+        '++policy.megatron_cfg.enabled=true '
+        '++policy.megatron_cfg.tensor_model_parallel_size=1 '
+        '++policy.megatron_cfg.expert_tensor_parallel_size=1 '
+        '++policy.megatron_cfg.expert_model_parallel_size=1 '
+        '++policy.megatron_cfg.pipeline_model_parallel_size=1 '
+        '++policy.megatron_cfg.context_parallel_size=1 '
+        '++policy.megatron_cfg.sequence_parallel=false '
+        '++policy.megatron_cfg.activation_checkpointing=true '
+        '++policy.megatron_cfg.optimizer.lr=1e-6 '
+        # Disable dtensor backend
+        '++policy.dtensor_cfg.enabled=false '
         '++env.nemo_gym.config_paths=[responses_api_models/vllm_model/configs/vllm_model_for_training.yaml,resources_servers/math_with_judge/configs/math_with_judge.yaml,resources_servers/ns_tools/configs/ns_tools.yaml] '
         # Disable LLM judge (use rule-based math verification)
         # '++env.nemo_gym.math_with_judge.resources_servers.math_with_judge.should_use_judge=false '
