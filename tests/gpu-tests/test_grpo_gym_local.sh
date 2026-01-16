@@ -58,6 +58,7 @@ grpo_gym_nemo_rl(
         '++policy.train_global_batch_size=2 '
         '++policy.train_micro_batch_size=1 '
         '++policy.optimizer.kwargs.lr=1e-6 '
+        '++policy.generation.vllm_cfg.tensor_parallel_size=1 '
         '++env.nemo_gym.config_paths=[responses_api_models/vllm_model/configs/vllm_model_for_training.yaml,resources_servers/math_with_judge/configs/math_with_judge.yaml,resources_servers/ns_tools/configs/ns_tools.yaml] '
         # Disable LLM judge (use rule-based math verification)
         # '++env.nemo_gym.math_with_judge.resources_servers.math_with_judge.should_use_judge=false '
