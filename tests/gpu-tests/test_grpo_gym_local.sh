@@ -67,6 +67,9 @@ grpo_gym_nemo_rl(
         '++policy.megatron_cfg.sequence_parallel=false '
         '++policy.megatron_cfg.activation_checkpointing=true '
         '++policy.megatron_cfg.optimizer.lr=1e-6 '
+        # Disable warmup and set decay steps
+        '++policy.megatron_cfg.scheduler.lr_warmup_iters=0 '
+        '++policy.megatron_cfg.scheduler.lr_decay_iters=10 '
         # Disable dtensor backend
         '++policy.dtensor_cfg.enabled=false '
         '++env.nemo_gym.config_paths=[responses_api_models/vllm_model/configs/vllm_model_for_training.yaml,resources_servers/math_with_judge/configs/math_with_judge.yaml,resources_servers/ns_tools/configs/ns_tools.yaml] '
