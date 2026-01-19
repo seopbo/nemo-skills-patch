@@ -209,6 +209,11 @@ class GenerateSolutionsConfig:
     eval_type: str | None = None  # "lean4-proof", "math", etc.
     eval_config: dict = field(default_factory=dict)  # Config for the evaluator
 
+    # Prompt field selection for datasets with multiple prompt variants
+    # If set, will replace placeholder content in messages with value from this field
+    # Example: "prompt_neutral", "prompt_tn", "prompt_itn"
+    prompt_field: str | None = None
+
     def __post_init__(self):
         self._post_init_validate_data()
         self._post_init_validate_server()
@@ -528,6 +533,15 @@ class GenerationTask:
     def fill_prompt(self, data_point, data):
         """Passing in full data in case it's needed to fill the prompt in subclasses."""
         if self.cfg.prompt_format == "openai":
+            # Replace placeholder content with prompt from specified field
+            if self.cfg.prompt_field and self.cfg.prompt_field in data_point:
+                prompt_value = data_point[self.cfg.prompt_field]
+                # Find and replace placeholder in messages
+                for message in data_point["messages"]:
+                    if message.get("role") == "user" and message.get("content") == "<PLACEHOLDER>":
+                        message["content"] = prompt_value
+                        break
+
             if self.cfg.prompt_suffix:
                 data_point["messages"][-1]["content"] += self.cfg.prompt_suffix
             if self.cfg.system_message:

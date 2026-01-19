@@ -34,6 +34,9 @@ class AudioEvaluatorConfig(BaseEvaluatorConfig):
 
     prompt_config: str = "eval/speechlm/audio"
     normalize_asr_pc_standard_wer: bool = True
+    # Optional list of reference fields to calculate WER against (e.g., ["text_tn", "text_itn"])
+    # For each field, WER will be computed and stored with corresponding metric name
+    reference_fields: list[str] | None = None
 
 
 def normalize_whitespace(text: str) -> str:
@@ -335,6 +338,17 @@ def evaluate_sample(sample: dict[str, Any], config: AudioEvaluatorConfig) -> dic
     elif task_type == "ASR":
         metrics = evaluate_asr(expected_answer, generation)
         updates.update(metrics)
+
+        # Additional WER calculation for specified reference fields
+        if config.reference_fields:
+            for ref_field in config.reference_fields:
+                if ref_field in sample and sample[ref_field]:
+                    # Compute WER against this reference field
+                    ref_metrics = evaluate_asr(sample[ref_field], generation)
+                    # Derive metric name from field name (e.g., "text_tn" -> "wer_tn")
+                    metric_suffix = ref_field.replace("text_", "") if ref_field.startswith("text_") else ref_field
+                    updates[f"wer_{metric_suffix}"] = ref_metrics["wer"]
+                    updates[f"is_correct_{metric_suffix}"] = ref_metrics["is_correct"]
 
     elif task_type in ["AST", "Translation"]:
         metrics = evaluate_translation(expected_answer, generation)
