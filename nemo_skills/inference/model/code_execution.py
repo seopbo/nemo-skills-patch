@@ -27,6 +27,25 @@ from .base import BaseModel, EndpointType
 LOG = logging.getLogger(get_logger_name(__file__))
 
 
+def _normalize_code_begin(code_begin: str | list[str]) -> list[str]:
+    """Convert code_begin to a list of strings."""
+    if isinstance(code_begin, str):
+        return [code_begin]
+    return code_begin
+
+
+def _count_code_begin(text: str, code_begin: str | list[str]) -> int:
+    """Count total occurrences of any code_begin token in text."""
+    code_begin_list = _normalize_code_begin(code_begin)
+    return sum(text.count(cb) for cb in code_begin_list)
+
+
+def _rfind_code_begin(text: str, code_begin: str | list[str]) -> int:
+    """Find the rightmost position of any code_begin token in text."""
+    code_begin_list = _normalize_code_begin(code_begin)
+    return max((text.rfind(cb) for cb in code_begin_list), default=-1)
+
+
 @nested_dataclass(kw_only=True)
 class CodeExecutionConfig:
     max_code_output_characters: int = 1000
@@ -47,7 +66,7 @@ class CodeExecutionWrapper:
     async def _generate_single(
         self,
         prompt: str | list[dict],
-        code_begin: str,
+        code_begin: str | list[str],
         code_end: str,
         code_output_begin: str,
         code_output_end: str,
@@ -152,7 +171,7 @@ class CodeExecutionWrapper:
 
                 # openai and trtllm don't show what stop word was triggered, so we assume that it was `code_end`
                 # if there's an unfinished code block
-                if output.count(code_end) + 1 == output.count(code_begin):
+                if output.count(code_end) + 1 == _count_code_begin(output, code_begin):
                     output += code_end
 
                 # Update the prompt based on format
@@ -176,7 +195,7 @@ class CodeExecutionWrapper:
                     break
                 # .rfind(code_end, 0, -1) searches for the second-to-last occurrence of code_end and checks
                 # that the last code_begin is not closed to ensure that we are inside the code block
-                if output.endswith(code_end) and output.rfind(code_begin) > output.rfind(code_end, 0, -1):
+                if output.endswith(code_end) and _rfind_code_begin(output, code_begin) > output.rfind(code_end, 0, -1):
                     code_execution_time_start, execution_dict, session_id = await self.execute_generated_code(
                         prompt, code_begin, code_end, output, session_id
                     )
@@ -244,7 +263,7 @@ class CodeExecutionWrapper:
     async def generate_async(
         self,
         prompt: str | list[dict],
-        code_begin: str,
+        code_begin: str | list[str],
         code_end: str,
         code_output_begin: str,
         code_output_end: str,
@@ -309,7 +328,7 @@ class CodeExecutionWrapper:
     async def _stream_single(
         self,
         prompt: str | list[dict],
-        code_begin: str,
+        code_begin: str | list[str],
         code_end: str,
         code_output_begin: str,
         code_output_end: str,
@@ -389,7 +408,7 @@ class CodeExecutionWrapper:
 
                 # openai and trtllm don't show what stop word was triggered, so we assume that it was `code_end`
                 # if there's an unfinished code block
-                if current_output_segment.count(code_end) + 1 == current_output_segment.count(code_begin):
+                if current_output_segment.count(code_end) + 1 == _count_code_begin(current_output_segment, code_begin):
                     current_output_segment += code_end
                     yield {"generation": code_end}
 
@@ -404,8 +423,8 @@ class CodeExecutionWrapper:
                     # This was the last iteration, intended for final text generation after all code executions.
                     break
 
-                if current_output_segment.endswith(code_end) and current_output_segment.rfind(
-                    code_begin
+                if current_output_segment.endswith(code_end) and _rfind_code_begin(
+                    current_output_segment, code_begin
                 ) > current_output_segment.rfind(code_end, 0, -1):
                     execution_dict, session_id = await self.sandbox.execute_code(
                         generated_code=extract_code_to_execute(current_output_segment, code_begin, code_end),

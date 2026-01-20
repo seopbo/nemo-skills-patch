@@ -79,8 +79,39 @@ def _extract_between_separators(generation: str, separators: Tuple[str, str], ex
     return generation.split(separators[0])[-1].split(separators[1])[0]
 
 
-def extract_code_to_execute(generation: str, code_begin: str, code_end: str, extract_all: bool = False):
-    return _extract_between_separators(generation, [code_begin, code_end], extract_all)
+def extract_code_to_execute(generation: str, code_begin: str | list[str], code_end: str, extract_all: bool = False):
+    """Extract code between code_begin and code_end markers.
+
+    code_begin can be a single string or a list of possible begin markers.
+    """
+    if isinstance(code_begin, str):
+        code_begin_list = [code_begin]
+    else:
+        code_begin_list = code_begin
+
+    if extract_all:
+        # Find all occurrences with any of the code_begin markers
+        all_matches = []
+        for cb in code_begin_list:
+            separators = [re.escape(cb), re.escape(code_end)]
+            pattern = f"{separators[0]}(.*?){separators[1]}"
+            all_matches.extend(re.findall(pattern, generation, re.DOTALL))
+        return all_matches
+
+    # Find the last occurrence of any code_begin marker
+    last_pos = -1
+    last_marker = None
+    for cb in code_begin_list:
+        pos = generation.rfind(cb)
+        if pos > last_pos:
+            last_pos = pos
+            last_marker = cb
+
+    if last_marker is None:
+        # No code_begin marker found, return empty or the whole thing split by code_end
+        return generation.split(code_end)[0]
+
+    return generation.split(last_marker)[-1].split(code_end)[0]
 
 
 def extract_code_output(generation: str, code_output_begin: str, code_output_end: str, extract_all: bool = False):

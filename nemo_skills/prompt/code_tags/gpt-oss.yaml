@@ -13,7 +13,9 @@
 # limitations under the License.
 
 # used to execute code within these tags
-code_begin: "<|start|>assistant<|channel|>analysis to=python code<|message|>"
+code_begin: # gpt-oss uses both
+  - "<|start|>assistant<|channel|>analysis to=python code<|message|>"
+  - "<|start|>assistant<|channel|>commentary to=python code<|message|>"
 code_end: "<|call|>"
 # used to extract the code output
 code_output_begin: "<|start|>python code to=assistant<|channel|>analysis<|message|>"
