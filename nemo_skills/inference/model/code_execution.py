@@ -358,16 +358,28 @@ class CodeExecutionWrapper:
 
         current_full_prompt = copy.deepcopy(prompt)
         session_id = None  # For sandbox state continuity
+        session_has_usage_info = False  # Track across all rounds
         try:
             for generation_index in range(effective_max_code_executions + 1):
                 model_token_iterator = await self.model.generate_async(prompt=current_full_prompt, **request)
 
                 current_output_segment = ""
                 num_generated_tokens = 0
+                chunk_count = 0
                 async for chunk in model_token_iterator:
                     yield chunk
-                    current_output_segment += chunk["generation"]
-                    num_generated_tokens += 1
+                    chunk_count += 1
+                    current_output_segment += chunk.get("generation", "")
+
+                    # Extract token count from usage info (vLLM with continuous_usage_stats)
+                    usage = chunk.get("usage")
+                    if usage and "completion_tokens" in usage:
+                        num_generated_tokens = usage["completion_tokens"]
+                        session_has_usage_info = True
+
+                # Fallback to chunk count if no usage info was provided
+                if num_generated_tokens == 0:
+                    num_generated_tokens = chunk_count
 
                 request["tokens_to_generate"] -= num_generated_tokens
                 if request["tokens_to_generate"] <= 0:
@@ -424,6 +436,13 @@ class CodeExecutionWrapper:
                         current_full_prompt += formatted_code_output
                 else:  # if no code was generated, we need to finish
                     break
+
+            # Warn once at end of session if no usage info was available
+            if not session_has_usage_info:
+                LOG.warning(
+                    "No usage info in streaming chunks - using chunk count as approximation. "
+                    "Token counting may be inaccurate. Use vLLM with stream_options for accurate counts."
+                )
         finally:
             if session_id is not None and self.config.code_execution_language == "ipython":
                 await self.sandbox.delete_session(str(session_id))

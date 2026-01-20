@@ -134,6 +134,9 @@ class VLLMModel(BaseModel):
             "extra_body": self._build_request_body(top_k, min_p, repetition_penalty, extra_body=extra_body),
             "tools": tools,
         }
+        # Request usage info in streaming mode for accurate token counting
+        if stream:
+            request["stream_options"] = {"include_usage": True, "continuous_usage_stats": True}
         if reasoning_effort:
             request["allowed_openai_params"] = ["reasoning_effort"]
             request["reasoning_effort"] = reasoning_effort

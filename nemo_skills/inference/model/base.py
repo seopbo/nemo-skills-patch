@@ -421,6 +421,19 @@ class BaseModel:
 
     def _process_chat_chunk(self, chunk):
         """Process a single chat chunk and return data to yield."""
+        # Handle usage-only chunks (empty choices, contains only usage info)
+        # These are sent when stream_options={"include_usage": True}
+        if not chunk.choices:
+            result = {"generation": ""}
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                result["usage"] = {
+                    "completion_tokens": usage.completion_tokens,
+                    "prompt_tokens": usage.prompt_tokens,
+                    "total_tokens": usage.total_tokens,
+                }
+            return [result]
+
         if hasattr(chunk.choices[0], "delta"):
             delta = chunk.choices[0].delta
             cur_delta = delta.content
@@ -462,6 +475,15 @@ class BaseModel:
             result["finish_reason"] = finish_reason
             if not cur_delta:
                 result["generation"] = ""
+
+        # Extract usage info if available (continuous_usage_stats mode)
+        usage = getattr(chunk, "usage", None)
+        if usage:
+            result["usage"] = {
+                "completion_tokens": usage.completion_tokens,
+                "prompt_tokens": usage.prompt_tokens,
+                "total_tokens": usage.total_tokens,
+            }
 
         return [result]
 

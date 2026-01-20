@@ -255,6 +255,13 @@ class ToolCallingWrapper:
         conversation = copy.deepcopy(prompt)
         request_id = str(uuid.uuid4())
 
+        # Track aggregates for final summary
+        total_generated_tokens = 0
+        total_tool_calls = 0
+        all_generations = []
+        last_finish_reason = None
+        session_has_usage_info = False  # Track across all rounds
+
         while True:
             if isinstance(tokens_to_generate, int) and tokens_to_generate <= 0:
                 break
@@ -272,18 +279,28 @@ class ToolCallingWrapper:
             reasoning_segment = ""
             tool_call_accumulator = {}
             num_generated_tokens = 0
+            chunk_count = 0
 
             async for chunk in model_token_iterator:
                 yield chunk
-                num_generated_tokens += 1  # TODO ! ! ! ! ! ! ! !
+                chunk_count += 1
 
-                chunk_text = chunk["generation"]
+                # Extract token count from usage info (vLLM with continuous_usage_stats)
+                usage = chunk.get("usage")
+                if usage and "completion_tokens" in usage:
+                    num_generated_tokens = usage["completion_tokens"]
+                    session_has_usage_info = True
+
+                chunk_text = chunk.get("generation", "")
                 if chunk_text:
                     current_output_segment += chunk_text
 
                 reasoning_delta = chunk.get("reasoning_content")
                 if reasoning_delta:
                     reasoning_segment += reasoning_delta
+
+                if chunk.get("finish_reason"):
+                    last_finish_reason = chunk["finish_reason"]
 
                 tool_calls_delta = chunk.get("tool_calls")
                 if tool_calls_delta:
@@ -294,8 +311,15 @@ class ToolCallingWrapper:
                     for tool_call_delta in tool_calls_delta:
                         self._merge_tool_call_delta(tool_call_delta, tool_call_accumulator)
 
+            # Fallback to chunk count if no usage info was provided
+            if num_generated_tokens == 0:
+                num_generated_tokens = chunk_count
+
             if isinstance(tokens_to_generate, int):
                 tokens_to_generate -= num_generated_tokens
+
+            total_generated_tokens += num_generated_tokens
+            all_generations.append(current_output_segment)
 
             tool_calls = self._finalize_tool_calls(tool_call_accumulator)
 
@@ -313,11 +337,37 @@ class ToolCallingWrapper:
                 raise NotImplementedError("Streaming tool calling is only supported for chat completions.")
 
             if tool_calls:
+                # Yield tool calls event so caller knows what tools are being called
+                yield {"type": "tool_calls", "tool_calls": tool_calls}
+
                 tool_calls_output_messages = await self._execute_tool_calls(
                     tool_calls, request_id=request_id, endpoint_type=endpoint_type
                 )
                 LOG.info("Sending tool calls: %s", tool_calls_output_messages)
+
+                # Yield tool results event so caller can see the results
+                yield {"type": "tool_results", "results": tool_calls_output_messages}
+
                 conversation.extend(tool_calls_output_messages)
+                total_tool_calls += len(tool_calls)
                 continue
 
             break
+
+        # Warn once at end of session if no usage info was available
+        if not session_has_usage_info:
+            LOG.warning(
+                "No usage info in streaming chunks - using chunk count as approximation. "
+                "Token counting may be inaccurate. Use vLLM with stream_options for accurate counts."
+            )
+
+        # Yield final summary with aggregated data
+        yield {
+            "type": "final",
+            "generation": "".join(all_generations),
+            "num_generated_tokens": total_generated_tokens,
+            "num_tool_calls": total_tool_calls,
+            "conversation": conversation,
+            "tools": tools,
+            "finish_reason": last_finish_reason,
+        }
