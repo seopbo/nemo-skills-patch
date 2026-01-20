@@ -28,6 +28,10 @@ class VLLMModel(BaseModel):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
+    def _should_use_openai_streaming(self, endpoint_type) -> bool:
+        # LiteLLM strips per-chunk usage; use OpenAI client directly for streaming.
+        return True
+
     def _get_tokenizer_endpoint(self):
         """
         Returns the tokenizer endpoint if available, otherwise returns None.
@@ -135,6 +139,7 @@ class VLLMModel(BaseModel):
             "tools": tools,
         }
         # Request usage info in streaming mode for accurate token counting
+        # Both include_usage and continuous_usage_stats are passed to vLLM
         if stream:
             request["stream_options"] = {"include_usage": True, "continuous_usage_stats": True}
         if reasoning_effort:
