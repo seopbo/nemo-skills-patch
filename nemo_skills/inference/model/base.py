@@ -128,6 +128,7 @@ class BaseModel:
         api_key = self._get_api_key(api_key, api_key_env_var, base_url)
         if api_key is None:  # self-hosted models don't need the key, but still require the parameter
             api_key = "EMPTY"
+        self.api_key = api_key
 
         model_litellm = f"{self.MODEL_PROVIDER}/{model}"
         # Passed to litellm every time we call it
@@ -144,6 +145,7 @@ class BaseModel:
         # Controlling concurrent requests using semaphore since large
         # concurrent requests result into httpx hanging
         self.concurrent_semaphore = asyncio.Semaphore(2048)
+        self._openai_client = None
 
     def _get_api_key(self, api_key: str | None, api_key_env_var: str | None, base_url: str) -> str | None:
         if api_key:  # explicit cmd argument always takes precedence
@@ -197,6 +199,31 @@ class BaseModel:
             return None
         if isinstance(tokenizer, str):
             return WrapperAutoTokenizer(tokenizer)
+
+    def _should_use_openai_streaming(self, endpoint_type: EndpointType) -> bool:
+        """Override in subclasses to bypass LiteLLM for streaming."""
+        return False
+
+    def _get_openai_client(self) -> openai.AsyncOpenAI:
+        if not self.base_url:
+            raise ValueError("base_url is required to use the OpenAI streaming client.")
+        if self._openai_client is None:
+            self._openai_client = openai.AsyncOpenAI(
+                base_url=self.base_url,
+                api_key=self.api_key,
+                http_client=litellm.aclient_session,
+            )
+        return self._openai_client
+
+    async def _openai_stream_chat(self, request_params: dict):
+        client = self._get_openai_client()
+        response = await client.chat.completions.create(model=self.model_name_or_path, **request_params)
+        return self._stream_chat_chunks_async(response)
+
+    async def _openai_stream_completion(self, request_params: dict):
+        client = self._get_openai_client()
+        response = await client.completions.create(model=self.model_name_or_path, **request_params)
+        return self._stream_completion_chunks_async(response)
 
     @abc.abstractmethod
     def _build_chat_request_params(self, **kwargs) -> dict:
@@ -267,20 +294,28 @@ class BaseModel:
                     if endpoint_type == EndpointType.chat:
                         assert isinstance(prompt, list), "Chat completion requests must be a list of messages."
                         request_params = self._build_chat_request_params(messages=prompt, stream=stream, **kwargs)
-                        response = await litellm.acompletion(**request_params, **self.litellm_kwargs)
                         if stream:
-                            result = self._stream_chat_chunks_async(response)
+                            if self._should_use_openai_streaming(endpoint_type):
+                                result = await self._openai_stream_chat(request_params)
+                            else:
+                                response = await litellm.acompletion(**request_params, **self.litellm_kwargs)
+                                result = self._stream_chat_chunks_async(response)
                         else:
+                            response = await litellm.acompletion(**request_params, **self.litellm_kwargs)
                             result = self._parse_chat_completion_response(
                                 response, include_response=include_response, **kwargs
                             )
                     elif endpoint_type == EndpointType.text:
                         assert isinstance(prompt, str), "Text completion requests must be a string."
                         request_params = self._build_completion_request_params(prompt=prompt, stream=stream, **kwargs)
-                        response = await litellm.atext_completion(**request_params, **self.litellm_kwargs)
                         if stream:
-                            result = self._stream_completion_chunks_async(response)
+                            if self._should_use_openai_streaming(endpoint_type):
+                                result = await self._openai_stream_completion(request_params)
+                            else:
+                                response = await litellm.atext_completion(**request_params, **self.litellm_kwargs)
+                                result = self._stream_completion_chunks_async(response)
                         else:
+                            response = await litellm.atext_completion(**request_params, **self.litellm_kwargs)
                             result = self._parse_completion_response(
                                 response, include_response=include_response, **kwargs
                             )
