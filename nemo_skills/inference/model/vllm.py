@@ -84,7 +84,7 @@ class VLLMModel(BaseModel):
     ) -> dict:
         assert reasoning_effort is None, "reasoning_effort is not supported for text completion requests"
         assert tools is None, "tools are not supported for text completion requests"
-        return {
+        request = {
             "prompt": prompt,
             "max_tokens": tokens_to_generate,
             "temperature": temperature,
@@ -102,6 +102,10 @@ class VLLMModel(BaseModel):
             "timeout": timeout,
             "extra_body": self._build_request_body(top_k, min_p, repetition_penalty, extra_body=extra_body),
         }
+        # Request usage info in streaming mode for accurate token counting
+        if stream:
+            request["stream_options"] = {"include_usage": True, "continuous_usage_stats": True}
+        return request
 
     def _build_chat_request_params(
         self,
