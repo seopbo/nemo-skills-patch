@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import subprocess
 from collections import defaultdict
 
 import numpy as np
@@ -20,9 +21,18 @@ from sacrebleu import corpus_bleu
 from nemo_skills.evaluation.metrics.base import BaseMetrics, as_float
 
 
+def install_packages(lang):
+    """Korean and Japanese tokenizations require extra dependencies."""
+    subprocess.run(
+        ["pip", "install", "-q", f"sacrebleu[{lang}]"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
 class TranslationMetrics(BaseMetrics):
-    # TODO: refactor BLEU computation so it reuses parent method functions from pass@k
-    # TODO: add support for other translation metrics, such as COMET and MetricX
+    # TODO: add support for other translation metrics, such as MetricX
 
     def get_metrics(self):
         metrics_dict = {}
@@ -35,10 +45,12 @@ class TranslationMetrics(BaseMetrics):
 
             tokenize = "13a"
             if tgt_lang[:2] == "ja":
+                install_packages(tgt_lang[:2])
                 tokenize = "ja-mecab"
             if tgt_lang[:2] == "zh":
                 tokenize = "zh"
             if tgt_lang[:2] == "ko":
+                install_packages(tgt_lang[:2])
                 tokenize = "ko-mecab"
 
             bleu_scores = []
