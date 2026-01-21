@@ -215,14 +215,44 @@ class BaseModel:
             )
         return self._openai_client
 
+    def _sanitize_params_for_openai_client(self, request_params: dict) -> dict:
+        """Move vLLM-specific params to extra_body and remove non-API params like timeout."""
+        params = request_params.copy()
+
+        # vLLM-specific top-level params that OpenAI SDK doesn't recognize
+        backend_specific_params = ["skip_special_tokens", "allowed_openai_params"]
+
+        # Params handled at HTTP client level, not in API request body
+        params_to_remove = ["timeout"]
+
+        # Extract existing extra_body or create new one
+        extra_body = params.pop("extra_body", None) or {}
+
+        # Move backend-specific params to extra_body
+        for param in backend_specific_params:
+            if param in params:
+                extra_body[param] = params.pop(param)
+
+        # Remove params that shouldn't be passed
+        for param in params_to_remove:
+            params.pop(param, None)
+
+        # Only add extra_body if it has content
+        if extra_body:
+            params["extra_body"] = extra_body
+
+        return params
+
     async def _openai_stream_chat(self, request_params: dict):
         client = self._get_openai_client()
-        response = await client.chat.completions.create(model=self.model_name_or_path, **request_params)
+        sanitized_params = self._sanitize_params_for_openai_client(request_params)
+        response = await client.chat.completions.create(model=self.model_name_or_path, **sanitized_params)
         return self._stream_chat_chunks_async(response)
 
     async def _openai_stream_completion(self, request_params: dict):
         client = self._get_openai_client()
-        response = await client.completions.create(model=self.model_name_or_path, **request_params)
+        sanitized_params = self._sanitize_params_for_openai_client(request_params)
+        response = await client.completions.create(model=self.model_name_or_path, **sanitized_params)
         return self._stream_completion_chunks_async(response)
 
     @abc.abstractmethod
@@ -422,12 +452,36 @@ class BaseModel:
 
     def _process_completion_chunk(self, chunk, emitted_so_far: list):
         """Process a single completion chunk and return data to yield."""
+        # Handle usage-only chunks (empty choices, contains only usage info)
+        # These are sent when stream_options={"include_usage": True}
+        if not chunk.choices:
+            result = {"generation": ""}
+            usage = getattr(chunk, "usage", None)
+            if usage:
+                result["usage"] = {
+                    "completion_tokens": usage.completion_tokens,
+                    "prompt_tokens": usage.prompt_tokens,
+                    "total_tokens": usage.total_tokens,
+                }
+            return [result]
+
         cur_delta = chunk.choices[0].text
         emitted_so_far.append(cur_delta)
 
         results_to_yield = []
-        if cur_delta:
-            results_to_yield.append({"generation": cur_delta})
+        result = {"generation": cur_delta} if cur_delta else {"generation": ""}
+
+        # Extract usage info from chunk (vLLM with continuous_usage_stats)
+        usage = getattr(chunk, "usage", None)
+        if usage:
+            result["usage"] = {
+                "completion_tokens": usage.completion_tokens,
+                "prompt_tokens": usage.prompt_tokens,
+                "total_tokens": usage.total_tokens,
+            }
+
+        if cur_delta or usage:
+            results_to_yield.append(result)
 
         # vllm variant
         stop_reason = getattr(chunk.choices[0], "stop_reason", None)
