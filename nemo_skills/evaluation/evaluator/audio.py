@@ -537,7 +537,7 @@ def evaluate_sample(sample: dict[str, Any], config: AudioEvaluatorConfig) -> dic
             for ref_field in config.reference_fields:
                 if ref_field in sample and sample[ref_field]:
                     # Compute WER against this reference field
-                    ref_metrics = evaluate_asr(sample[ref_field], generation)
+                    ref_metrics = evaluate_asr(sample[ref_field], generation, normalization_mode=mode)
                     # Derive metric name from field name (e.g., "text_tn" -> "wer_tn")
                     metric_suffix = ref_field.replace("text_", "") if ref_field.startswith("text_") else ref_field
                     updates[f"wer_{metric_suffix}"] = ref_metrics["wer"]
