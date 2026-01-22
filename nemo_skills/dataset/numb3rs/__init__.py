@@ -52,7 +52,7 @@ EVAL_SPLIT = "test"
 EVAL_ARGS = (
     "++eval_type=audio "
     "++eval_config.reference_fields='[text_tn,text_itn]' "  # Evaluate against both references
-    # "++eval_config.normalization_mode=standard "  # Uncomment after audio-input-output-integration is merged
+    "++eval_config.normalization_mode=standard "
 )
 
 # Generation settings - OpenAI format for audio-language models

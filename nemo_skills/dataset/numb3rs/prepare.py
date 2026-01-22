@@ -98,7 +98,7 @@ def save_audio_and_format_entry(entry, category, audio_dir, sample_idx, with_aud
         "text_tn": original_text,
         "text_itn": text,
         "expected_answer": text,  # Default to ITN for backward compatibility
-        "task_type": "ASR",
+        "task_type": "ASR_LEADERBOARD",
         "category": category,
         "sample_id": sample_id,
         "subset_for_metrics": f"numb3rs_{category}",
