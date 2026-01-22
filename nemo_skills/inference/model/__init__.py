@@ -84,7 +84,7 @@ def get_model(server_type, tokenizer=None, model_class: str | None = None, **kwa
 
 def get_code_execution_model(server_type, tokenizer=None, code_execution=None, sandbox=None, **kwargs):
     """A helper function to make it easier to set server through cmd."""
-    model = get_model(server_type=server_type, tokenizer=tokenizer, **kwargs)
+    model = get_model(server_type=server_type, tokenizer=tokenizer, require_tokenizer=True, **kwargs)
     if code_execution is None:
         code_execution = {}
     code_execution_config = CodeExecutionConfig(**code_execution)
@@ -128,7 +128,7 @@ def get_tool_calling_model(
     **kwargs,
 ):
     if isinstance(model, str):
-        model = get_model(model=model, tokenizer=tokenizer, **kwargs)
+        model = get_model(model=model, tokenizer=tokenizer, require_tokenizer=True, **kwargs)
     return ToolCallingWrapper(
         model,
         tool_modules=tool_modules,

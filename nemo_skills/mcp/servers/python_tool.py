@@ -123,8 +123,15 @@ class PythonTool(MCPClientTool):
         merged_extra.setdefault("timeout", self._config.get("exec_timeout_s", 10))
         merged_extra["session_id"] = self.requests_to_sessions[request_id]
         result = await self._client.call_tool(tool=tool_name, args=arguments, extra_args=merged_extra)
+
+        # Handle case where result doesn't contain expected keys (e.g., sandbox connection failed)
+        if "session_id" not in result:
+            error_msg = result.get("error", "Unknown error - no session_id returned")
+            raise RuntimeError(f"Tool execution failed: {error_msg}")
+
         self.requests_to_sessions[request_id] = result["session_id"]
-        output = f"{result['output_dict']['stdout']}{result['output_dict']['stderr']}"
+        output_dict = result.get("output_dict", {})
+        output = f"{output_dict.get('stdout', '')}{output_dict.get('stderr', '')}"
         if output.endswith("\n"):  # there is always a trailing newline, removing it
             output = output[:-1]
         return output
