@@ -67,7 +67,14 @@ async def stateful_python_code_exec(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MCP server for executing Python code in a sandbox")
+    parser = argparse.ArgumentParser(description="MCP HTTP server for executing Python code in a sandbox")
+    # HTTP server configuration
+    parser.add_argument("--host", default="0.0.0.0", help="Host to bind the HTTP server")
+    parser.add_argument("--port", type=int, default=8765, help="Port for the HTTP server")
+    # Sandbox configuration - CLI args take precedence over config file
+    parser.add_argument("--sandbox-host", default=None, help="Sandbox server host (overrides config)")
+    parser.add_argument("--sandbox-port", default=None, help="Sandbox server port (overrides config)")
+    # Sandbox configuration via OmegaConf/Hydra (optional)
     add_config_args(parser)
     args = parser.parse_args()
 
@@ -83,9 +90,23 @@ def main():
 
     global sandbox
     sandbox_cfg = OmegaConf.to_container(cfg.sandbox, resolve=True)
+
+    # CLI args override config file values
+    if args.sandbox_host:
+        sandbox_cfg["host"] = args.sandbox_host
+    if args.sandbox_port:
+        sandbox_cfg["port"] = args.sandbox_port
+
     sandbox = get_sandbox(**sandbox_cfg)
-    # Initialize and run the server
-    mcp.run(transport="stdio")
+
+    logger.info(f"Starting python_tool HTTP server on {args.host}:{args.port}")
+    logger.info(f"Sandbox config: {sandbox_cfg}")
+
+    # Run as HTTP server using uvicorn (fixes MCP stdio hang bug)
+    import uvicorn
+
+    app = mcp.streamable_http_app()
+    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 
 # ==============================
@@ -94,21 +115,20 @@ def main():
 
 
 class PythonTool(MCPClientTool):
-    def __init__(self) -> None:
+    # Default URL for the python_tool HTTP server (spawned by ns_tools)
+    DEFAULT_BASE_URL = "http://127.0.0.1:8765/mcp"
+
+    def __init__(self, base_url: str | None = None) -> None:
         super().__init__()
-        # Use connection pool for concurrent tool calls with persistent connections
+        # Use HTTP client to connect to python_tool server
         self.apply_config_updates(
             {
-                "client": "nemo_skills.mcp.clients.MCPStdioConnectionPool",
+                "client": "nemo_skills.mcp.clients.MCPStreamableHttpClient",
                 "client_params": {
-                    "command": "python",
-                    "args": ["-m", "nemo_skills.mcp.servers.python_tool"],
-                    "pool_size": 32,  # Support up to 32 concurrent tool calls
+                    "base_url": base_url or self.DEFAULT_BASE_URL,
                 },
                 # hide args from schemas and sanitize at runtime
                 "hide_args": {"stateful_python_code_exec": ["session_id", "timeout"]},
-                # use explicit Hydra connector built from full context by default
-                "init_hook": "hydra",
                 # execution-specific default
                 "exec_timeout_s": 10,
             }
