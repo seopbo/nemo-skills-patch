@@ -106,6 +106,8 @@ def main():
     for noisy_logger in [
         "mcp.server.streamable_http_manager",
         "mcp.server.streamable_http",
+        "mcp.server.lowlevel.server",
+        "mcp.server",
         "mcp.client.streamable_http",
         "httpx",
     ]:
