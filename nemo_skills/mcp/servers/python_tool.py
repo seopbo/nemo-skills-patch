@@ -102,11 +102,20 @@ def main():
     logger.info(f"Starting python_tool HTTP server on {args.host}:{args.port}")
     logger.info(f"Sandbox config: {sandbox_cfg}")
 
+    # Reduce verbosity of MCP and httpx loggers (they log every request at INFO)
+    for noisy_logger in [
+        "mcp.server.streamable_http_manager",
+        "mcp.server.streamable_http",
+        "mcp.client.streamable_http",
+        "httpx",
+    ]:
+        logging.getLogger(noisy_logger).setLevel(logging.WARNING)
+
     # Run as HTTP server using uvicorn (fixes MCP stdio hang bug)
     import uvicorn
 
     app = mcp.streamable_http_app()
-    uvicorn.run(app, host=args.host, port=args.port, log_level="info")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
 
 
 # ==============================
