@@ -120,15 +120,12 @@ class PythonTool(MCPClientTool):
 
     def __init__(self, base_url: str | None = None) -> None:
         super().__init__()
-        # Use HTTP connection pool for concurrent tool calls with persistent connections
+        # Use HTTP client to connect to python_tool server
         self.apply_config_updates(
             {
-                "client": "nemo_skills.mcp.clients.MCPStreamableHttpConnectionPool",
+                "client": "nemo_skills.mcp.clients.MCPStreamableHttpClient",
                 "client_params": {
                     "base_url": base_url or self.DEFAULT_BASE_URL,
-                    "pool_size": 32,  # Support up to 32 concurrent tool calls
-                    "lazy_init": True,  # Create connections on-demand
-                    "acquire_timeout": 30.0,  # Fail if can't get connection in 30s
                 },
                 # hide args from schemas and sanitize at runtime
                 "hide_args": {"stateful_python_code_exec": ["session_id", "timeout"]},
