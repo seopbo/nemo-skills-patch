@@ -638,7 +638,7 @@ class GenerationTask:
                 output[self.cfg.generation_key] = "Judgement: {}".format(
                     json.loads(output[self.cfg.generation_key])["correct"]
                 )
-            except json.JSONDecodeError as e:
+            except (json.JSONDecodeError, KeyError) as e:
                 output[self.cfg.generation_key] = "Judgement: FAILED_TO_PARSE"
 
         if not self.cfg.add_generation_stats:
