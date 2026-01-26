@@ -236,6 +236,7 @@ class BaseModel:
         tools: list[dict] | None = None,
         include_response: bool = False,
         extra_body: dict = None,
+        response_format = None,
     ) -> dict:
         if endpoint_type is None:
             # Infering completion type from prompt
@@ -261,6 +262,7 @@ class BaseModel:
             "reasoning_effort": reasoning_effort,
             "tools": tools,
             "extra_body": extra_body,
+            "response_format": response_format,
         }
 
         # TODO: remove this after we no longer use gpt-oss or it's fixed in vllm

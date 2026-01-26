@@ -46,6 +46,7 @@ from nemo_skills.inference.model import (
     server_params,
 )
 from nemo_skills.inference.model.base import EndpointType
+from nemo_skills.inference.structured_outputs import STRUCTURED_OUTPUTS
 from nemo_skills.prompt.utils import get_prompt, get_token_count
 from nemo_skills.utils import (
     chunk_data,
@@ -217,6 +218,8 @@ class GenerationTaskConfig:
     # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
     eval_type: str | None = None  # "lean4-proof", "math", etc.
     eval_config: dict = field(default_factory=dict)  # Config for the evaluator
+
+    structured_output: str | None = None
 
     def __post_init__(self):
         self._post_init_validate_data()
@@ -630,6 +633,14 @@ class GenerationTask:
         # all of the original data to the output file alongside the new generations
         output[self.cfg.generation_key] = output.pop("generation")
 
+        if self.cfg.structured_output == "HLE_JUDGE_AA":
+            try:
+                output[self.cfg.generation_key] = "Judgement: {}".format(
+                    json.loads(output[self.cfg.generation_key])["correct"]
+                )
+            except json.JSONDecodeError as e:
+                output[self.cfg.generation_key] = "Judgement: FAILED_TO_PARSE"
+
         if not self.cfg.add_generation_stats:
             output.pop("generation_start_time", None)
             output.pop("generation_end_time", None)
@@ -680,6 +691,9 @@ class GenerationTask:
             "prompt": self.fill_prompt(data_point, all_data),
             "stop_phrases": [self.cfg.stop_phrase] if self.cfg.stop_phrase else None,
         }
+
+        if self.cfg.structured_output in STRUCTURED_OUTPUTS:
+            generation_params["response_format"] = STRUCTURED_OUTPUTS[self.cfg.structured_output]
 
         if self.cfg.code_execution:
             if self.cfg.override_max_code_executions and self.cfg.total_code_executions_in_prompt is not None:
