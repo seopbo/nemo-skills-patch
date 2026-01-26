@@ -359,7 +359,10 @@ class SweBenchGenerationTask(GenerationTask):
         Returns the absolute (not mounted) path to a .jsonl file in the SWE-bench evaluation format.
         """
         if self.cfg.agent_config is None:
-            self.cfg.agent_config = "eval/swe-bench/swe-agent/default"
+            if self.cfg.generic_inference_container is not None:
+                self.cfg.agent_config = "eval/swe-bench/swe-agent/no-execution"
+            else:
+                self.cfg.agent_config = "eval/swe-bench/swe-agent/default"
         if agent_framework_repo is None:
             agent_framework_repo = "https://github.com/SWE-agent/SWE-agent.git"
 
