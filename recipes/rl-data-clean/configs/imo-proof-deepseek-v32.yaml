@@ -10,6 +10,7 @@ suffix: single-model
 # Full dataset
 input_file: ${base_output_dir}/raw_aops_data_sample_5000.jsonl
 
+
 # Model configuration
 generate_kwargs:
   model: /hf_models/${model_name}
