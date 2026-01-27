@@ -103,7 +103,7 @@ class OpenAIModel(BaseModel):
         reasoning_effort: str | None,
         extra_body: dict = None,
         tools: list[dict] | None = None,
-        response_format = None,
+        response_format=None,
     ) -> dict:
         # Validations
         if top_k != -1:

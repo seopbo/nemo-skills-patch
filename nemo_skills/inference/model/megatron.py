@@ -36,7 +36,7 @@ class MegatronModel(BaseModel):
         stop_phrases: list[str] | None = None,
         timeout: int | None = None,
         top_logprobs: int | None = None,
-        response_format = None,
+        response_format=None,
         **kwargs,
     ) -> dict:
         # Validations
@@ -83,7 +83,7 @@ class MegatronModel(BaseModel):
         stop_phrases: list[str] | None = None,
         timeout: int | None = None,
         top_logprobs: int | None = None,
-        response_format = None,
+        response_format=None,
         **kwargs,
     ) -> dict:
         # Parameter validation specific to Megatron

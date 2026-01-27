@@ -143,7 +143,7 @@ class VLLMModel(BaseModel):
         reasoning_effort: str | None = None,
         extra_body: dict = None,
         tools: list[dict] | None = None,
-        response_format = None,
+        response_format=None,
     ) -> dict:
         assert reasoning_effort is None, "reasoning_effort is not supported for text completion requests"
         assert tools is None, "tools are not supported for text completion requests"
@@ -184,7 +184,7 @@ class VLLMModel(BaseModel):
         reasoning_effort: str | None = None,
         tools: list[dict] | None = None,
         extra_body: dict = None,
-        response_format = None,
+        response_format=None,
     ) -> dict:
         # Process messages to handle image content (VLM support)
         processed_messages = []

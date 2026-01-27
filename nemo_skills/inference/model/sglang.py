@@ -39,7 +39,7 @@ class SGLangModel(VLLMModel):
         reasoning_effort: str | None = None,
         tools: list[dict] | None = None,
         extra_body: dict = None,
-        response_format = None,
+        response_format=None,
     ) -> dict:
         request = super()._build_chat_request_params(
             messages=messages,

@@ -236,7 +236,7 @@ class BaseModel:
         tools: list[dict] | None = None,
         include_response: bool = False,
         extra_body: dict = None,
-        response_format = None,
+        response_format=None,
     ) -> dict:
         if endpoint_type is None:
             # Infering completion type from prompt
