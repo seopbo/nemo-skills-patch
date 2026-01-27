@@ -34,11 +34,6 @@ user: |-
   - Consider: Is the approach clever and efficient, or purely computational?
   - Note: Elegant proofs are preferred but not required for ACCEPT
 
-  ## 5. MULTIPLE_APPROACHES (Bonus)
-  Are multiple solution methods discussed?
-  - This is valuable but not required for ACCEPT
-  - Multiple approaches add pedagogical value
-
   ## Decision Criteria for ACCEPT:
   - Proof is mathematically correct (or any errors are trivial)
   - Proof is sufficiently rigorous and complete (at least 80% complete, minor gaps acceptable)
@@ -64,9 +59,6 @@ user: |-
 
   MATHEMATICAL_INSIGHT_ANALYSIS:
   <Does the proof show insight or is it brute force? What's the key idea? Is it elegant or computational?>
-
-  MULTIPLE_APPROACHES: <yes/no>
-  APPROACHES_DESCRIPTION: <If yes, list the methods. If no, state "Single method">
 
   CRITICAL_ISSUES:
   <List any serious problems: mathematical errors, major gaps, unclear logic, etc. If none, state "None">
