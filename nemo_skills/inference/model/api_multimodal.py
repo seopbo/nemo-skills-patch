@@ -60,7 +60,7 @@ class APIMultimodal(OpenAIModel):
         enable_audio_chunking: bool = True,
         audio_chunk_task_types: list[str] | None = None,
         chunk_audio_threshold_sec: int = 30,
-        audio_format: str = "input_audio",  # Default to input_audio for NVIDIA API
+        audio_format: str = "input_audio",  # OpenAI native format for NVIDIA API/Gemini
         **kwargs,
     ):
         """Initialize APIMultimodal with audio I/O support.
@@ -124,7 +124,9 @@ class APIMultimodal(OpenAIModel):
         if "audio" in message:
             audio = message["audio"]
             audio_path = os.path.join(self.data_dir, audio["path"])
+            LOG.info(f"Processing audio: {audio_path} with format {self.audio_format}")
             base64_audio = audio_file_to_base64(audio_path)
+            LOG.info(f"Audio converted to base64, length: {len(base64_audio)}")
             audio_items.append(make_audio_content_block(base64_audio, self.audio_format))
             del message["audio"]  # Remove original audio field after conversion
         elif "audios" in message:
@@ -305,6 +307,7 @@ class APIMultimodal(OpenAIModel):
         Returns:
             Generation result dict with 'generation' key and optional metadata.
         """
+        LOG.info(f"APIMultimodal.generate_async called, base_url={self.base_url}, model={self.model}")
         if isinstance(prompt, list):
             messages = prompt
             needs_chunking, audio_path, duration = self._needs_audio_chunking(messages, task_type)
@@ -316,6 +319,12 @@ class APIMultimodal(OpenAIModel):
             messages = [self.content_text_to_list(copy.deepcopy(msg)) for msg in messages]
             messages = self._preprocess_messages_for_model(messages)
             prompt = messages
+            
+            # Debug: Log the processed message structure
+            for msg in messages:
+                if msg.get("role") == "user" and isinstance(msg.get("content"), list):
+                    content_types = [c.get("type") for c in msg["content"]]
+                    LOG.info(f"Processed user message content types: {content_types}")
 
         # Call parent's generate_async
         return await super().generate_async(prompt=prompt, tokens_to_generate=tokens_to_generate, **kwargs)
