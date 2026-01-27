@@ -38,14 +38,14 @@ def extract_problems(cluster, expname, run_after, stage_config, **kwargs):
     input_file = stage_config["input_file"]
 
     postprocess_cmd = (
-        f"python /nemo_run/code/recipes/openmathreasoning/scripts/postprocess_problem_extraction.py "
+        f"python /nemo_run/code/recipes/rl-data-clean/scripts/postprocess_problem_extraction.py "
         f"    {output_dir}/output.jsonl "
         f"    {output_dir}/extracted-problems.jsonl "
     )
 
     generate(
         ctx=wrap_arguments(
-            f"++prompt_config=/nemo_run/code/recipes/openmathreasoning/prompts/extract-problems.yaml "
+            f"++prompt_config=/nemo_run/code/recipes/rl-data-clean/prompts/extract-problems.yaml "
             f"{stage_config.get('inline_args', '')} "
         ),
         cluster=cluster,

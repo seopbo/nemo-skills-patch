@@ -52,7 +52,6 @@ stages:
     output_dir: ${directories.step-1-extract}
     input_file: ${input_file}
     dependencies: null
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/prompts/extract-problems.yaml"
     stage_kwargs: ${generate_kwargs}
 
   classify_if_proof:
