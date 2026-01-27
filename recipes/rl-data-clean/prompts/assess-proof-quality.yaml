@@ -5,7 +5,7 @@ user: |-
   {problem}
 
   Proposed Proof:
-  {proof}
+  {extracted_proof}
 
   Analyze the proof rigorously:
 
