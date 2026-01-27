@@ -149,13 +149,19 @@ class PythonTool(MCPClientTool):
     async def execute(self, tool_name: str, arguments: Dict[str, Any], extra_args: Dict[str, Any] | None = None):
         # Ensure timeout is sent via extra_args (post-sanitize), not in main arguments
         arguments = dict(arguments)
-        # TODO: error handling?
         request_id = extra_args.pop("request_id")
         merged_extra = dict(extra_args or {})
         merged_extra.setdefault("timeout", self._config.get("exec_timeout_s", 10))
         merged_extra["session_id"] = self.requests_to_sessions[request_id]
         result = await self._client.call_tool(tool=tool_name, args=arguments, extra_args=merged_extra)
-        self.requests_to_sessions[request_id] = result["session_id"]
+
+        # Handle error responses that don't contain session_id
+        if "error" in result:
+            logger.warning(f"Tool execution error: {result['error']}")
+            return f"Error: {result['error']}"
+
+        # Update session mapping for stateful execution
+        self.requests_to_sessions[request_id] = result.get("session_id")
         output = f"{result['output_dict']['stdout']}{result['output_dict']['stderr']}"
         if output.endswith("\n"):  # there is always a trailing newline, removing it
             output = output[:-1]
