@@ -21,7 +21,6 @@ class HLEJudgeAAResponseFormat(BaseModel):
     reasoning: str
     correct: Literal["yes", "no"]
     confidence: int
-    strict: Literal[True] # 100% reliability
 
 
 STRUCTURED_OUTPUTS = {
