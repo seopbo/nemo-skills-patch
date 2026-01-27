@@ -3,7 +3,7 @@
 
 cluster: dfw
 base_output_dir: /workspace/rl-data-clean/test
-model_name: gpt-oss-120b  # Model name for organizing outputs
+model_name: Qwen2.5-32B-Instruct  # Model name for organizing outputs
 expname: imo-proof-${model_name}
 suffix: single-model
 
