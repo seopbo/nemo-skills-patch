@@ -27,7 +27,10 @@ from nemo_skills.evaluation.evaluator.code import (
     eval_livebench_coding,
     eval_livecodebench_pro,
 )
-from nemo_skills.evaluation.evaluator.compute_eval import ComputeEvalEvaluator
+try:
+    from nemo_skills.evaluation.evaluator.compute_eval import ComputeEvalEvaluator
+except ImportError:
+    ComputeEvalEvaluator = None
 from nemo_skills.evaluation.evaluator.icpc import ICPCEvaluator
 from nemo_skills.evaluation.evaluator.ifbench import eval_ifbench
 from nemo_skills.evaluation.evaluator.ifeval import eval_if
@@ -40,7 +43,11 @@ from nemo_skills.evaluation.evaluator.math import (
 from nemo_skills.evaluation.evaluator.mcq import eval_mcq
 from nemo_skills.evaluation.evaluator.mmau_pro import eval_mmau_pro
 from nemo_skills.evaluation.evaluator.mrcr import eval_mrcr
-from nemo_skills.evaluation.evaluator.ruler import eval_ruler, eval_ruler2
+try:
+    from nemo_skills.evaluation.evaluator.ruler import eval_ruler, eval_ruler2
+except ImportError:
+    eval_ruler = None
+    eval_ruler2 = None
 from nemo_skills.evaluation.evaluator.scicode import eval_scicode
 
 EVALUATOR_MAP = {
@@ -50,8 +57,6 @@ EVALUATOR_MAP = {
     "ifbench": eval_ifbench,
     "bfcl": eval_bfcl,
     "multichoice": eval_mcq,
-    "ruler": eval_ruler,
-    "ruler2": eval_ruler2,
     "livecodebench": eval_livecodebench,
     "livebench_coding": eval_livebench_coding,
     "livecodebench_pro": eval_livecodebench_pro,
@@ -61,6 +66,11 @@ EVALUATOR_MAP = {
     "human_eval_infilling": eval_human_eval_infilling,
     "mmau-pro": eval_mmau_pro,
 }
+# Optional evaluators (require additional dependencies)
+if eval_ruler is not None:
+    EVALUATOR_MAP["ruler"] = eval_ruler
+if eval_ruler2 is not None:
+    EVALUATOR_MAP["ruler2"] = eval_ruler2
 
 # Evaluator class mapping, other evaluators can be added here as they're converted to classes
 EVALUATOR_CLASS_MAP = {
@@ -71,8 +81,10 @@ EVALUATOR_CLASS_MAP = {
     "icpc": ICPCEvaluator,
     "audio": AudioEvaluator,
     "bird": BirdEvaluator,
-    "compute-eval": ComputeEvalEvaluator,
 }
+# Optional evaluators (require additional dependencies)
+if ComputeEvalEvaluator is not None:
+    EVALUATOR_CLASS_MAP["compute-eval"] = ComputeEvalEvaluator
 
 # Validation: Ensure no overlap between class and function maps
 _class_types = set(EVALUATOR_CLASS_MAP.keys())
