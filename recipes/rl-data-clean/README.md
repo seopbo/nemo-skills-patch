@@ -37,27 +37,32 @@ rl-data-clean/
 ### Stage 2: Classify if Proof
 - Binary classification: proof vs non-proof
 
-### Stage 3: Assess Problem Quality (NEW)
+### Stage 3: Extract Proof (NEW)
+- **Approach**: Extract and clean proof/solution from forum discussions
+- **Clean-up**: Remove "Thanks!", "Nice solution", off-topic comments
+- **Output**: `extracted_proof` field with clean, organized proof
+
+### Stage 4: Assess Problem Quality (NEW)
 - **Approach**: Detailed analysis → Binary decision (ACCEPT/REJECT)
 - **Analysis**: Clarity, completeness, mathematical rigor, difficulty level
 - **Output**: Detailed reasoning + ACCEPT/REJECT decision
 
-### Stage 4: Assess Discussion Quality (NEW)
+### Stage 5: Assess Discussion Quality (NEW)
 - **Approach**: Detailed analysis → Binary decision (ACCEPT/REJECT)
 - **Analysis**: Meaningful content, solution presence/clarity, coherence
 - **Output**: Detailed reasoning + ACCEPT/REJECT decision
 
-### Stage 5: Assess Proof Quality (NEW)
+### Stage 6: Assess Proof Quality (NEW)
 - **Approach**: Detailed analysis → Binary decision (ACCEPT/REJECT)
 - **Analysis**: Correctness, rigor & completeness, clarity, mathematical insight
 - **Output**: Detailed reasoning + ACCEPT/REJECT decision
 
-### Stage 6: Assess IMO Readiness (NEW - Final Gate)
+### Stage 7: Assess IMO Readiness (NEW - Final Gate)
 - **Approach**: Synthesize all assessments → Binary decision (ACCEPT/REJECT)
 - **Analysis**: Olympiad style, pedagogical value, difficulty, teachability, RL suitability
 - **Output**: Final decision on IMO training readiness
 
-### Stage 7: Decontaminate
+### Stage 8: Decontaminate
 - Check against test sets
 
 ## Usage

@@ -1,0 +1,129 @@
+user: |-
+  I will give you a math proof problem and a series of forum posts discussing its solution.
+  Your task is to extract the most complete and clear proof/solution from the discussion.
+
+  Guidelines:
+  - Extract the mathematical proof or solution, focusing on logical steps and reasoning
+  - Remove social comments like "Thanks!", "Nice solution", "I agree", etc.
+  - Remove personal commentary, questions, or off-topic discussions
+  - If multiple solutions are presented, choose the most complete and rigorous one
+  - If no valid proof is found, output "Proof not found."
+  - Keep all mathematical notation, formulas, and explanations
+  - Organize the proof in a clear, logical flow
+
+  Here are some examples.
+
+  Example 1
+
+  Problem:
+  Prove that for real numbers \(x\) and \(y\) satisfying \(0 < x, y \le 1\), the inequality \(\sqrt{3} \le 2(x+y) - \sqrt{4xy-1} \le \frac{5}{2}\) holds.
+
+  Forum discussions:
+  Post 1 by user123steeve: For the LHS, \[2(x+y)-\sqrt{4xy-1} \ge 2(x+y)-\sqrt{(x+y)^2-1}\]  Put $x+y=\sec\theta$, then we need \[2\sec\theta-\tan\theta\ge \sqrt{3} \iff \sqrt{3}\cos\theta+\sin\theta=2\cos[\theta-\frac{\pi}{6}] \ge 2\] which is true for all $\theta$ with equality when $\theta = \frac{\pi}{6}$ and $x=y$ i.e. at $x=y=\frac{1}{\sqrt{3}}$
+
+  For the RHS, from the condition, $y \le 1$ and from the square root, $y \ge \frac{1}{4x} \ge \frac{1}{4}$. This gives \[(4y-1)(1-y) \ge 0 \iff 1+4y^2 \le 5y\] Also \[(2y-1)^2 \ge 0 \Rightarrow 4y^2+1 \ge 4y \ge 4xy \Rightarrow \sqrt{4xy-1} \le 2y\] Rearrange as \[\sqrt{4xy-1}\left(\frac{\sqrt{4xy-1}}{2y}-1\right)+\frac{1+4y^2}{2y} \le \frac{5}{2}\] with equality when $x=1, y=\frac{1}{4}$
+
+  Post 2 by MariusStanean: Thanks! Very nice solution.
+
+  Output:
+  **Proof of the left inequality:**
+
+  For the LHS, we have:
+  \[2(x+y)-\sqrt{4xy-1} \ge 2(x+y)-\sqrt{(x+y)^2-1}\]
+
+  Let $x+y=\sec\theta$. Then we need to show:
+  \[2\sec\theta-\tan\theta\ge \sqrt{3}\]
+
+  This is equivalent to:
+  \[\sqrt{3}\cos\theta+\sin\theta=2\cos\left[\theta-\frac{\pi}{6}\right] \ge 2\]
+
+  This holds for all valid $\theta$, with equality when $\theta = \frac{\pi}{6}$ and $x=y=\frac{1}{\sqrt{3}}$.
+
+  **Proof of the right inequality:**
+
+  From the conditions, $y \le 1$ and from the square root constraint, $y \ge \frac{1}{4x} \ge \frac{1}{4}$.
+
+  This gives:
+  \[(4y-1)(1-y) \ge 0 \iff 1+4y^2 \le 5y\]
+
+  Also, from $(2y-1)^2 \ge 0$:
+  \[4y^2+1 \ge 4y \ge 4xy \Rightarrow \sqrt{4xy-1} \le 2y\]
+
+  Rearranging:
+  \[\sqrt{4xy-1}\left(\frac{\sqrt{4xy-1}}{2y}-1\right)+\frac{1+4y^2}{2y} \le \frac{5}{2}\]
+
+  Equality holds when $x=1, y=\frac{1}{4}$.
+
+
+
+  Example 2
+
+  Problem:
+  Prove that $\sqrt{2}$ is irrational.
+
+  Forum discussions:
+  Post 1 by Alice: I'm stuck on this problem. Can anyone help?
+
+  Post 2 by Bob: Sure! Here's the proof.
+
+  Assume $\sqrt{2}$ is rational. Then $\sqrt{2} = \frac{p}{q}$ where $p$ and $q$ are coprime integers.
+
+  Squaring both sides: $2 = \frac{p^2}{q^2}$, so $p^2 = 2q^2$.
+
+  This means $p^2$ is even, so $p$ is even. Let $p = 2k$ for some integer $k$.
+
+  Then $(2k)^2 = 2q^2$, which gives $4k^2 = 2q^2$, so $q^2 = 2k^2$.
+
+  This means $q^2$ is even, so $q$ is even.
+
+  But if both $p$ and $q$ are even, they share a common factor of 2, contradicting our assumption that they are coprime.
+
+  Therefore, $\sqrt{2}$ is irrational.
+
+  Post 3 by Alice: Thanks Bob! That's so clear now.
+
+  Output:
+  **Proof by contradiction:**
+
+  Assume $\sqrt{2}$ is rational. Then $\sqrt{2} = \frac{p}{q}$ where $p$ and $q$ are coprime integers.
+
+  Squaring both sides: $2 = \frac{p^2}{q^2}$, so $p^2 = 2q^2$.
+
+  This means $p^2$ is even, therefore $p$ must be even. Let $p = 2k$ for some integer $k$.
+
+  Substituting: $(2k)^2 = 2q^2$, which gives $4k^2 = 2q^2$, so $q^2 = 2k^2$.
+
+  This means $q^2$ is even, therefore $q$ must be even.
+
+  However, if both $p$ and $q$ are even, they share a common factor of 2, contradicting our assumption that they are coprime.
+
+  Therefore, $\sqrt{2}$ must be irrational.
+
+
+
+  Example 3
+
+  Problem:
+  Show that the sum of the first n odd numbers equals $n^2$.
+
+  Forum discussions:
+  Post 1 by user789: Anyone tried this problem?
+
+  Post 2 by moderator: Please show your work first before asking for help.
+
+  Post 3 by user789: Ok never mind, I figured it out myself.
+
+  Output:
+  Proof not found.
+
+
+
+  Now here is the problem and forum discussion you need to extract the proof from.
+
+  Problem:
+  {problem}
+
+  Forum discussions:
+  {forum_discussions}
+
+  Output:

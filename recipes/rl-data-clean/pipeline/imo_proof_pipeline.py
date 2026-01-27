@@ -85,6 +85,32 @@ def classify_if_proof(cluster, expname, run_after, stage_config, **kwargs):
     )
 
 
+def extract_proof(cluster, expname, run_after, stage_config, **kwargs):
+    """Extract and clean proof/solution from forum discussions."""
+    output_dir = stage_config["output_dir"]
+    input_file = stage_config["input_file"]
+
+    postprocess_cmd = (
+        f"python /nemo_run/code/recipes/rl-data-clean/scripts/postprocess_proof_extraction.py "
+        f"    {output_dir}/output.jsonl "
+        f"    {output_dir}/extracted-proofs.jsonl "
+    )
+
+    generate(
+        ctx=wrap_arguments(
+            f"++prompt_config=/nemo_run/code/recipes/rl-data-clean/prompts/extract-proof.yaml "
+            f"{stage_config.get('inline_args', '')} "
+        ),
+        cluster=cluster,
+        input_file=input_file,
+        output_dir=output_dir,
+        postprocess_cmd=postprocess_cmd,
+        expname=expname,
+        run_after=run_after,
+        **stage_config.get("stage_kwargs", {}),
+    )
+
+
 def assess_problem_quality(cluster, expname, run_after, stage_config, **kwargs):
     """Assess problem statement quality - returns ACCEPT/REJECT decision."""
     output_dir = stage_config["output_dir"]
@@ -243,6 +269,7 @@ def decontaminate(cluster, expname, run_after, stage_config, **kwargs):
 stages_map = {
     "extract_problems": extract_problems,
     "classify_if_proof": classify_if_proof,
+    "extract_proof": extract_proof,
     "assess_problem_quality": assess_problem_quality,
     "assess_discussion_quality": assess_discussion_quality,
     "assess_proof_quality": assess_proof_quality,
