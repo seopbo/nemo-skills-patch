@@ -3,7 +3,8 @@
 
 cluster: dfw
 base_output_dir: /workspace/rl-data-clean/test
-expname: imo-proof-120b
+model_name: gpt-oss-120b  # Model name for organizing outputs
+expname: imo-proof-${model_name}
 suffix: single-model
 
 # Full dataset
@@ -11,7 +12,7 @@ input_file: ${base_output_dir}/raw_aops_data_sample_5000.jsonl
 
 # Model configuration
 generate_kwargs:
-  model: /hf_models/gpt-oss-120b
+  model: /hf_models/${model_name}
   server_type: vllm
   server_gpus: 8
   server_nodes: 1
@@ -40,14 +41,14 @@ decontamination_datasets:
   - omni-math
 
 directories:
-  step-1-extract: ${base_output_dir}/step-1-extract-problems
-  step-2-classify: ${base_output_dir}/step-2-classify-proof
-  step-3-extract-proof: ${base_output_dir}/step-3-extract-proof
-  step-4-problem-quality: ${base_output_dir}/step-4-problem-quality
-  step-5-discussion-quality: ${base_output_dir}/step-5-discussion-quality
-  step-6-proof-quality: ${base_output_dir}/step-6-proof-quality
-  step-7-imo-readiness: ${base_output_dir}/step-7-imo-readiness
-  step-8-decontaminate: ${base_output_dir}/step-8-decontamination
+  step-1-extract: ${base_output_dir}/${model_name}/step-1-extract-problems
+  step-2-classify: ${base_output_dir}/${model_name}/step-2-classify-proof
+  step-3-extract-proof: ${base_output_dir}/${model_name}/step-3-extract-proof
+  step-4-problem-quality: ${base_output_dir}/${model_name}/step-4-problem-quality
+  step-5-discussion-quality: ${base_output_dir}/${model_name}/step-5-discussion-quality
+  step-6-proof-quality: ${base_output_dir}/${model_name}/step-6-proof-quality
+  step-7-imo-readiness: ${base_output_dir}/${model_name}/step-7-imo-readiness
+  step-8-decontaminate: ${base_output_dir}/${model_name}/step-8-decontamination
 
 stages:
   extract_problems:
