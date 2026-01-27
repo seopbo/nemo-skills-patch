@@ -4,10 +4,10 @@
 
 A complete high-quality data cleaning pipeline for IMO-level proof problems with:
 
-✅ **5 Quality Assessment Prompts** - Carefully designed evaluation criteria
-✅ **2 Processing Scripts** - Automated filtering and model comparison
+✅ **5 Quality Assessment Prompts** - Binary decision model (ACCEPT/REJECT)
+✅ **2 Processing Scripts** - Decision-based filtering and model comparison
 ✅ **2 Pipeline Configs** - Ready-to-run experiment and production configs
-✅ **Complete Documentation** - README with full pipeline explanation
+✅ **Binary Decision Design** - More stable than numeric scores across models
 
 ## File Structure
 
@@ -47,10 +47,10 @@ cat assess-imo-readiness.yaml      # IMO-specific criteria
 ```
 
 **Key features:**
-- Clear 1-5 rating scales with detailed descriptions
-- Structured output format for easy parsing
-- Comprehensive evaluation dimensions
-- Examples and guidelines for consistency
+- **Binary Decision Model**: Detailed analysis → ACCEPT/REJECT (no numeric scores!)
+- **Reasoning First**: LLM analyzes all quality dimensions before making decision
+- **Critical Issues Identification**: Explicitly lists deal-breakers
+- **Stable Across Models**: Easier agreement than "3 vs 4" scoring
 
 ### Step 2: Test a Prompt (Optional)
 
@@ -125,29 +125,24 @@ python recipes/rl-data-clean/pipeline/imo_proof_pipeline.py \
 
 ## Customization
 
-### Adjust Quality Thresholds
+### Adjust Decision Criteria
 
-Edit the config file to change thresholds:
+If pass rates are too high/low, modify the prompts (not numeric thresholds):
 
-```yaml
-# In configs/imo-proof-120b.yaml
+**To make STRICTER:**
+- Emphasize critical issues in prompt
+- Add more examples of what should be REJECTED
+- Make decision criteria more explicit
 
-stages:
-  assess_proof_quality:
-    postprocess_cmd: |
-      python ... \
-        --min-rigor 5        # Change from 4 to 5 (stricter)
+**To make MORE LENIENT:**
+- Relax wording around minor issues
+- Add examples of borderline cases that ACCEPT
+- Adjust "Critical Issues" guidelines
 
-  assess_imo_readiness:
-    postprocess_cmd: |
-      python ... \
-        --min-score 90       # Change from 80 to 90 (stricter)
-```
-
-**Effect of strictness:**
-- Conservative (rigor≥5, score≥90): ~300-400 problems @ 99% quality
-- Moderate (rigor≥4, score≥80): ~600-800 problems @ 95% quality
-- Relaxed (rigor≥3, score≥70): ~1000-1200 problems @ 90% quality
+**Why no numeric thresholds?**
+- Binary decisions are more stable across models
+- Less subjective tuning needed
+- Better agreement in Phase 1 experiments
 
 ### Add More Models
 
@@ -207,11 +202,11 @@ done
 
 ## Questions to Discuss with Team
 
-1. **Quality vs Quantity**: Conservative (300 @ 99%) or Moderate (800 @ 95%)?
-2. **Model Strategy**: Single model or dual model validation?
+1. **Binary Decision Design**: Approve the shift from numeric scores to ACCEPT/REJECT?
+2. **Model Strategy**: Single model or dual model validation based on Phase 1 results?
 3. **Timeline**: Is 5-6 weeks acceptable for full pipeline?
 4. **API Models**: Use closed-source models (Claude/GPT-4) or open-source only?
-5. **Threshold Tuning**: Start strict and relax, or start moderate?
+5. **Pass Rate Expectations**: What's acceptable? 30%? 50%? 70% of problems passing all stages?
 
 ## Contact
 

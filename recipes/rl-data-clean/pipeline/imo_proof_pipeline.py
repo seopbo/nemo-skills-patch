@@ -86,24 +86,16 @@ def classify_if_proof(cluster, expname, run_after, stage_config, **kwargs):
 
 
 def assess_problem_quality(cluster, expname, run_after, stage_config, **kwargs):
-    """Assess problem statement quality (clarity, completeness, rigor)."""
+    """Assess problem statement quality - returns ACCEPT/REJECT decision."""
     output_dir = stage_config["output_dir"]
     input_file = stage_config["input_file"]
-
-    # Get thresholds from config
-    min_clarity = stage_config.get("min_clarity", 4)
-    min_completeness = stage_config.get("min_completeness", 4)
-    min_rigor = stage_config.get("min_rigor", 4)
 
     postprocess_cmd = (
         f"python /nemo_run/code/recipes/rl-data-clean/scripts/postprocess_quality_assessment.py "
         f"    {output_dir}/output.jsonl "
-        f"    {output_dir}/high-quality.jsonl "
-        f"    {output_dir}/low-quality.jsonl "
+        f"    {output_dir}/accepted.jsonl "
+        f"    {output_dir}/rejected.jsonl "
         f"    --stage problem_quality "
-        f"    --min-clarity {min_clarity} "
-        f"    --min-completeness {min_completeness} "
-        f"    --min-rigor {min_rigor} "
     )
 
     generate(
@@ -122,18 +114,16 @@ def assess_problem_quality(cluster, expname, run_after, stage_config, **kwargs):
 
 
 def assess_discussion_quality(cluster, expname, run_after, stage_config, **kwargs):
-    """Assess forum discussion quality."""
+    """Assess forum discussion quality - returns ACCEPT/REJECT decision."""
     output_dir = stage_config["output_dir"]
     input_file = stage_config["input_file"]
 
     postprocess_cmd = (
         f"python /nemo_run/code/recipes/rl-data-clean/scripts/postprocess_quality_assessment.py "
         f"    {output_dir}/output.jsonl "
-        f"    {output_dir}/high-quality.jsonl "
-        f"    {output_dir}/low-quality.jsonl "
+        f"    {output_dir}/accepted.jsonl "
+        f"    {output_dir}/rejected.jsonl "
         f"    --stage discussion_quality "
-        f"    --must-have-discussion "
-        f"    --must-have-solution "
     )
 
     generate(
@@ -152,19 +142,16 @@ def assess_discussion_quality(cluster, expname, run_after, stage_config, **kwarg
 
 
 def assess_proof_quality(cluster, expname, run_after, stage_config, **kwargs):
-    """Assess proof quality (correctness, rigor, elegance)."""
+    """Assess proof quality - returns ACCEPT/REJECT decision."""
     output_dir = stage_config["output_dir"]
     input_file = stage_config["input_file"]
-
-    min_rigor = stage_config.get("min_rigor", 4)
 
     postprocess_cmd = (
         f"python /nemo_run/code/recipes/rl-data-clean/scripts/postprocess_quality_assessment.py "
         f"    {output_dir}/output.jsonl "
-        f"    {output_dir}/high-quality.jsonl "
-        f"    {output_dir}/low-quality.jsonl "
+        f"    {output_dir}/accepted.jsonl "
+        f"    {output_dir}/rejected.jsonl "
         f"    --stage proof_quality "
-        f"    --min-rigor {min_rigor} "
     )
 
     generate(
@@ -183,13 +170,9 @@ def assess_proof_quality(cluster, expname, run_after, stage_config, **kwargs):
 
 
 def assess_imo_readiness(cluster, expname, run_after, stage_config, **kwargs):
-    """Assess IMO competition readiness."""
+    """Final IMO readiness assessment - returns ACCEPT/REJECT decision."""
     output_dir = stage_config["output_dir"]
     input_file = stage_config["input_file"]
-
-    min_score = stage_config.get("min_score", 80)
-    must_be_olympiad_style = "--must-be-olympiad-style" if stage_config.get("must_be_olympiad_style", False) else ""
-    must_be_teachable = "--must-be-teachable" if stage_config.get("must_be_teachable", False) else ""
 
     postprocess_cmd = (
         f"python /nemo_run/code/recipes/rl-data-clean/scripts/postprocess_quality_assessment.py "
@@ -197,9 +180,6 @@ def assess_imo_readiness(cluster, expname, run_after, stage_config, **kwargs):
         f"    {output_dir}/imo-ready.jsonl "
         f"    {output_dir}/not-imo-ready.jsonl "
         f"    --stage imo_readiness "
-        f"    --min-score {min_score} "
-        f"    {must_be_olympiad_style} "
-        f"    {must_be_teachable} "
     )
 
     generate(

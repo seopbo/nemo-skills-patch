@@ -1,5 +1,5 @@
 user: |-
-  You are an IMO preparation expert and coach. Your task is to determine if this problem and its proof are suitable for training an AI model to solve IMO-level competition problems.
+  You are an IMO preparation expert and coach. Make the final decision: Is this problem-proof pair suitable for training an AI model to solve IMO-level competition problems?
 
   Problem:
   {problem}
@@ -12,83 +12,83 @@ user: |-
   - Discussion Quality: {discussion_quality_summary}
   - Proof Quality: {proof_quality_summary}
 
-  Evaluate IMO readiness across these dimensions:
+  Make the final decision based on these critical factors:
 
   ## 1. OLYMPIAD_STYLE
   Is this a typical olympiad-style problem?
-  - yes: Classic olympiad problem type (proof, construction, optimization)
-  - borderline: Has olympiad elements but also computational/routine aspects
-  - no: Not olympiad-style (pure computation, routine textbook exercise, or research-level)
-
-  **Olympiad characteristics:**
-  - Requires proof, not just calculation
-  - Needs creativity and insight, not just applying formulas
-  - Self-contained, doesn't require advanced theory
-  - Has an "aha!" moment or key observation
+  - Analyze: Does it require proof, creativity, and insight (not just computation)?
+  - Check: Is it self-contained? Does it have an "aha!" moment?
+  - Reject if: Pure computation, routine textbook exercise, or requires graduate-level theory
 
   ## 2. PEDAGOGICAL_VALUE
   Would solving this problem help prepare someone for IMO?
-  - high: Teaches important techniques, builds problem-solving skills
-  - medium: Some learning value, reinforces standard methods
-  - low: Limited learning value (too easy, too specific, or bad example)
+  - Analyze: Does it teach important techniques or problem-solving skills?
+  - Consider: Can students learn and apply this technique to other problems?
+  - Reject if: Too specific, no generalizable technique, or bad example
 
   ## 3. DIFFICULTY_APPROPRIATENESS
   Is the difficulty appropriate for IMO training?
-  - appropriate: IMO P1-P6 range (from accessible to very challenging)
-  - too_easy: Trivial, below IMO level (routine textbook problem)
-  - too_hard: Beyond competition level (research problem, open question, requires graduate-level knowledge)
+  - Accept if: IMO P1-P6 range (from accessible to very challenging)
+  - Reject if: Trivial (below IMO level) or too hard (research-level, requires advanced theory)
 
   ## 4. PROOF_TEACHABILITY
   Can the proof technique be learned and generalized?
-  - yes: Technique is generalizable, can be applied to similar problems
-  - no: Solution is too specific, one-off trick, or relies on guessing
+  - Analyze: Is the technique generalizable to similar problems?
+  - Reject if: One-off trick, relies on guessing, or method is not reproducible
 
-  ## 5. SUITABLE_FOR_RL_TRAINING
+  ## 5. TRAINING_SIGNAL_QUALITY
   Is this suitable for RL training?
-  - yes: Clear problem + correct proof = good training signal
-  - no: Ambiguous problem, incorrect/unclear proof, or unclear reward signal
+  - Analyze: Is the problem-solution pair clear enough to provide good training signal?
+  - Check: Can a model learn from this example?
+  - Reject if: Ambiguous problem, incorrect/unclear proof, or reward signal is unclear
 
-  ## 6. IMO_READINESS_SCORE (0-100)
-  Overall score indicating how suitable this is for IMO training.
+  ## 6. OVERALL_QUALITY
+  Synthesize all previous assessments:
+  - Problem quality (clarity, completeness, rigor)
+  - Discussion quality (if applicable)
+  - Proof quality (correctness, rigor, clarity)
+  - All above factors (olympiad style, pedagogy, difficulty, teachability, RL suitability)
 
-  **Scoring guidelines:**
-  - 90-100: Perfect IMO training data (outstanding quality across all dimensions)
-  - 80-89: Excellent IMO training data (strong in all key areas)
-  - 70-79: Good IMO training data (solid but with minor issues)
-  - 60-69: Acceptable but not ideal (borderline quality)
-  - 50-59: Marginal (significant issues, consider rejecting)
-  - 0-49: Not suitable (reject)
+  ## Decision Criteria for ACCEPT:
+  - Must be olympiad-style (requires proof and insight)
+  - Must have pedagogical value (teaches generalizable techniques)
+  - Must be appropriate difficulty (IMO P1-P6 range)
+  - Must be teachable (technique can be learned and applied)
+  - Must be suitable for RL training (clear problem-solution pair)
+  - Previous quality assessments must show no critical issues
 
-  **Score calculation considerations:**
-  - Olympiad style (weight: 25%)
-  - Pedagogical value (weight: 20%)
-  - Difficulty appropriateness (weight: 20%)
-  - Proof teachability (weight: 20%)
-  - Previous quality scores (weight: 15%)
+  ## Decision Criteria for REJECT:
+  - Not olympiad-style (computational, routine, or research-level)
+  - Low pedagogical value (too specific, no learning value)
+  - Inappropriate difficulty (trivial or requires advanced theory)
+  - Not teachable (one-off trick, not generalizable)
+  - Poor training signal (ambiguous, incorrect, or unclear)
+  - Previous quality assessments show critical issues
 
   Provide your assessment in EXACT format:
 
-  OLYMPIAD_STYLE: <yes/borderline/no>
-  OLYMPIAD_STYLE_REASONING: <Does it have the characteristics of olympiad problems? Be specific.>
+  OLYMPIAD_STYLE_ANALYSIS:
+  <Is this a typical olympiad problem? Does it require proof, creativity, insight? Or is it computational/routine/research-level?>
 
-  PEDAGOGICAL_VALUE: <high/medium/low>
-  PEDAGOGICAL_VALUE_REASONING: <What can be learned from this problem? What techniques does it teach?>
+  PEDAGOGICAL_VALUE_ANALYSIS:
+  <What can be learned from this problem? What techniques does it teach? Are they generalizable?>
 
-  DIFFICULTY_APPROPRIATENESS: <appropriate/too_easy/too_hard>
-  DIFFICULTY_REASONING: <Why is the difficulty appropriate or not?>
+  DIFFICULTY_APPROPRIATENESS_ANALYSIS:
+  <What IMO difficulty level (P1-P6)? Is it appropriate for training or too easy/hard?>
 
-  PROOF_TEACHABILITY: <yes/no>
-  TEACHABILITY_REASONING: <Can this technique be generalized? Or is it too specific?>
+  PROOF_TEACHABILITY_ANALYSIS:
+  <Can this technique be learned and applied to other problems? Or is it too specific?>
 
-  SUITABLE_FOR_RL_TRAINING: <yes/no>
-  RL_SUITABILITY_REASONING: <Is the problem-solution pair clear enough for training?>
+  TRAINING_SIGNAL_QUALITY_ANALYSIS:
+  <Is the problem-solution pair clear enough for RL training? Can a model learn from this?>
 
-  IMO_READINESS_SCORE: <0-100>
-  SCORE_BREAKDOWN: <Explain how you arrived at this score, referencing each component.>
+  OVERALL_QUALITY_SYNTHESIS:
+  <Synthesize all previous quality assessments. What are the key strengths and critical issues?>
 
-  OVERALL_ASSESSMENT: <outstanding/excellent/good/acceptable/marginal/unsuitable>
-  FINAL_REASONING: <综合判断：为什么这个问题适合或不适合作为 IMO 训练数据？>
+  CRITICAL_ISSUES:
+  <List any deal-breakers: not olympiad-style, low pedagogical value, wrong difficulty, not teachable, poor training signal, or issues from previous assessments. If none, state "None">
 
-  FINAL_RECOMMENDATION: <accept/review/reject>
+  DECISION: <ACCEPT/REJECT>
+  DECISION_REASONING: <Final decision with clear justification. Why is this suitable or not suitable for IMO training data? Reference specific factors.>
 
   Output:

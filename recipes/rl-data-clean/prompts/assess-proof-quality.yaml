@@ -1,5 +1,5 @@
 user: |-
-  You are an IMO jury member with decades of experience evaluating mathematical proofs. Assess this proof with the highest standards of mathematical rigor.
+  You are an IMO jury member with decades of experience. Determine if this proof meets IMO training data quality standards.
 
   Problem:
   {problem}
@@ -7,81 +7,71 @@ user: |-
   Proposed Proof:
   {proof}
 
-  Evaluate the proof across these critical dimensions:
+  Analyze the proof rigorously:
 
   ## 1. CORRECTNESS
   Is the proof mathematically correct?
-  - correct: Proof is logically sound, no mathematical errors, conclusion follows from premises
-  - incorrect: Proof contains logical errors, false claims, or invalid reasoning
-  - uncertain: Cannot determine (proof too incomplete, unclear, or uses unproven claims)
+  - Verify: Are all logical steps valid? Does the conclusion follow?
+  - Check: Are there mathematical errors or false claims?
+  - If uncertain, specify what cannot be verified
 
-  If incorrect or uncertain, explain the specific issues.
+  ## 2. RIGOR & COMPLETENESS
+  Is the proof rigorous and complete by IMO competition standards?
+  - Analyze: Are all claims justified or are there unjustified leaps?
+  - Check: Is every step explained clearly?
+  - Evaluate: Would this proof receive full marks at IMO?
+  - Identify: What's missing? What gaps exist?
 
-  ## 2. RIGOR (1-5)
-  How rigorous is the proof by IMO standards?
+  ## 3. CLARITY
+  Is the proof clear and followable?
+  - Analyze: Can you follow the logic step by step?
+  - Check: Is notation standard and explained?
+  - Reject if: Cryptic, uses undefined notation, or logic is unclear
 
-  **Evaluation criteria:**
-  - Are all claims justified?
-  - Are there logical gaps or unjustified leaps?
-  - Is every step clearly explained?
-  - Are all necessary lemmas stated and proven (or cited)?
+  ## 4. MATHEMATICAL INSIGHT
+  Does the proof demonstrate mathematical insight?
+  - Analyze: Does it reveal the problem's structure or use brute force?
+  - Consider: Is the approach clever and efficient, or purely computational?
+  - Note: Elegant proofs are preferred but not required for ACCEPT
 
-  **Rating scale:**
-  - 5 = Competition-ready: Every step proven, no gaps, would receive full marks at IMO
-  - 4 = Rigorous: Well-justified, very minor gaps that are trivial to fill
-  - 3 = Mostly complete: Main ideas clear, some steps could use more justification
-  - 2 = Sketch: Outline is correct but missing significant details
-  - 1 = Handwavy: Major gaps, many unjustified claims, "it's obvious that..."
+  ## 5. MULTIPLE_APPROACHES (Bonus)
+  Are multiple solution methods discussed?
+  - This is valuable but not required for ACCEPT
+  - Multiple approaches add pedagogical value
 
-  ## 3. ELEGANCE (1-5)
-  How elegant and insightful is the solution?
+  ## Decision Criteria for ACCEPT:
+  - Proof is mathematically correct (or any errors are trivial)
+  - Proof is sufficiently rigorous and complete (at least 80% complete, minor gaps acceptable)
+  - Proof is clear and followable
+  - Proof demonstrates mathematical reasoning (not just computation)
 
-  **Evaluation criteria:**
-  - Does it reveal the problem's essence or use brute force?
-  - Is the approach clever and insightful or computational?
-  - Is the proof concise or unnecessarily long?
-
-  **Rating scale:**
-  - 5 = Elegant: Beautiful key insight, reveals problem structure, makes it look easy
-  - 4 = Insightful: Contains clever observations, efficient approach
-  - 3 = Standard: Uses well-known techniques, direct and effective
-  - 2 = Computational: Relies mainly on calculation or case analysis
-  - 1 = Brute force: Pure computation, enumeration, no mathematical insight
-
-  ## 4. COMPLETENESS
-  What percentage of the proof is present?
-  - complete (100%): Full proof from start to finish
-  - nearly_complete (80-99%): Missing only minor details
-  - partial (50-79%): Major steps present but significant gaps
-  - sketch (20-49%): Only outline or key ideas
-  - minimal (<20%): Almost nothing, just hints
-
-  ## 5. MULTIPLE_APPROACHES
-  Are multiple solution methods discussed or presented?
-  - yes: Multiple distinct approaches shown
-  - no: Single approach only
+  ## Decision Criteria for REJECT:
+  - Proof contains significant mathematical errors
+  - Proof has major logical gaps (< 80% complete)
+  - Proof is unclear or impossible to follow
+  - Proof is purely computational with no mathematical insight
 
   Provide your assessment in EXACT format:
 
-  CORRECTNESS: <correct/incorrect/uncertain>
-  CORRECTNESS_EXPLANATION: <Detailed explanation. If incorrect, specify the error. If uncertain, explain why you cannot verify.>
+  CORRECTNESS_ANALYSIS:
+  <Is the proof mathematically correct? If incorrect, specify the error. If uncertain, explain why.>
 
-  RIGOR_SCORE: <1-5>
-  RIGOR_JUSTIFICATION: <Step-by-step analysis: What is well-justified? What gaps exist? Rate each major step.>
+  RIGOR_AND_COMPLETENESS_ANALYSIS:
+  <Detailed analysis: Are steps justified? What gaps exist? Is it IMO competition-ready? Be specific about what's well-justified and what's missing.>
 
-  ELEGANCE_SCORE: <1-5>
-  ELEGANCE_JUSTIFICATION: <What makes this proof elegant or inelegant? Is there a key insight? Or is it brute force?>
+  CLARITY_ANALYSIS:
+  <Is the proof clear and followable? Can you understand each step? Any notation issues?>
 
-  COMPLETENESS: <complete/nearly_complete/partial/sketch/minimal>
-  COMPLETENESS_EXPLANATION: <What parts are present? What is missing?>
+  MATHEMATICAL_INSIGHT_ANALYSIS:
+  <Does the proof show insight or is it brute force? What's the key idea? Is it elegant or computational?>
 
   MULTIPLE_APPROACHES: <yes/no>
-  APPROACHES_DESCRIPTION: <If yes, list the different methods. If no, state "Single method">
+  APPROACHES_DESCRIPTION: <If yes, list the methods. If no, state "Single method">
 
-  OVERALL_PROOF_QUALITY: <outstanding/excellent/good/fair/poor>
-  OVERALL_REASONING: <综合以上维度，这个证明的整体质量如何？为什么？>
+  CRITICAL_ISSUES:
+  <List any serious problems: mathematical errors, major gaps, unclear logic, etc. If none, state "None">
 
-  RECOMMENDATION: <accept/review/reject>
-  RECOMMENDATION_REASONING: <Why accept, review, or reject this proof?>
+  DECISION: <ACCEPT/REJECT>
+  DECISION_REASONING: <Why accept or reject? Reference specific strengths or critical issues. Be clear about what makes it usable or not.>
 
   Output:

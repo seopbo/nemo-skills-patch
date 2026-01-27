@@ -38,28 +38,24 @@ rl-data-clean/
 - Binary classification: proof vs non-proof
 
 ### Stage 3: Assess Problem Quality (NEW)
-- Clarity (1-5)
-- Completeness (1-5)
-- Mathematical rigor (1-5)
-- Difficulty estimation (P1-P6)
+- **Approach**: Detailed analysis → Binary decision (ACCEPT/REJECT)
+- **Analysis**: Clarity, completeness, mathematical rigor, difficulty level
+- **Output**: Detailed reasoning + ACCEPT/REJECT decision
 
 ### Stage 4: Assess Discussion Quality (NEW)
-- Has meaningful discussion (yes/no)
-- Solution present (yes/no)
-- Discussion coherence (1-5)
+- **Approach**: Detailed analysis → Binary decision (ACCEPT/REJECT)
+- **Analysis**: Meaningful content, solution presence/clarity, coherence
+- **Output**: Detailed reasoning + ACCEPT/REJECT decision
 
 ### Stage 5: Assess Proof Quality (NEW)
-- Correctness (correct/incorrect/uncertain)
-- Rigor (1-5)
-- Elegance (1-5)
-- Multiple approaches (yes/no)
-- Overall quality (outstanding/excellent/good/fair/poor)
+- **Approach**: Detailed analysis → Binary decision (ACCEPT/REJECT)
+- **Analysis**: Correctness, rigor & completeness, clarity, mathematical insight
+- **Output**: Detailed reasoning + ACCEPT/REJECT decision
 
-### Stage 6: Assess IMO Readiness (NEW)
-- Olympiad style (yes/no/borderline)
-- Pedagogical value (high/medium/low)
-- Difficulty appropriateness (too_easy/appropriate/too_hard)
-- IMO readiness score (0-100)
+### Stage 6: Assess IMO Readiness (NEW - Final Gate)
+- **Approach**: Synthesize all assessments → Binary decision (ACCEPT/REJECT)
+- **Analysis**: Olympiad style, pedagogical value, difficulty, teachability, RL suitability
+- **Output**: Final decision on IMO training readiness
 
 ### Stage 7: Decontaminate
 - Check against test sets
@@ -84,17 +80,19 @@ python recipes/rl-data-clean/pipeline/imo_proof_pipeline.py \
   --stages classify_if_proof,assess_proof_quality
 ```
 
-## Quality Thresholds
+## Design Philosophy: Binary Decisions
 
-**Conservative** (300-400 problems @ 99% quality):
-- Problem quality: clarity ≥ 5, completeness ≥ 5, rigor ≥ 5
-- Proof quality: rigor ≥ 5, correctness = correct
-- IMO readiness: score ≥ 90
+**Why Binary Instead of Numeric Scores?**
 
-**Moderate** (600-800 problems @ 95% quality):
-- Problem quality: clarity ≥ 4, completeness ≥ 4, rigor ≥ 4
-- Proof quality: rigor ≥ 4, correctness = correct
-- IMO readiness: score ≥ 80
+1. **More Stable**: Different models agree more easily on ACCEPT/REJECT than on "3 vs 4"
+2. **Less Subjective**: No need to tune thresholds ("≥4 or ≥3.5?")
+3. **Better for Phase 1**: Clear agreement rate between models (90% agreement is meaningful)
+4. **LLM-Friendly**: Models are better at reasoning + judgment than precise numerical scoring
+
+**Each Stage Outputs**:
+- ✅ **ACCEPT**: Problem/proof meets IMO training quality standards
+- ❌ **REJECT**: Problem/proof has critical issues
+- 📝 **Detailed Reasoning**: Why the decision was made (for debugging/analysis)
 
 ## Model Options
 

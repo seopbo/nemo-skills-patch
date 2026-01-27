@@ -1,5 +1,5 @@
 user: |-
-  You are evaluating the quality of a mathematical forum discussion. Your goal is to determine if the discussion contains useful solution content for training an AI model.
+  You are evaluating a mathematical forum discussion. Your goal is to determine if the discussion contains useful, clear solution content suitable for training an AI model.
 
   Problem:
   {problem}
@@ -7,60 +7,64 @@ user: |-
   Forum Discussion:
   {forum_discussions}
 
-  Evaluate the discussion quality:
+  Analyze the discussion:
 
-  ## 1. MEANINGFUL_DISCUSSION
+  ## 1. MEANINGFUL_CONTENT
   Does the discussion contain substantive mathematical content?
-  - yes: Discussion includes serious solution attempts, mathematical reasoning, or helpful hints
-  - no: Discussion is only questions like "help me", "I don't know", or off-topic chat
+  - Analyze: Are there serious solution attempts, mathematical reasoning, or helpful hints?
+  - Reject if: Only questions like "help me", "I don't know", or off-topic chat
+  - Reject if: No mathematical substance, just social interactions
 
-  ## 2. SOLUTION_PRESENT
-  Is there at least one complete or near-complete solution in the discussion?
-  - yes: At least one post contains a solution (may have minor gaps but the approach is clear)
-  - no: No solutions, only questions or incomplete sketches
+  ## 2. SOLUTION_PRESENCE
+  Is there at least one usable solution?
+  - Analyze: Does at least one post contain a complete or near-complete solution?
+  - The approach should be clear even if some details are missing
+  - Partial sketches or incomplete attempts are not sufficient
 
-  ## 3. SOLUTION_CLARITY (1-5)
-  If a solution is present, how clear is it?
-  - 5: Crystal clear, easy to follow every step
-  - 4: Clear, understandable with minor effort
-  - 3: Somewhat clear, requires careful reading
-  - 2: Unclear in places, hard to follow
-  - 1: Very unclear or incomprehensible
-  - N/A: No solution present
+  ## 3. SOLUTION_CLARITY
+  If a solution is present, is it clear and followable?
+  - Analyze: Can you follow the logic step by step?
+  - Check: Is mathematical reasoning explained or just stated?
+  - Reject if: Solution is cryptic, unexplained, or uses unclear notation
 
-  ## 4. DISCUSSION_COHERENCE (1-5)
-  How coherent and organized is the discussion?
-  - 5: Well-organized, logical flow, builds on previous posts
-  - 4: Mostly coherent, follows a thread
-  - 3: Somewhat scattered but followable
-  - 2: Disorganized, jumps around
-  - 1: Incoherent, random posts
+  ## 4. DISCUSSION_COHERENCE
+  Is the discussion organized and coherent?
+  - Analyze: Does it flow logically? Do posts build on each other?
+  - Minor disorganization is acceptable if the solution is clear
+  - Reject if: Completely incoherent or impossible to follow
 
-  ## 5. MULTIPLE_APPROACHES
+  ## 5. MULTIPLE_APPROACHES (Bonus)
   Are multiple solution approaches discussed?
-  - yes: Multiple different methods are presented
-  - no: Only one approach (or no complete approaches)
+  - This is a bonus but not required for ACCEPT
+  - Multiple clear approaches add pedagogical value
+
+  ## Decision Criteria for ACCEPT:
+  - Discussion contains meaningful mathematical content
+  - At least one clear, usable solution is present
+  - Solution can be followed and understood
+  - Discussion is coherent enough to extract the solution
 
   Provide your assessment in EXACT format:
 
-  MEANINGFUL_DISCUSSION: <yes/no>
-  MEANINGFUL_DISCUSSION_EXPLANATION: <Why is it meaningful or not?>
+  MEANINGFUL_CONTENT_ANALYSIS:
+  <Does the discussion contain substantive math? Or just "help me" posts? Be specific.>
 
-  SOLUTION_PRESENT: <yes/no>
-  SOLUTION_DESCRIPTION: <If yes, briefly describe what solution(s) are provided. If no, explain what's missing.>
+  SOLUTION_PRESENCE_ANALYSIS:
+  <Is there a complete/near-complete solution? Describe what's provided. If no solution, explain what's missing.>
 
-  SOLUTION_CLARITY: <1-5/N/A>
-  SOLUTION_CLARITY_REASONING: <Why this rating?>
+  SOLUTION_CLARITY_ANALYSIS:
+  <If solution exists: Is it clear and followable? Can you understand the logic? Any unclear parts? If no solution, state "N/A">
 
-  DISCUSSION_COHERENCE: <1-5>
-  COHERENCE_REASONING: <How organized is the discussion?>
+  DISCUSSION_COHERENCE_ANALYSIS:
+  <Is the discussion organized? Does it flow logically? Any major coherence issues?>
 
   MULTIPLE_APPROACHES: <yes/no>
-  APPROACHES_DESCRIPTION: <If yes, list the different approaches. If no, state "Single approach" or "No approaches">
+  APPROACHES_DESCRIPTION: <If yes, list the approaches. If no, state "Single approach" or "No approaches">
 
-  OVERALL_DISCUSSION_QUALITY: <excellent/good/acceptable/poor>
-  OVERALL_REASONING: <Brief summary>
+  CRITICAL_ISSUES:
+  <List any serious problems: no solution, unclear reasoning, incoherent discussion, etc. If none, state "None">
 
-  RECOMMENDATION: <accept/review/reject>
+  DECISION: <ACCEPT/REJECT>
+  DECISION_REASONING: <Why accept or reject? Be specific about what makes it usable or not.>
 
   Output:

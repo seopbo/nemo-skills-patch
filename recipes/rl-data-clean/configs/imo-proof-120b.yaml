@@ -1,7 +1,7 @@
 # Full pipeline using single model (gpt-oss-120B)
 # Use this if Phase 1 experiment shows >90% agreement
 
-cluster: slurm
+cluster: dfw
 base_output_dir: /workspace/rl-data-clean/production
 expname: imo-proof-120b
 suffix: single-model
@@ -11,10 +11,10 @@ input_file: ${base_output_dir}/raw_aops_full.jsonl
 
 # Model configuration
 generate_kwargs:
-  model: gpt-oss-120B
-  server_type: trtllm
+  model: gpt-oss-120b
+  server_type: vllm
   server_gpus: 8
-  server_nodes: 2
+  server_nodes: 1
   num_chunks: 10  # Increase for large dataset
 
 # Pipeline stages
@@ -29,7 +29,6 @@ pipeline_stages:
 
 # Decontamination datasets
 decontamination_datasets:
-  - imo_official
   - aime
   - aime24
   - aime25
@@ -74,64 +73,27 @@ stages:
     input_file: ${directories.step-2-classify}/proof.jsonl
     dependencies:
       - classify_if_proof
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-problem-quality.yaml"
-    postprocess_cmd: |
-      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_quality_assessment.py \
-        ${directories.step-3-problem-quality}/output.jsonl \
-        ${directories.step-3-problem-quality}/high-quality.jsonl \
-        ${directories.step-3-problem-quality}/low-quality.jsonl \
-        --stage problem_quality \
-        --min-clarity 4 \
-        --min-completeness 4 \
-        --min-rigor 4
     stage_kwargs: ${generate_kwargs}
 
   assess_discussion_quality:
     output_dir: ${directories.step-4-discussion-quality}
-    input_file: ${directories.step-3-problem-quality}/high-quality.jsonl
+    input_file: ${directories.step-3-problem-quality}/accepted.jsonl
     dependencies:
       - assess_problem_quality
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-discussion-quality.yaml"
-    postprocess_cmd: |
-      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_quality_assessment.py \
-        ${directories.step-4-discussion-quality}/output.jsonl \
-        ${directories.step-4-discussion-quality}/high-quality.jsonl \
-        ${directories.step-4-discussion-quality}/low-quality.jsonl \
-        --stage discussion_quality \
-        --must-have-discussion \
-        --must-have-solution
     stage_kwargs: ${generate_kwargs}
 
   assess_proof_quality:
     output_dir: ${directories.step-5-proof-quality}
-    input_file: ${directories.step-4-discussion-quality}/high-quality.jsonl
+    input_file: ${directories.step-4-discussion-quality}/accepted.jsonl
     dependencies:
       - assess_discussion_quality
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-proof-quality.yaml"
-    postprocess_cmd: |
-      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_quality_assessment.py \
-        ${directories.step-5-proof-quality}/output.jsonl \
-        ${directories.step-5-proof-quality}/high-quality.jsonl \
-        ${directories.step-5-proof-quality}/low-quality.jsonl \
-        --stage proof_quality \
-        --min-rigor 4
     stage_kwargs: ${generate_kwargs}
 
   assess_imo_readiness:
     output_dir: ${directories.step-6-imo-readiness}
-    input_file: ${directories.step-5-proof-quality}/high-quality.jsonl
+    input_file: ${directories.step-5-proof-quality}/accepted.jsonl
     dependencies:
       - assess_proof_quality
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-imo-readiness.yaml"
-    postprocess_cmd: |
-      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_quality_assessment.py \
-        ${directories.step-6-imo-readiness}/output.jsonl \
-        ${directories.step-6-imo-readiness}/imo-ready.jsonl \
-        ${directories.step-6-imo-readiness}/not-imo-ready.jsonl \
-        --stage imo_readiness \
-        --min-score 80 \
-        --must-be-olympiad-style \
-        --must-be-teachable
     stage_kwargs: ${generate_kwargs}
 
   decontaminate:
