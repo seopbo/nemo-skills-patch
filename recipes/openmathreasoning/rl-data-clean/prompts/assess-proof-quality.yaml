@@ -1,0 +1,87 @@
+user: |-
+  You are an IMO jury member with decades of experience evaluating mathematical proofs. Assess this proof with the highest standards of mathematical rigor.
+
+  Problem:
+  {problem}
+
+  Proposed Proof:
+  {proof}
+
+  Evaluate the proof across these critical dimensions:
+
+  ## 1. CORRECTNESS
+  Is the proof mathematically correct?
+  - correct: Proof is logically sound, no mathematical errors, conclusion follows from premises
+  - incorrect: Proof contains logical errors, false claims, or invalid reasoning
+  - uncertain: Cannot determine (proof too incomplete, unclear, or uses unproven claims)
+
+  If incorrect or uncertain, explain the specific issues.
+
+  ## 2. RIGOR (1-5)
+  How rigorous is the proof by IMO standards?
+
+  **Evaluation criteria:**
+  - Are all claims justified?
+  - Are there logical gaps or unjustified leaps?
+  - Is every step clearly explained?
+  - Are all necessary lemmas stated and proven (or cited)?
+
+  **Rating scale:**
+  - 5 = Competition-ready: Every step proven, no gaps, would receive full marks at IMO
+  - 4 = Rigorous: Well-justified, very minor gaps that are trivial to fill
+  - 3 = Mostly complete: Main ideas clear, some steps could use more justification
+  - 2 = Sketch: Outline is correct but missing significant details
+  - 1 = Handwavy: Major gaps, many unjustified claims, "it's obvious that..."
+
+  ## 3. ELEGANCE (1-5)
+  How elegant and insightful is the solution?
+
+  **Evaluation criteria:**
+  - Does it reveal the problem's essence or use brute force?
+  - Is the approach clever and insightful or computational?
+  - Is the proof concise or unnecessarily long?
+
+  **Rating scale:**
+  - 5 = Elegant: Beautiful key insight, reveals problem structure, makes it look easy
+  - 4 = Insightful: Contains clever observations, efficient approach
+  - 3 = Standard: Uses well-known techniques, direct and effective
+  - 2 = Computational: Relies mainly on calculation or case analysis
+  - 1 = Brute force: Pure computation, enumeration, no mathematical insight
+
+  ## 4. COMPLETENESS
+  What percentage of the proof is present?
+  - complete (100%): Full proof from start to finish
+  - nearly_complete (80-99%): Missing only minor details
+  - partial (50-79%): Major steps present but significant gaps
+  - sketch (20-49%): Only outline or key ideas
+  - minimal (<20%): Almost nothing, just hints
+
+  ## 5. MULTIPLE_APPROACHES
+  Are multiple solution methods discussed or presented?
+  - yes: Multiple distinct approaches shown
+  - no: Single approach only
+
+  Provide your assessment in EXACT format:
+
+  CORRECTNESS: <correct/incorrect/uncertain>
+  CORRECTNESS_EXPLANATION: <Detailed explanation. If incorrect, specify the error. If uncertain, explain why you cannot verify.>
+
+  RIGOR_SCORE: <1-5>
+  RIGOR_JUSTIFICATION: <Step-by-step analysis: What is well-justified? What gaps exist? Rate each major step.>
+
+  ELEGANCE_SCORE: <1-5>
+  ELEGANCE_JUSTIFICATION: <What makes this proof elegant or inelegant? Is there a key insight? Or is it brute force?>
+
+  COMPLETENESS: <complete/nearly_complete/partial/sketch/minimal>
+  COMPLETENESS_EXPLANATION: <What parts are present? What is missing?>
+
+  MULTIPLE_APPROACHES: <yes/no>
+  APPROACHES_DESCRIPTION: <If yes, list the different methods. If no, state "Single method">
+
+  OVERALL_PROOF_QUALITY: <outstanding/excellent/good/fair/poor>
+  OVERALL_REASONING: <综合以上维度，这个证明的整体质量如何？为什么？>
+
+  RECOMMENDATION: <accept/review/reject>
+  RECOMMENDATION_REASONING: <Why accept, review, or reject this proof?>
+
+  Output:

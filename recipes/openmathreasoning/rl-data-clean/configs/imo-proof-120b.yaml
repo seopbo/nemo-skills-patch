@@ -1,0 +1,144 @@
+# Full pipeline using single model (gpt-oss-120B)
+# Use this if Phase 1 experiment shows >90% agreement
+
+cluster: slurm
+base_output_dir: /workspace/rl-data-clean/production
+expname: imo-proof-120b
+suffix: single-model
+
+# Full dataset
+input_file: ${base_output_dir}/raw_aops_full.jsonl
+
+# Model configuration
+generate_kwargs:
+  model: gpt-oss-120B
+  server_type: trtllm
+  server_gpus: 8
+  server_nodes: 2
+  num_chunks: 10  # Increase for large dataset
+
+# Pipeline stages
+pipeline_stages:
+  - extract_problems
+  - classify_if_proof
+  - assess_problem_quality
+  - assess_discussion_quality
+  - assess_proof_quality
+  - assess_imo_readiness
+  - decontaminate
+
+# Decontamination datasets
+decontamination_datasets:
+  - imo_official
+  - aime
+  - aime24
+  - aime25
+  - usamo
+  - math
+  - minerva_math
+  - olympiadbench
+  - omni-math
+
+directories:
+  step-1-extract: ${base_output_dir}/step-1-extract-problems
+  step-2-classify: ${base_output_dir}/step-2-classify-proof
+  step-3-problem-quality: ${base_output_dir}/step-3-problem-quality
+  step-4-discussion-quality: ${base_output_dir}/step-4-discussion-quality
+  step-5-proof-quality: ${base_output_dir}/step-5-proof-quality
+  step-6-imo-readiness: ${base_output_dir}/step-6-imo-readiness
+  step-7-decontaminate: ${base_output_dir}/step-7-decontamination
+
+stages:
+  extract_problems:
+    output_dir: ${directories.step-1-extract}
+    input_file: ${input_file}
+    dependencies: null
+    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/prompts/extract-problems.yaml"
+    stage_kwargs: ${generate_kwargs}
+
+  classify_if_proof:
+    output_dir: ${directories.step-2-classify}
+    input_file: ${directories.step-1-extract}/extracted-problems.jsonl
+    dependencies:
+      - extract_problems
+    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/classify-if-proof.yaml"
+    postprocess_cmd: |
+      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_classification.py \
+        ${directories.step-2-classify}/output.jsonl \
+        ${directories.step-2-classify}/proof.jsonl \
+        ${directories.step-2-classify}/not-proof.jsonl
+    stage_kwargs: ${generate_kwargs}
+
+  assess_problem_quality:
+    output_dir: ${directories.step-3-problem-quality}
+    input_file: ${directories.step-2-classify}/proof.jsonl
+    dependencies:
+      - classify_if_proof
+    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-problem-quality.yaml"
+    postprocess_cmd: |
+      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_quality_assessment.py \
+        ${directories.step-3-problem-quality}/output.jsonl \
+        ${directories.step-3-problem-quality}/high-quality.jsonl \
+        ${directories.step-3-problem-quality}/low-quality.jsonl \
+        --stage problem_quality \
+        --min-clarity 4 \
+        --min-completeness 4 \
+        --min-rigor 4
+    stage_kwargs: ${generate_kwargs}
+
+  assess_discussion_quality:
+    output_dir: ${directories.step-4-discussion-quality}
+    input_file: ${directories.step-3-problem-quality}/high-quality.jsonl
+    dependencies:
+      - assess_problem_quality
+    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-discussion-quality.yaml"
+    postprocess_cmd: |
+      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_quality_assessment.py \
+        ${directories.step-4-discussion-quality}/output.jsonl \
+        ${directories.step-4-discussion-quality}/high-quality.jsonl \
+        ${directories.step-4-discussion-quality}/low-quality.jsonl \
+        --stage discussion_quality \
+        --must-have-discussion \
+        --must-have-solution
+    stage_kwargs: ${generate_kwargs}
+
+  assess_proof_quality:
+    output_dir: ${directories.step-5-proof-quality}
+    input_file: ${directories.step-4-discussion-quality}/high-quality.jsonl
+    dependencies:
+      - assess_discussion_quality
+    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-proof-quality.yaml"
+    postprocess_cmd: |
+      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_quality_assessment.py \
+        ${directories.step-5-proof-quality}/output.jsonl \
+        ${directories.step-5-proof-quality}/high-quality.jsonl \
+        ${directories.step-5-proof-quality}/low-quality.jsonl \
+        --stage proof_quality \
+        --min-rigor 4
+    stage_kwargs: ${generate_kwargs}
+
+  assess_imo_readiness:
+    output_dir: ${directories.step-6-imo-readiness}
+    input_file: ${directories.step-5-proof-quality}/high-quality.jsonl
+    dependencies:
+      - assess_proof_quality
+    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-imo-readiness.yaml"
+    postprocess_cmd: |
+      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_quality_assessment.py \
+        ${directories.step-6-imo-readiness}/output.jsonl \
+        ${directories.step-6-imo-readiness}/imo-ready.jsonl \
+        ${directories.step-6-imo-readiness}/not-imo-ready.jsonl \
+        --stage imo_readiness \
+        --min-score 80 \
+        --must-be-olympiad-style \
+        --must-be-teachable
+    stage_kwargs: ${generate_kwargs}
+
+  decontaminate:
+    output_dir: ${directories.step-7-decontaminate}
+    input_file: ${directories.step-6-imo-readiness}/imo-ready.jsonl
+    datasets: ${decontamination_datasets}
+    dependencies:
+      - assess_imo_readiness
+    inline_args: ""
+    stage_kwargs: ${generate_kwargs}

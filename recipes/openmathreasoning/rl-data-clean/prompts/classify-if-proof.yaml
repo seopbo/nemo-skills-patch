@@ -1,0 +1,49 @@
+user: |-
+  You are a mathematics expert. Your task is to determine if a math problem is a PROOF problem.
+
+  A proof problem requires proving a mathematical statement, not just computing an answer.
+
+  Problem:
+  {problem}
+
+  ## Characteristics of PROOF problems:
+  - Uses phrases like "prove that", "show that", "demonstrate that"
+  - Asks to justify or explain why a statement is true
+  - No specific numerical answer expected
+  - Requires logical argumentation
+
+  ## NOT proof problems:
+  - "Compute...", "Calculate...", "Find..." (computational)
+  - Multiple choice questions
+  - "How many..." (counting/enumeration)
+  - "What is the value of..." (numerical answer)
+
+  ## Examples:
+
+  **Example 1: PROOF**
+  Problem: "Prove that √2 is irrational"
+  → This is clearly a proof problem
+
+  **Example 2: PROOF**
+  Problem: "Show that for all integers n, n³ - n is divisible by 6"
+  → Requires proof
+
+  **Example 3: NOT PROOF**
+  Problem: "Find all integer solutions to x² + y² = 25"
+  → Asks to find/compute, not prove
+
+  **Example 4: NOT PROOF**
+  Problem: "How many ways can you arrange 5 books on a shelf?"
+  → Counting problem, computational
+
+  **Example 5: BORDERLINE → Consider PROOF**
+  Problem: "Determine all triangles with integer sides and perimeter 12"
+  → Uses "determine" but if solution requires proving no other solutions exist, treat as PROOF
+
+  Respond in EXACT format:
+
+  CLASSIFICATION: <proof/not_proof>
+  REASONING: <Explain why this is or isn't a proof problem. What words/structure indicate this?>
+  CONFIDENCE: <high/medium/low>
+
+  Output:

@@ -1,0 +1,66 @@
+user: |-
+  You are evaluating the quality of a mathematical forum discussion. Your goal is to determine if the discussion contains useful solution content for training an AI model.
+
+  Problem:
+  {problem}
+
+  Forum Discussion:
+  {forum_discussions}
+
+  Evaluate the discussion quality:
+
+  ## 1. MEANINGFUL_DISCUSSION
+  Does the discussion contain substantive mathematical content?
+  - yes: Discussion includes serious solution attempts, mathematical reasoning, or helpful hints
+  - no: Discussion is only questions like "help me", "I don't know", or off-topic chat
+
+  ## 2. SOLUTION_PRESENT
+  Is there at least one complete or near-complete solution in the discussion?
+  - yes: At least one post contains a solution (may have minor gaps but the approach is clear)
+  - no: No solutions, only questions or incomplete sketches
+
+  ## 3. SOLUTION_CLARITY (1-5)
+  If a solution is present, how clear is it?
+  - 5: Crystal clear, easy to follow every step
+  - 4: Clear, understandable with minor effort
+  - 3: Somewhat clear, requires careful reading
+  - 2: Unclear in places, hard to follow
+  - 1: Very unclear or incomprehensible
+  - N/A: No solution present
+
+  ## 4. DISCUSSION_COHERENCE (1-5)
+  How coherent and organized is the discussion?
+  - 5: Well-organized, logical flow, builds on previous posts
+  - 4: Mostly coherent, follows a thread
+  - 3: Somewhat scattered but followable
+  - 2: Disorganized, jumps around
+  - 1: Incoherent, random posts
+
+  ## 5. MULTIPLE_APPROACHES
+  Are multiple solution approaches discussed?
+  - yes: Multiple different methods are presented
+  - no: Only one approach (or no complete approaches)
+
+  Provide your assessment in EXACT format:
+
+  MEANINGFUL_DISCUSSION: <yes/no>
+  MEANINGFUL_DISCUSSION_EXPLANATION: <Why is it meaningful or not?>
+
+  SOLUTION_PRESENT: <yes/no>
+  SOLUTION_DESCRIPTION: <If yes, briefly describe what solution(s) are provided. If no, explain what's missing.>
+
+  SOLUTION_CLARITY: <1-5/N/A>
+  SOLUTION_CLARITY_REASONING: <Why this rating?>
+
+  DISCUSSION_COHERENCE: <1-5>
+  COHERENCE_REASONING: <How organized is the discussion?>
+
+  MULTIPLE_APPROACHES: <yes/no>
+  APPROACHES_DESCRIPTION: <If yes, list the different approaches. If no, state "Single approach" or "No approaches">
+
+  OVERALL_DISCUSSION_QUALITY: <excellent/good/acceptable/poor>
+  OVERALL_REASONING: <Brief summary>
+
+  RECOMMENDATION: <accept/review/reject>
+
+  Output:

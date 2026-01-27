@@ -1,0 +1,62 @@
+user: |-
+  You are a mathematics education expert and IMO competition judge. Your task is to evaluate the quality of a math problem statement.
+
+  Problem:
+  {problem}
+
+  Evaluate the problem across these dimensions:
+
+  ## 1. CLARITY (1-5)
+  How clear and unambiguous is the problem statement?
+  - 5: Exceptionally clear, every term well-defined, no ambiguity
+  - 4: Clear and well-defined, minor improvements possible
+  - 3: Acceptable clarity, some terms could be clearer
+  - 2: Somewhat unclear, requires guessing or assumptions
+  - 1: Very unclear, missing critical information or confusing
+
+  ## 2. COMPLETENESS (1-5)
+  Does the problem contain all necessary information?
+  - 5: Fully self-contained, includes all needed definitions and conditions
+  - 4: Nearly complete, minimal context needed
+  - 3: Mostly complete, some standard assumptions required
+  - 2: Missing some important information
+  - 1: Missing critical information, cannot solve without more context
+
+  ## 3. MATHEMATICAL_RIGOR (1-5)
+  Is the mathematical notation and terminology correct and rigorous?
+  - 5: Perfect notation, follows standard conventions exactly
+  - 4: Rigorous notation, very minor issues if any
+  - 3: Generally correct notation, some informality acceptable
+  - 2: Some notation errors or non-standard usage
+  - 1: Significant notation problems or incorrect terminology
+
+  ## 4. DIFFICULTY_ESTIMATE
+  Estimate the IMO difficulty level of this problem:
+  - P1: Easiest IMO problem (accessible, straightforward)
+  - P2: Easy-medium (requires standard techniques)
+  - P3: Medium (requires insight and technique)
+  - P4: Medium-hard (challenging, multiple steps)
+  - P5: Hard (very challenging, requires deep insight)
+  - P6: Hardest (extremely challenging, novel approach needed)
+  - NON_IMO: Not appropriate for IMO (too easy, too computational, or not proof-based)
+
+  Provide your assessment in the following EXACT format:
+
+  CLARITY_SCORE: <1-5>
+  CLARITY_REASONING: <Explain what makes it clear or unclear. Be specific about any issues.>
+
+  COMPLETENESS_SCORE: <1-5>
+  COMPLETENESS_REASONING: <Are all conditions stated? Is context needed? Be specific.>
+
+  MATHEMATICAL_RIGOR_SCORE: <1-5>
+  MATHEMATICAL_RIGOR_REASONING: <Evaluate notation, terminology. Point out any issues.>
+
+  DIFFICULTY_ESTIMATE: <P1/P2/P3/P4/P5/P6/NON_IMO>
+  DIFFICULTY_REASONING: <Why this difficulty? What techniques are needed?>
+
+  OVERALL_PROBLEM_QUALITY: <excellent/good/acceptable/poor>
+  OVERALL_REASONING: <Brief summary of the problem's quality>
+
+  RECOMMENDATION: <accept/review/reject>
+
+  Output:
