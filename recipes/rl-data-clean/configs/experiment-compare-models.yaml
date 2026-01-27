@@ -76,7 +76,7 @@ stages:
     input_file: ${directories.step-2-classify}/proof.jsonl
     dependencies:
       - classify_if_proof
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-proof-quality.yaml"
+    inline_args: "++prompt_config=/nemo_run/code/recipes/rl-data-clean/prompts/assess-proof-quality.yaml"
     stage_kwargs: ${model_120b}
 
   # Proof quality assessment - Model 2 (DeepSeek)
@@ -85,7 +85,7 @@ stages:
     input_file: ${directories.step-2-classify}/proof.jsonl
     dependencies:
       - classify_if_proof
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-proof-quality.yaml"
+    inline_args: "++prompt_config=/nemo_run/code/recipes/rl-data-clean/prompts/assess-proof-quality.yaml"
     stage_kwargs: ${model_deepseek}
 
   # Compare proof quality assessments
@@ -96,7 +96,7 @@ stages:
       - assess_proof_quality_deepseek
     # This will be a script execution, not a generate() call
     script: |
-      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/compare_model_outputs.py \
+      python /nemo_run/code/recipes/rl-data-clean/scripts/compare_model_outputs.py \
         ${directories.step-3-proof-120b}/output.jsonl \
         ${directories.step-3-proof-deepseek}/output.jsonl \
         ${directories.step-4-comparison}/proof_quality_comparison.json \
@@ -110,7 +110,7 @@ stages:
     input_file: ${directories.step-3-proof-120b}/output.jsonl
     dependencies:
       - assess_proof_quality_120b
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-imo-readiness.yaml"
+    inline_args: "++prompt_config=/nemo_run/code/recipes/rl-data-clean/prompts/assess-imo-readiness.yaml"
     stage_kwargs: ${model_120b}
 
   # IMO readiness - Model 2 (DeepSeek)
@@ -119,7 +119,7 @@ stages:
     input_file: ${directories.step-3-proof-deepseek}/output.jsonl
     dependencies:
       - assess_proof_quality_deepseek
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/assess-imo-readiness.yaml"
+    inline_args: "++prompt_config=/nemo_run/code/recipes/rl-data-clean/prompts/assess-imo-readiness.yaml"
     stage_kwargs: ${model_deepseek}
 
   # Compare IMO readiness assessments
@@ -129,7 +129,7 @@ stages:
       - assess_imo_readiness_120b
       - assess_imo_readiness_deepseek
     script: |
-      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/compare_model_outputs.py \
+      python /nemo_run/code/recipes/rl-data-clean/scripts/compare_model_outputs.py \
         ${directories.step-5-imo-120b}/output.jsonl \
         ${directories.step-5-imo-deepseek}/output.jsonl \
         ${directories.step-6-comparison}/imo_readiness_comparison.json \

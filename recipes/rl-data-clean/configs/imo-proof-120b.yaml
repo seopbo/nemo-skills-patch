@@ -62,12 +62,6 @@ stages:
     input_file: ${directories.step-1-extract}/extracted-problems.jsonl
     dependencies:
       - extract_problems
-    inline_args: "++prompt_config=/nemo_run/code/recipes/openmathreasoning/rl-data-clean/prompts/classify-if-proof.yaml"
-    postprocess_cmd: |
-      python /nemo_run/code/recipes/openmathreasoning/rl-data-clean/scripts/postprocess_classification.py \
-        ${directories.step-2-classify}/output.jsonl \
-        ${directories.step-2-classify}/proof.jsonl \
-        ${directories.step-2-classify}/not-proof.jsonl
     stage_kwargs: ${generate_kwargs}
 
   extract_proof:
