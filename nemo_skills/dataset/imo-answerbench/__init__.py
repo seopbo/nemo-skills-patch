@@ -1,4 +1,4 @@
-# Copyright (c) 2024, NVIDIA CORPORATION.  All rights reserved.
+# Copyright (c) 2025, NVIDIA CORPORATION.  All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -12,38 +12,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-*.json
-*.tar.gz
-*.tar
-*.npy
-*.info
-*.jsonl
-*.csv
-nemo_experiments
-wandb
-build
-.hypothesis
-*.zip
-*.egg-info
-*.xml
-*.DS_Store
-.coverage
-.venv
-*.lock
+DATASET_GROUP = "math"
+METRICS_TYPE = "math"
+GENERATION_ARGS = "++prompt_config=generic/math ++eval_type=math"
+# Judge configuration: Use the AnswerAutoGrader prompt.
+# Recommended model: Gemini 2.5 Pro (or similar strong reasoner)
+JUDGE_ARGS = "++prompt_config=judge/imo_answerbench ++generation_key=judgement ++inference.reasoning_effort=dynamic"
 
-__pycache__
-.ipynb_checkpoints
-
-cluster_configs/*
-!cluster_configs/example-*.yaml
-
-nemo_skills/dataset/ruler/*/
-nemo_skills/dataset/bfcl_v3/*/
-nemo_skills/dataset/bfcl_v4/*/
-nemo_skills/dataset/aalcr/lcr/
-.idea/
-.idea/*
-CLAUDE.md
-.codex
-
-.idea
+JUDGE_PIPELINE_ARGS = {
+    "generation_type": "math_judge",
+    "model": "gemini-2.5-pro",
+    "server_type": "gemini",
+}
