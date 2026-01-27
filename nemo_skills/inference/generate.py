@@ -206,13 +206,17 @@ class GenerationTaskConfig:
     enable_litellm_cache: bool = False
 
     # List of content types to drop from messages (e.g., base64 audio) to keep output files smaller
-    drop_content_types: list[str] = field(default_factory=lambda: ["audio_url"])
+    drop_content_types: list[str] = field(default_factory=lambda: ["audio_url", "input_audio"])
 
     # Audio configuration - set by benchmarks that need audio processing (mmau-pro, audiobench, etc.)
     enable_audio: bool = False  # Enable audio preprocessing (set by benchmark configs)
     enable_audio_chunking: bool = True
     audio_chunk_task_types: list[str] | None = None  # If None, chunk all task types; if specified, only chunk these
     chunk_audio_threshold_sec: int = 30  # Duration in seconds for each audio chunk
+    # Audio format for API requests:
+    #   - "audio_url": data URI format for vLLM/Qwen (default)
+    #   - "input_audio": OpenAI native format for NVIDIA API/Gemini/Azure
+    audio_format: str = "audio_url"
 
     # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
     eval_type: str | None = None  # "lean4-proof", "math", etc.
@@ -428,11 +432,11 @@ class GenerationTask:
 
         # Build server config, potentially switching to vllm_multimodal for audio tasks
         server_config = dict(self.cfg.server)
-        if needs_audio and server_config.get("server_type") not in ["vllm", "vllm_multimodal"]:
+        if needs_audio and server_config.get("server_type") not in ["vllm", "vllm_multimodal", "api_multimodal"]:
             LOG.warning(
-                f"enable_audio is set but server_type is '{server_config.get('server_type')}'. "
-                "Audio processing is only supported for vllm_multimodal server types. "
-                "Audio will not be processed."
+                f"Audio enabled with server_type='{server_config.get('server_type')}'. "
+                "Advanced audio preprocessing (base64 encoding, chunking) is only available for "
+                "vllm_multimodal and api_multimodal. Server will receive raw audio paths."
             )
         if needs_audio and server_config.get("server_type") in [
             "vllm",
@@ -447,6 +451,16 @@ class GenerationTask:
                     "enable_audio_chunking": self.cfg.enable_audio_chunking,
                     "audio_chunk_task_types": self.cfg.audio_chunk_task_types,
                     "chunk_audio_threshold_sec": self.cfg.chunk_audio_threshold_sec,
+                }
+            )
+        if needs_audio and server_config.get("server_type") == "api_multimodal":
+            # Pass audio config to api_multimodal (has built-in audio processing)
+            server_config.update(
+                {
+                    "enable_audio_chunking": self.cfg.enable_audio_chunking,
+                    "audio_chunk_task_types": self.cfg.audio_chunk_task_types,
+                    "chunk_audio_threshold_sec": self.cfg.chunk_audio_threshold_sec,
+                    "audio_format": self.cfg.audio_format,
                 }
             )
 

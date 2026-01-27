@@ -39,6 +39,7 @@ from .context_retry import ContextLimitRetryConfig
 from .gemini import GeminiModel
 from .megatron import MegatronModel
 from .openai import OpenAIModel
+from .api_multimodal import APIMultimodal
 from .parallel_thinking import ParallelThinkingConfig, ParallelThinkingTask
 
 # Tool Calling
@@ -65,6 +66,7 @@ models = {
     "sglang": SGLangModel,
     "tts_nim": TTSNIMModel,
     "asr_nim": ASRNIMModel,
+    "api_multimodal": APIMultimodal,
 }
 
 

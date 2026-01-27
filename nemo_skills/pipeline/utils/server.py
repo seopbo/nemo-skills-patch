@@ -38,6 +38,7 @@ class SupportedServers(str, Enum):
     azureopenai = "azureopenai"
     gemini = "gemini"
     generic = "generic"
+    api_multimodal = "api_multimodal"  # For connecting to external servers (NVIDIA API, etc.)
 
 
 def get_free_port(exclude: list[int] | None = None, strategy: int | str = 5000) -> int:
