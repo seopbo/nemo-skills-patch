@@ -17,6 +17,8 @@ import dataclasses
 from nemo_skills.mcp.utils import locate
 from nemo_skills.utils import python_doc_to_cmd_help
 
+from .api_multimodal import APIMultimodal
+
 # NIM models (speech)
 from .asr_nim import ASRNIMModel
 
@@ -39,7 +41,6 @@ from .context_retry import ContextLimitRetryConfig
 from .gemini import GeminiModel
 from .megatron import MegatronModel
 from .openai import OpenAIModel
-from .api_multimodal import APIMultimodal
 from .parallel_thinking import ParallelThinkingConfig, ParallelThinkingTask
 
 # Tool Calling
