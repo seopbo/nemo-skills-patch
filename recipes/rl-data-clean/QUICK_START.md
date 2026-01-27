@@ -39,7 +39,7 @@ rl-data-clean/
 Take a look at the 5 prompts we designed:
 
 ```bash
-cd /home/wedu/NeMo-Skills/recipes/openmathreasoning/rl-data-clean/prompts
+cd /home/wedu/NeMo-Skills/recipes/rl-data-clean/prompts
 
 # Most important ones to review:
 cat assess-proof-quality.yaml      # Core evaluation
@@ -59,7 +59,7 @@ You can test individual prompts before running the full pipeline:
 ```bash
 # Example: Test proof quality assessment on a sample problem
 python -m nemo_skills.inference.generate \
-  ++prompt_config=recipes/openmathreasoning/rl-data-clean/prompts/assess-proof-quality.yaml \
+  ++prompt_config=recipes/rl-data-clean/prompts/assess-proof-quality.yaml \
   ++input_file=sample_proof.jsonl \
   ++output_dir=test_output \
   ++model=gpt-oss-120B
@@ -82,9 +82,8 @@ Compare two models on the sample:
 # This will run both gpt-oss-120B and deepseek-v3 in parallel
 # and compare their outputs
 
-python recipes/openmathreasoning/pipeline/problem_generation.py \
-  --mode experiment-compare-models \
-  --config recipes/openmathreasoning/rl-data-clean/configs/experiment-compare-models.yaml
+python recipes/rl-data-clean/pipeline/imo_proof_pipeline.py \
+  --config experiment-compare-models
 ```
 
 **Expected output:**
@@ -113,9 +112,13 @@ Based on Phase 1 results, run the full pipeline:
 
 ```bash
 # Single model (if agreement >90%)
-python recipes/openmathreasoning/pipeline/problem_generation.py \
-  --mode imo-proof-120b \
-  --config recipes/openmathreasoning/rl-data-clean/configs/imo-proof-120b.yaml
+python recipes/rl-data-clean/pipeline/imo_proof_pipeline.py \
+  --config imo-proof-120b
+
+# Or run specific stages only
+python recipes/rl-data-clean/pipeline/imo_proof_pipeline.py \
+  --config imo-proof-120b \
+  --stages extract_problems,classify_if_proof
 ```
 
 **Timeline:** 2-3 weeks for full dataset (~10k problems)

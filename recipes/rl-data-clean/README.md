@@ -68,16 +68,20 @@ rl-data-clean/
 
 ### Phase 1: Model Comparison Experiment (1000 samples)
 ```bash
-python pipeline/proof_pipeline.py --config configs/experiment-compare-models.yaml
+python recipes/rl-data-clean/pipeline/imo_proof_pipeline.py \
+  --config experiment-compare-models
 ```
 
 ### Phase 2: Full Pipeline
 ```bash
 # Single model
-python pipeline/proof_pipeline.py --config configs/imo-proof-120b.yaml
+python recipes/rl-data-clean/pipeline/imo_proof_pipeline.py \
+  --config imo-proof-120b
 
-# Dual model validation
-python pipeline/proof_pipeline.py --config configs/imo-proof-dual-model.yaml
+# Run specific stages
+python recipes/rl-data-clean/pipeline/imo_proof_pipeline.py \
+  --config imo-proof-120b \
+  --stages classify_if_proof,assess_proof_quality
 ```
 
 ## Quality Thresholds
