@@ -2,7 +2,7 @@
 # Use this if Phase 1 experiment shows >90% agreement
 
 cluster: dfw
-base_output_dir: /workspace/rl-data-clean/production
+base_output_dir: /workspace/rl-data-clean/test
 expname: imo-proof-120b
 suffix: single-model
 
