@@ -135,6 +135,7 @@ def _extract_tool_result(result) -> Any:
     """
     # Check if tool explicitly returned an error - return generic message to avoid leaking details
     if getattr(result, "isError", False):
+        LOG.error("Tool execution failed: %s", result)
         return {"error": "Tool execution failed"}
 
     struct = getattr(result, "structuredContent", None)
