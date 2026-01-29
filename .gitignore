@@ -44,7 +44,9 @@ nemo_skills/dataset/bfcl_v4/*/
 nemo_skills/dataset/aalcr/lcr/
 .idea/
 .idea/*
+generation/
 CLAUDE.md
 .codex
-
+.claude
+.cursor
 .idea

@@ -36,7 +36,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 
 [project.urls]
 homepage = "https://nvidia-nemo.github.io/Skills"
