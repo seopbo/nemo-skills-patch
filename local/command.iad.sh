@@ -28,16 +28,13 @@ if [ -z "$NV_INFERENCE_URL" ]; then
     exit 1
 fi
 
-# GPU allocation:
-# --server_gpus: Number of GPUs per node (default: 1)
-# --server_nodes: Number of nodes for distributed inference (default: 1)
+# Run generation client on cluster (makes API calls from cluster node)
+# --num_gpus: Allocate GPU for the client job on cluster (not for serving)
 ns generate \
     --cluster=iad \
     --expname=test-iad \
     --server_type=openai \
     --model=nvidia/openai/gpt-oss-20b \
-    --server_gpus=8 \
-    --server_nodes=1 \
     ++server.base_url="$NV_INFERENCE_URL" \
     --output_dir=/workspace/generation \
     --input_file=/nemo_run/code/local/input.jsonl \
