@@ -633,14 +633,6 @@ class GenerationTask:
         # all of the original data to the output file alongside the new generations
         output[self.cfg.generation_key] = output.pop("generation")
 
-        if self.cfg.structured_output == "HLE_JUDGE_AA":
-            try:
-                output[self.cfg.generation_key] = "Judgement: {}".format(
-                    json.loads(output[self.cfg.generation_key])["correct"]
-                )
-            except (json.JSONDecodeError, KeyError):
-                output[self.cfg.generation_key] = "Judgement: FAILED_TO_PARSE"
-
         if not self.cfg.add_generation_stats:
             output.pop("generation_start_time", None)
             output.pop("generation_end_time", None)
