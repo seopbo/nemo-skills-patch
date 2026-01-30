@@ -31,6 +31,7 @@ from nemo_skills.evaluation.metrics.code_metrics import (
     SciCodeMetrics,
     SweBenchMetrics,
 )
+from nemo_skills.evaluation.metrics.critpt_metrics import CritPtMetrics
 from nemo_skills.evaluation.metrics.gradingbench_metrics import GradingBenchMetrics
 from nemo_skills.evaluation.metrics.icpc_metrics import ICPCMetrics
 from nemo_skills.evaluation.metrics.if_metrics import IFMetrics
@@ -82,6 +83,7 @@ METRICS_MAP = {
     "omniscience": OmniMetrics,
     "compute-eval": ComputeEvalMetrics,
     "gradingbench": GradingBenchMetrics,
+    "critpt": CritPtMetrics,
 }
 
 
