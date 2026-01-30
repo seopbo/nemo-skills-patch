@@ -6,413 +6,223 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Nemo-Skills is a collection of pipelines to improve "skills" of large language models (LLMs). The system supports the full lifecycle: synthetic data generation → model training → evaluation on 80+ benchmarks. It scales from local workstations to large Slurm clusters with minimal code changes.
 
-## Development Setup
+**Documentation:** https://nvidia-nemo.github.io/Skills/
+- Basics: https://nvidia-nemo.github.io/Skills/basics
+- Pipelines: https://nvidia-nemo.github.io/Skills/pipelines
+- Tutorials: https://nvidia-nemo.github.io/Skills/tutorials
 
-### Installation
+## Quick Start
 
 ```bash
-# Development install with all dependencies
+# Install
 pip install -e .[dev]
 
-# Initialize cluster configuration (required for most operations)
+# Setup cluster config (required for local/cluster execution)
 ns setup
 
-# Install pre-commit hooks (required)
+# For development: Install pre-commit hooks (required - enforces DCO sign-off)
 pre-commit install
-```
 
-### Pre-commit Requirements
-
-All commits MUST be signed off:
-```bash
+# All commits MUST be signed off
 git commit -s -m "Your message"
+
+# Run tests
+pytest                    # Unit tests (CPU only)
+pytest -m gpu            # GPU tests
+pytest tests/gpu-tests/  # Specific GPU tests
 ```
 
-This adds `Signed-off-by: Your Name <your@email.com>` to comply with DCO requirements.
-
-### Code Quality
-
-- Run `ruff check --fix` and `ruff format` before committing (pre-commit handles this)
+**Code Quality:**
 - Line length: 119 characters
 - Target: Python 3.10+
+- Ruff for formatting/linting (pre-commit handles this)
 - Do not add arbitrary defaults for configs - be explicit
 
-### Running Tests
+## Key Environment Variables
 
+**Cluster Configuration:**
+- `NEMO_SKILLS_CONFIG` - Set default cluster (instead of `--cluster`)
+- `NEMO_SKILLS_CONFIG_DIR` - Override default config directory
+- `NEMO_SKILLS_DATA_DIR` - Cluster data directory path
+- `NEMO_SKILLS_EXTRA_DATASETS` - Additional dataset search paths
+
+**API Keys:**
+- `OPENAI_API_KEY`, `AZURE_OPENAI_API_KEY`, `NVIDIA_API_KEY` - For API providers
+- `HF_TOKEN` - For gated models (e.g., Llama 3.1)
+- `WANDB_API_KEY` - For training logging
+
+**Critical for Cluster:**
+- `HF_HOME` - Must be set in cluster config's `env_vars` for HuggingFace models
+
+**SSH & Code Packaging:**
+- `NEMO_SKILLS_SSH_KEY_PATH`, `NEMO_SKILLS_SSH_SERVER` - SSH tunnel config
+- `NEMO_SKILLS_DISABLE_UNCOMMITTED_CHANGES_CHECK=1` - Allow uncommitted changes (but won't be packaged!)
+
+## Command Basics
+
+### Argument Convention
+- `--arg_name` - Wrapper arguments (job config: cluster, GPUs, expname, etc.)
+- `++arg_name` - Main arguments (passed to underlying script)
+- Run `ns <command> --help` to see all options and underlying script path
+
+### Common Wrapper Arguments
+- `--cluster=local|slurm` - Execution environment
+- `--expname=my-exp` - Experiment name
+- `--run_after=other-exp` - Job dependency (SLURM only)
+- `--num_chunks=N` - Split into N parallel jobs
+- `--num_random_seeds=N` - Generate N samples per input
+- `--num_jobs=N` - Parallelize across N SLURM jobs
+- `--reuse_code_exp=exp-name` - Reuse code from previous experiment
+
+### Basic Commands
+
+**Generation:**
 ```bash
-# Run all unit tests (CPU-only, excludes GPU and slurm tests)
-pytest
+# API-based
+ns generate --server_type=openai --model=gpt-4o-mini --output_dir=./output --input_file=./input.jsonl ++prompt_config=generic/math
 
-# Run specific test file
-pytest tests/test_declarative_pipeline.py
-
-# Run GPU tests (requires GPU access)
-pytest -m gpu
-pytest tests/gpu-tests/test_generate.py
-
-# Slurm tests are comprehensive end-to-end tests on cluster
-# Located in tests/slurm-tests/ - see tests/slurm-tests/README.md for details
+# Local with vLLM
+ns generate --cluster=local --server_type=vllm --model=Qwen/Qwen2.5-1.5B-Instruct --server_gpus=1 --output_dir=/workspace/output --input_file=/workspace/input.jsonl ++prompt_config=generic/math
 ```
 
-Tests marked with `@pytest.mark.gpu` require GPU access.
-
-## Common Commands
-
-### Basic Generation
-
+**Evaluation:**
 ```bash
-# API-based inference
-ns generate \
-    --server_type=openai \
-    --model=gpt-4o-mini \
-    --output_dir=./output \
-    --input_file=./input.jsonl \
-    ++prompt_config=generic/math
-
-# Local model with vLLM
-ns generate \
-    --cluster=local \
-    --server_type=vllm \
-    --model=Qwen/Qwen2.5-1.5B-Instruct \
-    --server_gpus=1 \
-    --output_dir=/workspace/output \
-    --input_file=/workspace/input.jsonl \
-    ++prompt_config=generic/math
-```
-
-### Evaluation
-
-```bash
-# Prepare benchmark data
 ns prepare_data gsm8k math aime24
-
-# Evaluate on benchmarks
-ns eval \
-    --cluster=local \
-    --benchmarks=gsm8k:4,math:8 \
-    --model=/models/my-model \
-    --server_type=vllm \
-    --output_dir=/workspace/results
-
-# Evaluate vision-language models (VLM)
-ns eval \
-    --cluster=local \
-    --benchmarks=mmmu-pro:4 \
-    --model=/models/my-vlm \
-    --server_type=vllm \
-    --output_dir=/workspace/results
-
-# Summarize results
+ns eval --cluster=local --benchmarks=gsm8k:4,math:8 --model=/models/my-model --server_type=vllm --output_dir=/workspace/results
 ns summarize_results /workspace/results
 ```
 
-### Training
-
+**Training:**
 ```bash
-# Prepare training data
-ns prepare_data --dataset=openmathinstruct2
-
-# SFT with NeMo-RL
-ns sft_nemo_rl \
-    --cluster=slurm \
-    --expname=my-sft-run \
-    --model=/models/base-model \
-    --training_data=/data/train.jsonl
-
-# GRPO with NeMo-RL
-ns grpo_nemo_rl \
-    --cluster=slurm \
-    --expname=my-grpo-run \
-    --model=/models/sft-model \
-    --training_data=/data/train.jsonl
+ns sft_nemo_rl --cluster=slurm --expname=my-sft --model=/models/base-model --training_data=/data/train.jsonl
+ns grpo_nemo_rl --cluster=slurm --expname=my-grpo --model=/models/sft-model --training_data=/data/train.jsonl
 ```
 
-### Server Management
-
+**Server:**
 ```bash
-# Start a model server
-ns start_server \
-    --cluster=local \
-    --server_type=vllm \
-    --model=meta-llama/Llama-3.1-8B-Instruct \
-    --num_gpus=1
+ns start_server --cluster=local --server_type=vllm --model=meta-llama/Llama-3.1-8B-Instruct --num_gpus=1
 ```
 
-### Running Arbitrary Commands
-
+**Run Arbitrary Commands:**
 ```bash
-# Execute custom command in container
-ns run_cmd \
-    --cluster=slurm \
-    --cmd="python scripts/my_script.py" \
-    --expname=custom-job
+ns run_cmd --cluster=slurm --cmd="python scripts/my_script.py" --expname=custom-job
 ```
 
-### Documentation
+**Find detailed examples:** Run `ns <command> --help` or check documentation at https://nvidia-nemo.github.io/Skills/pipelines
 
-```bash
-# Serve documentation locally (requires mkdocs)
-mkdocs serve
+### Important Command Options
 
-# Build documentation
-mkdocs build
-```
+**Generation:**
+- `++code_execution=true` - Enable sandboxed code execution
+- `++parse_reasoning=true ++end_reasoning_string='</think>'` - For reasoning models
+- `++prompt_format=openai` - When data is already formatted as OpenAI messages
+- `++server.enable_soft_fail=true` - Continue on errors (vLLM/SGLang)
+- `++skip_filled=false` - Force rerun even if output exists
 
-## Architecture
+**Evaluation:**
+- `--benchmarks=gsm8k:10,math:10` - `:N` specifies number of repeats (computes variance)
+- `--data_dir=/workspace/ns-data` - Use cluster-prepared data
+- `--judge_model=gpt-4o --judge_server_type=openai` - LLM-as-a-judge
+- `++eval_config.timeout=60` - Custom code execution timeout
 
-### CLI System (`ns` command)
+**Training:**
+- `++backend=megatron` - Use Megatron backend (faster than FSDP)
+- `++policy.train_micro_batch_size=1` - Keep at 1 for sequence packing!
+- `++policy.context_parallel_size=4` - For sequences > 4k tokens
+- `--disable_wandb` - Disable WandB logging
 
-Entry point: `nemo_skills/pipeline/cli.py:47`
+**Server:**
+- `--create_tunnel` - Create SSH tunnel for remote SLURM
+- `--get_random_port` - Avoid port conflicts on shared nodes
+- `--launch_chat_interface` - Start chat UI (default port: 7860)
 
-Built with Typer. Main commands map to functions in `nemo_skills/pipeline/`:
-- `generate` → `generation.py`
-- `eval` → `eval.py`
-- `prepare_data` → `data_preparation.py`
-- `sft_nemo_rl`, `grpo_nemo_rl` → `nemo_rl/`
-- `ppo_verl` → `verl/`
-- `start_server` → `start_server.py`
+## Architecture Overview
 
-### Declarative Pipeline System
+### Core Patterns
 
-**Core concept**: Layered job specification
-
-```
-Pipeline (experiment-level)
-  └─ Jobs (can depend on other jobs via run_after/expname)
-      └─ CommandGroup(s) (SLURM heterogeneous job groups)
-          └─ Command(s) (individual processes in containers)
-              └─ Script objects (typed, reusable components)
-```
-
-**Key files**:
-- `nemo_skills/pipeline/utils/declarative.py:832` - Pipeline/Job/CommandGroup/Command classes
-- `nemo_skills/pipeline/utils/scripts.py:428` - Script objects (ServerScript, GenerationClientScript, etc.)
-- `nemo_skills/pipeline/utils/exp.py:780` - Experiment management, code packaging
-- `nemo_skills/pipeline/utils/cluster.py:580` - Cluster config resolution, SSH tunneling
-
-**Script types**:
-- `ServerScript` - Model serving (vLLM, TRT-LLM, SGLang, Megatron)
-- `SandboxScript` - Code execution sandbox
-- `GenerationClientScript` - LLM inference client
-- `BaseJobScript` - Base class with heterogeneous job support
-
-**Key Pattern**: Cross-component references allow scripts to reference each other for coordination (e.g., client gets server hostname/port automatically).
-
-### Inference System
-
-**Architecture**: Pluggable backend with unified interface
-
-**Model backends** (`nemo_skills/inference/model/`):
-- `base.py` - BaseModel abstract class (uses LiteLLM for unified API)
-- `vllm.py`, `sglang.py`, `megatron.py` - Self-hosted backends
-- `openai.py`, `azure.py`, `gemini.py` - API providers
-- `vllm.py` - Includes vision-language model (VLM) support for multimodal inputs
-- `asr_nim.py`, `tts_nim.py` - Speech/audio models
-
-**Model registry** (`inference/model/__init__.py`):
+**1. Registry + Factory Pattern** - Used everywhere for pluggability
 ```python
-models = {
-    "trtllm": VLLMModel,  # TRT-LLM uses vLLM wrapper
-    "vllm": VLLMModel,
-    "sglang": SGLangModel,
-    "openai": OpenAIModel,
-    # ...
-}
-```
-
-Factory: `get_model(server_type, ...)` instantiates appropriate backend.
-
-**Advanced wrappers**:
-- `CodeExecutionWrapper` - Integrates sandbox for iterative code execution
-- `ToolCallingWrapper` - Function calling support (BFCL benchmarks)
-- `ParallelThinkingTask` - Multi-path reasoning
-
-**Generation types** (`inference/factory.py`):
-- `generate` - Standard generation
-- `math_judge` - LLM-based math judging
-- `check_contamination` - Dataset contamination checking
-- Custom generation modules can specify their own Python environments/dependencies
-
-**Server management** (`inference/server/`):
-- `serve_vllm.py`, `serve_sglang.py` - Server startup scripts
-- Automatic port allocation
-- Multi-node distributed inference support
-
-### Evaluation System
-
-**Architecture**: Evaluator + Metrics pattern
-
-**Base evaluator** (`nemo_skills/evaluation/evaluator/base.py`):
-```python
-class BaseEvaluator:
-    async def eval_full()      # Batch evaluation
-    async def eval_single()    # Single sample (streaming during generation)
-    def supports_single_eval() # Check if streaming supported
-```
-
-**Specialized evaluators** (`evaluation/evaluator/`):
-- `math.py` - Math answer checking (symbolic, numeric, extraction)
-- `code.py` - Code execution evaluation
-- `bird.py` - SQL evaluation
-- `ifeval.py` - Instruction following
-- `bfcl.py` - Function calling benchmarks (with web search support for BFCLv4)
-- `arena.py` - LLM-as-judge evaluation
-- `nvembed_judge.py` - Embedding-based judging
-- `scicode.py` - Scientific code evaluation
-- `audio.py` - Audio input/output evaluation (ASR, TTS, audio understanding)
-
-**Metrics system** (`evaluation/metrics/`):
-- Benchmark-specific metric calculators
-- `map_metrics.py` - Maps benchmark names to metric functions
-- Supports aggregation: pass@k, majority voting, avg-of-N
-
-**Evaluation pipeline**:
-1. Main generation jobs (chunked/seeded for parallelization)
-2. Judge jobs (if needed) - LLM or rule-based
-3. Automatic metric computation and summarization
-4. Group scoring for benchmark suites
-
-### Dataset System
-
-**Architecture**: Plugin-based dataset modules
-
-Each benchmark is a directory in `nemo_skills/dataset/` with `__init__.py`:
-```python
-DATASET_GROUP = "math"           # Category
-METRICS_TYPE = "math"            # Which metrics to use
-GENERATION_ARGS = "++prompt_config=generic/math"  # Default args
-```
-
-**Dataset discovery** (`dataset/utils.py`):
-- Searches in: `nemo_skills/dataset/`, `data_dir` parameter, `NEMO_SKILLS_EXTRA_DATASETS` env var
-- Supports cluster-mounted paths with automatic download
-
-**80+ benchmarks organized by category**:
-- **Math (natural)**: gsm8k, math, aime24, aime25, hmmt_feb25, imo-answerbench, etc.
-- **Math (formal)**: minif2f, proofnet, putnam-bench, imo-proofbench, imo-gradingbench, etc.
-- **Code**: swe-bench, swe-bench-multilingual, livecodebench, bigcodebench, bird, etc.
-- **Science**: gpqa, hle, scicode, frontierscience-olympiad, omniscience, etc.
-- **Multilingual**: flores-200, wmt24pp, mmlu-prox, etc.
-- **Tool-calling**: bfcl_v3, bfcl_v4
-- **Long-context**: ruler, ruler2, mrcr, aalcr
-- **Instruction-following**: ifbench, ifeval
-- **Speech/Audio**: asr-leaderboard, mmau-pro
-- **VLM**: mmmu-pro
-
-### Prompt System
-
-**Architecture**: YAML-based templates with dynamic construction
-
-**Prompt configs** (`nemo_skills/prompt/config/`):
-- `generic/` - Universal prompts (math, codegen, etc.)
-- `llama3-instruct/`, `qwen/` - Model-specific formats
-- `judge/` - Prompts for LLM judges (includes IMO and FrontierScience judges)
-- `vlm/` - Vision-language model prompts (e.g., mmmu-pro)
-- `multilingual/` - Language-specific prompts
-- `eval/aai/` - AAI benchmark-specific prompts
-
-**Example YAML structure** (`generic/math.yaml`):
-```yaml
-few_shot_examples:
-  prefix: "Here are some examples..."
-  template: "Problem:\n{problem}\n\nSolution:\n{solution}"
-  suffix: "Here is the problem to solve:\n"
-
-user: |-
-  Solve the following math problem...
-  {examples}{problem}
-```
-
-**Few-shot examples** (`prompt/few_shot_examples/`):
-- `math.py`, `gsm8k.py`, `lean4.py`, etc.
-- BM25-based example retrieval support
-- Dynamic example selection
-
-**Code tags** (`prompt/code_tags/`):
-- Defines markers for code execution (```python, ```output)
-- Format-specific output formatting
-
-**Prompt construction flow**:
-1. Load YAML config via `++prompt_config=<category>/<name>`
-2. Resolve few-shot examples (if specified)
-3. Fill template with data fields
-4. Apply tokenizer's chat template (for chat models)
-
-### Training System
-
-**Architecture**: Integration with NeMo-RL and veRL
-
-**Data preparation** (`nemo_skills/training/prepare_data.py`):
-- Uses SDP (Speech Data Processor) pipeline
-- Configuration in `data_preparation_utils/config/`
-- Filters, processors, and merging utilities
-
-**NeMo-RL backend** (`training/nemo_rl/`):
-- `start_sft.py` - Supervised fine-tuning
-- `start_grpo.py` - Group relative policy optimization
-- `environments/math_environment.py` - Reward computation
-- Checkpoint conversion utilities
-
-**veRL backend** (`training/verl/`):
-- `prepare_data.py` - veRL-specific data formatting
-- PPO training support
-
-**Pipeline integration** (`pipeline/nemo_rl/`, `pipeline/verl/`):
-- `sft.py`, `grpo.py`, `ppo.py` - Training job creation
-- Automatic resource allocation
-- Checkpoint management
-- Ray template support for distributed training (NeMo-RL)
-
-### Code Execution System
-
-**Architecture**: Sandboxed execution with safety controls
-
-**Core sandbox** (`nemo_skills/code_execution/sandbox.py:398`):
-- Network blocking support (via iptables)
-- Timeout controls
-- Mount restrictions for safety
-- Output formatting (configurable via code_tags)
-
-**Proof/formal math** (`code_execution/proof_utils.py`):
-- Lean4 interaction utilities
-- Formal proof verification
-
-**Integration**:
-- `SandboxScript` allocates sandbox alongside inference
-- `CodeExecutionWrapper` coordinates LLM ↔ sandbox communication
-- Supports iterative code generation and execution
-
-## Key Architectural Patterns
-
-### 1. Multi-Backend Support
-
-All systems use **registry + factory pattern**:
-
-```python
-# Registry
 models = {"vllm": VLLMModel, "openai": OpenAIModel, ...}
-
-# Factory
 def get_model(server_type, **kwargs):
     return models[server_type](**kwargs)
 ```
+- Model backends: `nemo_skills/inference/model/__init__.py`
+- Evaluators: `nemo_skills/evaluation/evaluator/__init__.py`
+- Datasets: `nemo_skills/dataset/`
 
-Enables seamless switching between:
-- **Inference**: TensorRT-LLM, vLLM, SGLang, Megatron, OpenAI, Azure, Gemini
-- **Training**: NeMo-RL, veRL
-- **Execution**: Local, cluster, containers
+**2. Declarative Pipeline System** - Layered job specification
+```
+Pipeline → Jobs → CommandGroups → Commands → Scripts
+```
+- Key files: `nemo_skills/pipeline/utils/declarative.py`, `scripts.py`, `exp.py`, `cluster.py`
+- Cross-component references for coordination (server hostname/port auto-shared with clients)
+- Script types: `ServerScript`, `SandboxScript`, `GenerationClientScript`, `BaseJobScript`
 
-### 2. Cluster Abstraction
+**3. Cluster Abstraction** - Same code runs locally or on SLURM
+- Executor types: `none` (direct), `local` (Docker), `slurm` (SLURM+containers)
+- Config location: `cluster_configs/`
+- SSH tunnel support for remote job submission
 
-**Executor types** (`pipeline/utils/cluster.py`):
-- `none` - Direct execution (no containers)
-- `local` - Docker with host networking
-- `slurm` - SLURM with containers
+**4. Async Generation** - High concurrency via async/await
+- Default: 512 concurrent requests (configurable)
+- Unified interface via LiteLLM across all backends
 
-**Cluster config** (`cluster_configs/`):
+**5. Chunking & Seeding** - Massive parallelization
+- `--num_chunks=100` splits dataset across jobs
+- `--num_random_seeds=10` generates multiple samples per input
+- Auto `.done` file tracking prevents re-running completed work
+
+### Key Systems
+
+**Inference:**
+- Model backends: `nemo_skills/inference/model/` (vLLM, SGLang, Megatron, OpenAI, Azure, Gemini, etc.)
+- Server scripts: `nemo_skills/inference/server/`
+- Generation types: `nemo_skills/inference/factory.py` (generate, math_judge, check_contamination)
+- Advanced wrappers: `CodeExecutionWrapper`, `ToolCallingWrapper`, `ParallelThinkingTask`
+
+**Evaluation:**
+- Base: `nemo_skills/evaluation/evaluator/base.py` - defines `eval_full()`, `eval_single()`, `supports_single_eval()`
+- Evaluators: `evaluation/evaluator/` - math, code, SQL, instruction-following, function-calling, LLM-judge, etc.
+- Metrics: `evaluation/metrics/` - supports pass@k, majority voting, variance analysis
+
+**Datasets:**
+- 80+ benchmarks in `nemo_skills/dataset/`
+- Each has `__init__.py` with `DATASET_GROUP`, `METRICS_TYPE`, `GENERATION_ARGS`
+- Categories: math (natural/formal), code, science, multilingual, tool-calling, long-context, VLM, audio
+- Discovery: `dataset/utils.py` searches multiple locations
+
+**Prompts:**
+- YAML configs: `nemo_skills/prompt/config/` (generic/, model-specific/, judge/, vlm/, etc.)
+- Few-shot examples: `prompt/few_shot_examples/` (includes BM25 retrieval)
+- Code tags: `prompt/code_tags/` (defines execution markers)
+
+**Training:**
+- Data prep: `nemo_skills/training/prepare_data.py` (uses SDP pipeline)
+- NeMo-RL: `training/nemo_rl/` (SFT, GRPO, reward computation)
+- veRL: `training/verl/` (PPO)
+- Pipeline integration: `pipeline/nemo_rl/`, `pipeline/verl/`
+
+**Code Execution:**
+- Sandbox: `nemo_skills/code_execution/sandbox.py:398` (network blocking, timeouts, safety)
+- Lean4 support: `code_execution/proof_utils.py`
+
+**Tool Calling (MCP-based):**
+- Architecture: LLM → ToolManager → MCPClientTool → MCP Server
+- Built-in: `nemo_skills.mcp.servers.python_tool.PythonTool`, `nemo_skills.mcp.servers.exa_tool.ExaTool`
+- Usage: `++tool_modules=[...]` with `--server_args="--enable-auto-tool-choice --tool-call-parser hermes"`
+
+**Parallel Thinking:**
+- Modes: `genselect` (select best), `gensynthesis` (synthesize new)
+- Online: generates N solutions then processes
+- Offline: uses pre-generated solutions (enables different generator/processor models)
+- Config: `++parallel_thinking.mode=genselect ++parallel_thinking.window_size=8`
+
+### Cluster Configuration
+
+**Config file structure** (`cluster_configs/*.yaml`):
 ```yaml
 executor: slurm
-ssh_tunnel:  # Optional SSH access from local machine
+ssh_tunnel:
   host: cluster.domain
   user: username
   job_dir: /path/on/cluster
@@ -424,267 +234,227 @@ mounts:
   - /models:/models
 env_vars:
   - HF_HOME=/models/hf-cache
+  - HF_TOKEN  # References local environment
+required_env_vars:
+  - WANDB_API_KEY  # Must be set locally, fails if not
 ```
 
-**SSH tunnel support**: Submit jobs from local machine to remote SLURM cluster.
+**Environment variable types:**
+- `env_vars` - Can have inline values or reference local env (fails silently if not set)
+- `required_env_vars` - Must be set in local environment (fails if not set)
 
-### 3. Heterogeneous SLURM Jobs
-
-Declarative pipeline supports different resource requirements in single job:
-
-```python
-# Example: 8B model (1 GPU) + 32B model (4 GPUs) in one job
-job = {
-    "name": "multi_model",
-    "groups": [
-        CommandGroup([server_8b, client_8b], HardwareConfig(num_gpus=1)),
-        CommandGroup([server_32b, client_32b], HardwareConfig(num_gpus=4))
-    ]
-}
-```
-
-Cross-component references use SLURM env vars: `$SLURM_MASTER_NODE_HET_GROUP_0`, etc.
-
-### 4. Configuration Management
-
-- **Hydra for generation**: `inference/generate.py` uses Hydra for complex configs
-  - Usage: `ns generate ++prompt_config=math ++temperature=0.7`
-- **Typer for pipelines**: `pipeline/` commands use Typer for type-safe CLIs
-  - Usage: `ns eval --benchmarks=gsm8k:4 --model=/models/llama`
-- **YAML for prompts/data**: Declarative configs in `prompt/config/` and `dataset/`
-
-**Arguments convention**:
-- `--arg_name` - Wrapper arguments (job config: cluster, GPUs, etc.)
-- `++arg_name` - Main arguments (passed to underlying script)
-
-Run `ns <command> --help` to see wrapper args and underlying script path.
-
-### 5. Async Generation
-
-Generation uses async/await for high concurrency (`inference/generate.py`):
-
-```python
-max_concurrent_requests = 512  # Configurable
-semaphore = asyncio.Semaphore(max_concurrent_requests)
-
-async def generate_batch(...):
-    async with semaphore:
-        return await model.generate(...)
-```
-
-LiteLLM provides unified async interface across all backends.
-
-### 6. Chunking and Seeding
-
-Supports massive parallelization (`pipeline/generate.py`):
-
-```bash
-# Split dataset into 100 chunks, run 10 seeds each
-ns generate \
-    --num_chunks=100 \
-    --num_random_seeds=10 \
-    --output_dir=/results
-```
-
-Creates: `output-rs0-chunk0.jsonl`, `output-rs0-chunk1.jsonl`, ..., `output-rs9-chunk99.jsonl`
-
-Automatic `.done` file tracking prevents re-running completed jobs.
-
-## Important Concepts
+## Critical Concepts
 
 ### Code Packaging
 
-All `ns` commands package your code automatically:
-- Packages any git repo you're running from + nemo-skills package
-- Available in containers/SLURM at `/nemo_run/code`
-- Stored in `~/.nemo_run/experiments/<expname>` locally
-- Stored in `job_dir/<expname>` on cluster (from cluster config)
+**ALL `ns` commands package code automatically:**
+- Available in containers at `/nemo_run/code`
+- Stored locally: `~/.nemo_run/experiments/<expname>`
+- Stored on cluster: `job_dir/<expname>` (from cluster config)
 
-**Important**: Only committed files are packaged!
+**Packaging behavior (from `nemo_skills/pipeline/utils/packager.py`):**
+1. **From nemo-skills repo**: Packages nemo-skills repo only
+2. **From another git repo**: Packages that repo + installed nemo_skills
+3. **Outside any git repo**: Only packages installed nemo_skills (ALL files if not git-based!)
 
+**CRITICAL CONSTRAINTS:**
+- **Only git-tracked files are packaged** (exception: `.jsonl` files in `nemo_skills/dataset/`)
+- Uncommitted changes will NOT be packaged, even with `NEMO_SKILLS_DISABLE_UNCOMMITTED_CHANGES_CHECK=1`
+- Non-git nemo_skills installations upload ALL files (watch for large files!)
+- Code copies accumulate - must manually clean `~/.nemo_run` and cluster `job_dir` periodically
+- Use `--reuse_code_exp=<expname>` to avoid re-packaging
+
+**Workflow:**
 ```bash
-git add file.py && git commit -m "Add file"
+git add file.py && git commit -s -m "Add file"
 ns generate ... --input_file=/nemo_run/code/file.py
 ```
 
 ### Container Usage
 
-Most commands run in containers specified in cluster config:
+**Most commands run in containers specified in cluster config:**
 - Packages installed locally are NOT available unless added to containers
 - All paths must reference mounted paths (not local filesystem paths)
 - Environment variables need explicit listing in cluster config's `env_vars`
 
-### Slurm Job Scheduling
+### Job Dependencies
 
-Best practice: Submit from local machine via SSH tunnel in cluster config.
-
-**Job dependencies**:
-```python
-run_cmd(expname="download-model", ...)
-eval(run_after="download-model", ...)  # Waits for download to complete
+**SLURM only** (ignored for local execution):
+```bash
+ns run_cmd --cluster=slurm --expname=download-model --cmd="python download.py"
+ns eval --cluster=slurm --benchmarks=gsm8k:4 --model=/models/my-model --run_after=download-model
 ```
-
-Only used with SLURM clusters, ignored for local execution.
-
-## Data Flow Example: Evaluation
-
-1. **User**: `ns eval --benchmarks=gsm8k:4 --model=/models/llama --server_type=vllm`
-2. **CLI** (`pipeline/cli.py`) → Routes to `eval()` in `pipeline/eval.py`
-3. **Eval orchestration** (`pipeline/eval.py`):
-   - Loads benchmark config from `dataset/gsm8k/__init__.py`
-   - Loads prompt from `prompt/config/generic/math.yaml`
-   - Calls `_generate()` with 4 random seeds
-4. **Generate orchestration** (`pipeline/generate.py`):
-   - Creates CommandGroup with ServerScript + GenerationClientScript
-   - Builds Pipeline with 4 jobs (one per seed)
-   - Submits via `pipeline.run()`
-5. **Execution** (`pipeline/utils/exp.py`):
-   - Packages code, resolves containers
-   - Creates SLURM/Docker job, submits via NeMo-Run
-6. **Server starts** (`inference/server/serve_vllm.py`): Launches vLLM
-7. **Generation** (`inference/generate.py`):
-   - Loads dataset, constructs prompts
-   - Calls `model.generate()` for each sample async
-   - Writes to `output-rs{seed}.jsonl`
-8. **Evaluation** (`evaluation/evaluator/math.py`):
-   - Extracts answers, compares with ground truth
-9. **Summarization** (`pipeline/summarize_results.py`):
-   - Aggregates metrics across seeds
-   - Saves to `metrics.json`, optionally logs to WandB
-
-## Extension Points
-
-### Adding New Model Backend
-
-1. Implement `BaseModel` in `nemo_skills/inference/model/new_backend.py`
-2. Register in `models` dict in `inference/model/__init__.py`
-3. Optionally add server script in `inference/server/serve_new_backend.py`
-
-### Adding New Benchmark
-
-1. Create `nemo_skills/dataset/my_benchmark/__init__.py`:
-   ```python
-   DATASET_GROUP = "math"
-   METRICS_TYPE = "math"
-   GENERATION_ARGS = "++prompt_config=generic/math"
-   ```
-2. Add data files: `test.jsonl`, `validation.jsonl`
-3. Implement evaluator in `evaluation/evaluator/` if custom logic needed
-4. Add metrics in `evaluation/metrics/` if new metric type needed
-5. Add to documentation with example command and expected results
-6. Run `mkdocs serve` to verify documentation renders properly
-7. Run GPU tests in CI (set "run GPU tests" label)
-8. Consider adding to slurm tests for comprehensive validation
-
-### Adding New Prompt Template
-
-1. Create `nemo_skills/prompt/config/category/name.yaml`
-2. Define `user`, `system`, `few_shot_examples` sections
-3. Use as `++prompt_config=category/name`
-
-### Adding New Training Backend
-
-1. Implement integration in `nemo_skills/training/new_backend/`
-2. Add pipeline command in `nemo_skills/pipeline/new_backend/`
-3. Register in `nemo_skills/pipeline/cli.py`
-
-### Custom Generation Logic
-
-1. Implement `GenerationTask` class
-2. Register in `GENERATION_MODULE_MAP` or use `--generation_module`
 
 ## Code Guidelines (from CONTRIBUTING.md)
 
-### Don't Be Overly Defensive
+### Fail-Fast Philosophy
 
-This codebase prioritizes **fail-fast** over silent errors:
-
-- **No `.get()` for expected keys**: Use `data[key_name]` instead of `data.get(key_name, "")` - let it fail with clear KeyError
-- **No unnecessary exception catching**: Let code crash when unexpected things happen rather than silently misbehaving
-- **No silently ignoring parameters**: If a user passes an unsupported parameter, the code should fail (use dataclasses or **kwargs)
-- **Security not a concern**: Users have full system access; things like `subprocess.call(..., shell=True)` are fine
-  - Exception: Code generated by LLMs should use the provided sandbox API
+**This codebase prioritizes fail-fast over silent errors:**
+- ❌ NO `.get()` for expected keys - use `data[key_name]` to fail with clear KeyError
+- ❌ NO unnecessary exception catching - let code crash on unexpected conditions
+- ❌ NO silently ignoring parameters - fail if user passes unsupported parameter
+- ✅ Security not a concern (users have full system access) - `subprocess.call(..., shell=True)` is fine
+- ⚠️ Exception: LLM-generated code should use sandbox API
 
 ### Keep Code Elegant
 
-When adding new features, try to keep the code simple and elegant:
 - Reuse/extend existing functionality when possible
 - Avoid checking too many conditions or complicated logic
 - Write simpler code even if it sacrifices rare edge-cases
-- Make the code self-explanatory rather than adding excessive comments
+- Make code self-explanatory rather than adding excessive comments
 - Use simple types (dict, list, int, float, existing classes)
-- Avoid complicated type unions/interfaces that quickly become outdated
-- Follow existing naming conventions - if something is called X in one place, don't call it Y elsewhere
+- Avoid complicated type unions/interfaces
+- Follow existing naming conventions
 
-When in doubt, follow the Zen of Python: "Beautiful is better than ugly. Explicit is better than implicit. Simple is better than complex."
+**Zen of Python:** "Beautiful is better than ugly. Explicit is better than implicit. Simple is better than complex."
 
 ## Key Directories
 
 ```
 nemo_skills/
-├── pipeline/          # Pipeline orchestration and CLI
-│   ├── cli.py        # Main ns CLI entry point
+├── pipeline/          # CLI & orchestration (cli.py is entry point)
 │   ├── generate.py   # Generation pipeline
 │   ├── eval.py       # Evaluation pipeline
-│   ├── utils/        # Pipeline utilities (declarative.py, scripts.py, etc.)
-│   ├── megatron_lm/  # Megatron-LM training pipelines
-│   ├── nemo_rl/      # NeMo-RL training pipelines (SFT, GRPO)
-│   └── verl/         # VERL training pipelines (PPO)
-├── inference/        # LLM inference and generation
+│   ├── utils/        # declarative.py, scripts.py, exp.py, cluster.py
+│   ├── nemo_rl/      # SFT, GRPO pipelines
+│   └── verl/         # PPO pipelines
+├── inference/        # Generation, model backends, servers
 │   ├── generate.py   # Main generation script
 │   ├── factory.py    # Generation type registry
-│   ├── model/        # Model provider implementations
+│   ├── model/        # Backend implementations + registry
 │   └── server/       # Server startup scripts
-├── evaluation/       # Evaluation and metrics
-│   ├── evaluator/    # Benchmark evaluators
-│   └── metrics/      # Metric implementations
+├── evaluation/       # Evaluators & metrics
 ├── dataset/          # 80+ benchmark datasets
-├── training/         # Training pipelines (NeMo-RL, VERL)
-├── prompt/           # Prompt templates
-│   ├── config/       # YAML prompt configurations
-│   ├── few_shot_examples/  # Few-shot example generators
-│   └── code_tags/    # Code execution markers
-└── code_execution/   # Code execution sandbox
+├── training/         # NeMo-RL, veRL integration
+├── prompt/           # YAML configs, few-shot examples, code tags
+├── code_execution/   # Sandboxed execution
+└── mcp/             # Tool calling (MCP protocol)
 
-cluster_configs/      # Execution environment configs (local/slurm)
+cluster_configs/      # Execution environment configs
 tests/
 ├── gpu-tests/        # GPU-required tests
-└── slurm-tests/      # Full cluster integration tests
-recipes/              # Reproducible experiment recipes
-docs/                 # Documentation (MkDocs)
+└── slurm-tests/      # End-to-end cluster tests
+recipes/              # Reproducible experiments
+docs/                 # MkDocs documentation
 ```
 
 ## Common Pitfalls
 
-- **Forgetting to run `ns setup`** before using cluster features
-- **Not mounting paths correctly** in cluster configs - all paths in jobs must reference mounted locations
-- **Using relative paths** instead of absolute paths in cluster jobs
-- **Not signing off commits** - use `git commit -s` (pre-commit will catch this)
-- **Adding unnecessary defensive code** - violates contribution guidelines (let code fail explicitly)
-- **Forgetting code is packaged from git** - only committed files are available in containers/cluster
-- **Not setting HF_HOME** in cluster config env_vars (required for HuggingFace models)
-- **Expecting local packages in containers** - containers only have what's in their Dockerfile
-- **Using container paths that aren't mounted** - will fail at runtime
+**Setup & Configuration:**
+- Forgetting to run `ns setup` before using cluster features
+- Not mounting paths correctly in cluster configs - all paths in jobs must reference mounted locations
+- Using relative paths instead of absolute paths in cluster jobs
+- Not setting `HF_HOME` in cluster config's `env_vars` (required for HuggingFace models)
+- Not setting `HF_TOKEN` for gated models
+- Using container paths that aren't mounted
+- Expecting local packages in containers - containers only have what's in Dockerfile
 
-## Tips
+**Code Management:**
+- Not signing off commits - use `git commit -s` (pre-commit will catch this)
+- Forgetting code is packaged from git - only committed files available
+- Using uncommitted changes - won't be packaged even with env var set
+- Using `git add -A` or `git add .` - stage specific files to avoid committing secrets
+- Non-git nemo_skills installations package ALL files (watch for large files!)
+- Not cleaning `~/.nemo_run` and cluster `job_dir` - code copies accumulate
 
+**Generation & Evaluation:**
+- Missing reasoning parser for reasoning models - must set `--server_args="--reasoning-parser ..."` or `++parse_reasoning=true`
+- Wrong prompt format - check if data is already formatted (use `++prompt_format=openai`)
+- Not preparing large datasets on cluster - datasets like ruler should be prepared on cluster with `--data_dir`
+- Forgetting `.done` files exist - completed jobs are auto-skipped; use `++skip_filled=false` to force rerun
+- Not checking first printed prompt - verify formatting before expensive jobs
+- `preprocess_cmd` with `num_chunks>1` doesn't work together
+
+**Cluster & Job Management:**
+- Using local tunnel ports without customization - can conflict on shared nodes; use `--get_random_port`
+- Not using `run_after` for dependencies
+- Hitting SLURM time limits - use `--dependent_jobs=N` to chain jobs
+- Not using `--reuse_code_exp` - unnecessarily re-packages code
+
+**Training:**
+- Not using `train_micro_batch_size=1` with sequence packing - REQUIRED
+- Forgetting `context_parallel_size` for long sequences (>4k tokens)
+- Not using `--disable_wandb` when `WANDB_API_KEY` not set
+
+**Development:**
+- Adding unnecessary defensive code - violates contribution guidelines
+- Using `.get()` for expected keys - use direct access to fail fast
+- Catching exceptions unnecessarily - let code crash
+
+## Quick Tips
+
+**Setup:**
 - Use `ns setup` to create cluster configs interactively
-- Check `nemo_skills/dataset/` for all available benchmarks
-- Use `ns <command> --help` to see available arguments and underlying script path
-- Run `summarize_results` with `--cluster=slurm` if results are on cluster
-- Use `expname` and `run_after` for job dependencies on SLURM
-- For debugging: set `++log_level=debug` in generation commands
-- Use `num_jobs` parameter to parallelize evaluation across multiple SLURM jobs
-- Prefix paths with `/nemo_run/code/` to reference packaged code files
-- Check `.done` files to see which jobs have completed
-- The codebase uses **nemo_run** (from NVIDIA-NeMo/Run) for execution orchestration
+- Set `HF_HOME` in cluster config's `env_vars`
+- For large datasets, prepare on cluster: `ns prepare_data ruler --data_dir=/workspace/ns-data --cluster=slurm`
+- Build `.sqsh` containers on cluster to avoid repeated downloads
+- Clean `~/.nemo_run` and cluster `job_dir` periodically
 
-## Key Files to Know
+**Debugging:**
+- `ns <command> --help` - see all arguments and underlying script path
+- `++log_level=debug` - verbose logging
+- Check first printed prompt to verify formatting
+- Inspect sbatch files in cluster `job_dir/<expname>` for manual modification
+- `ns summarize_results /path/to/results` - recompute metrics
 
-- `nemo_skills/pipeline/cli.py` - All CLI commands registered here
+**Performance:**
+- `--num_jobs=N` - parallelize evaluations across SLURM jobs
+- `--num_chunks=N` - split large generation jobs
+- `--num_random_seeds=N` - for pass@k or majority voting
+- `--dependent_jobs=M` - chain jobs hitting time limits
+- `--reuse_code_exp=<expname>` - avoid re-packaging code
+
+**Job Management:**
+- Use `expname` and `run_after` for dependencies
+- Check `.done` files for completion status
+- `++skip_filled=false` to force rerun
+- Prefix paths with `/nemo_run/code/` to reference packaged files
+
+**Config Files for Special Characters:**
+- Use `--config-path` and `--config-name` for arguments with special characters (e.g., `</think>`)
+- Avoids shell escaping issues
+
+## Key Files Reference
+
+**Entry Points:**
+- `nemo_skills/pipeline/cli.py:47` - All CLI commands registered here
 - `nemo_skills/inference/generate.py` - Core generation logic
+
+**Registries:**
+- `nemo_skills/inference/model/__init__.py` - Model backend registry
 - `nemo_skills/evaluation/evaluator/__init__.py` - Evaluator registry
-- `nemo_skills/inference/model/__init__.py` - Model registry
-- `pyproject.toml` - Package metadata, scripts (`ns` command), and tool configs
+- `nemo_skills/inference/factory.py` - Generation type registry
+
+**Core Systems:**
+- `nemo_skills/pipeline/utils/packager.py` - Code packaging logic
+- `nemo_skills/pipeline/utils/declarative.py` - Pipeline/Job/CommandGroup/Command classes
+- `nemo_skills/pipeline/utils/scripts.py` - Script objects (ServerScript, etc.)
+- `nemo_skills/pipeline/utils/exp.py` - Experiment management
+- `nemo_skills/pipeline/utils/cluster.py` - Cluster config resolution, SSH tunneling
+
+**Configuration:**
+- `pyproject.toml` - Package metadata, scripts (`ns` command), tool configs
 - `requirements/main.txt` - Production dependencies
 - `requirements/common-dev.txt` - Development dependencies
+
+## Where to Find More
+
+**Documentation:** https://nvidia-nemo.github.io/Skills/
+- **Basics:** https://nvidia-nemo.github.io/Skills/basics - Getting started, setup, core concepts
+- **Pipelines:** https://nvidia-nemo.github.io/Skills/pipelines - Detailed command reference with all options
+- **Tutorials:** https://nvidia-nemo.github.io/Skills/tutorials - Full workflows (GPT-OSS-120B, Nemotron evals, AIMO2 pipeline)
+
+**In Repository:**
+- **Recipes:** `recipes/` - Reproducible experiment configurations
+- **Examples:** Look at existing dataset `__init__.py` files in `nemo_skills/dataset/` for benchmark setup patterns
+- **Tests:** `tests/gpu-tests/`, `tests/slurm-tests/` - Real-world usage examples
+- **Cluster configs:** `cluster_configs/` - Example configurations
+
+**Command Help:**
+- Run `ns <command> --help` to see wrapper arguments and underlying script path
+- Look at underlying script (e.g., `nemo_skills/inference/generate.py`) for all `++` arguments
+
+**Specific Topics:**
+- **Benchmark-specific notes:** Check documentation tutorials for SWE-Bench, LiveCodeBench, IOI, Lean4, RULER, gpt-oss-120b
+- **Advanced features:** Tool calling (MCP), parallel thinking (GenSelect/GenSynthesis), LLM-as-a-judge configs
+- **Training details:** NeMo-RL optimization parameters, checkpoint management, MoE configuration
