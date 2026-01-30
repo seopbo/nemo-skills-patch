@@ -91,7 +91,7 @@ def get_benchmark_args_from_module(
         split = get_arg_from_module_or_dict(benchmark_module, "EVAL_SPLIT", "test", override_dict)
 
     if not is_on_cluster:
-        if pipeline_utils.is_mounted_filepath(cluster_config, data_path):
+        if pipeline_utils.is_mounted_filepath(cluster_config, data_path) or cluster_config["executor"] == "none":
             input_file = f"{data_path}/{benchmark.replace('.', '/')}/{split}.jsonl"
             unmounted_input_file = pipeline_utils.get_unmounted_path(cluster_config, input_file)
             unmounted_path = str(Path(__file__).parents[3] / unmounted_input_file.replace("/nemo_run/code/", ""))
@@ -415,6 +415,7 @@ def prepare_eval_commands(
                         "Please provide a valid generation module."
                     )
                 generation_task = generation_task.GENERATION_TASK_CLASS
+                requirements = generation_task.get_generation_requirements()
                 if (
                     generation_task.get_server_command_fn.__func__ != GenerationTask.get_server_command_fn.__func__
                     and num_jobs != total_evals
@@ -438,6 +439,7 @@ def prepare_eval_commands(
                     chunk_id=chunk_id,
                     num_chunks=benchmark_args.num_chunks,
                     script=generation_module or benchmark_args.generation_module,
+                    requirements=requirements,
                     # only logging for the first seed
                     wandb_parameters=wandb_parameters if seed_idx == 0 else None,
                     with_sandbox=benchmark_args.requires_sandbox,

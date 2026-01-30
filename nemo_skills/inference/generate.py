@@ -27,7 +27,7 @@ from typing import Any
 
 import hydra
 import litellm
-from omegaconf import ListConfig
+from omegaconf import DictConfig, ListConfig, OmegaConf
 from tqdm import tqdm
 from transformers import AutoTokenizer
 
@@ -84,7 +84,7 @@ class InferenceConfig:
 
 
 @nested_dataclass(kw_only=True)
-class GenerateSolutionsConfig:
+class GenerationTaskConfig:
     """Generation parameters."""
 
     input_file: str  # Path to the input file with data
@@ -177,6 +177,25 @@ class GenerateSolutionsConfig:
     #     - Set an ExampleTool server-only arg:
     #         ++tool_overrides.ExampleTool.foo_argument='[TEST] '
     tool_overrides: dict | None = field(default_factory=dict)
+    #
+    #   Schema overrides allow customizing tool schemas shown to the model.
+    #   Dict keyed by provider class name (like tool_overrides), then tool name.
+    #   Format: ProviderClassName -> tool_name -> (name, description, parameters)
+    #
+    #   Example YAML configuration (config.yaml):
+    #     schema_overrides:
+    #       PythonTool:
+    #         stateful_python_code_exec:
+    #           name: "python_executor"
+    #           description: "Evaluate Python code interactively"
+    #           parameters:
+    #             code:
+    #               name: "script"
+    #               description: "Python code to execute"
+    #
+    #   To use this config with Hydra, launch your script with:
+    #      --config-path /path/to/configs --config-name config
+    schema_overrides: dict | None = field(default_factory=dict)
 
     # if True, will move full generation to _full_generation key and keep cfg.generation_key without thinking tokens
     # IMPORTANT: do not set this for non-reasoning models as it will make the generations empty!
@@ -185,6 +204,15 @@ class GenerateSolutionsConfig:
 
     # If True, will enable litellm disk cache (useful for keeping intermediate results in case of job timelimit failures)
     enable_litellm_cache: bool = False
+
+    # List of content types to drop from messages (e.g., base64 audio) to keep output files smaller
+    drop_content_types: list[str] = field(default_factory=lambda: ["audio_url"])
+
+    # Audio configuration - set by benchmarks that need audio processing (mmau-pro, audiobench, etc.)
+    enable_audio: bool = False  # Enable audio preprocessing (set by benchmark configs)
+    enable_audio_chunking: bool = True
+    audio_chunk_task_types: list[str] | None = None  # If None, chunk all task types; if specified, only chunk these
+    chunk_audio_threshold_sec: int = 30  # Duration in seconds for each audio chunk
 
     # Evaluation setup if requested. If eval_type is set to None, evaluation is skipped
     eval_type: str | None = None  # "lean4-proof", "math", etc.
@@ -235,7 +263,7 @@ class GenerateSolutionsConfig:
 
 
 cs = hydra.core.config_store.ConfigStore.instance()
-cs.store(name="base_generation_config", node=GenerateSolutionsConfig)
+cs.store(name="base_generation_config", node=GenerationTaskConfig)
 
 
 class GenerationTask:
@@ -263,16 +291,24 @@ class GenerationTask:
 
         return get_server_command
 
-    def __init__(self, cfg: GenerateSolutionsConfig):
+    @classmethod
+    def get_generation_requirements(cls) -> list[str] | None:
+        """Return extra requirements for this generation module, if any."""
+        return None
+
+    def __init__(self, cfg: GenerationTaskConfig):
         """
         Class that represents a generation task. It implements a template of steps to generate solutions using LLMs.
         Individual functions can be overriden to customize the behavior of the generation task.
 
         Args:
-            cfg: GenerateSolutionsConfig object with the configuration parameters or subclass.
+            cfg: GenerationTaskConfig object with the configuration parameters or subclass.
         """
         self.cfg = cfg
-        self.cfg.inference.extra_body = dict(self.cfg.inference.extra_body)
+        if isinstance(self.cfg.inference.extra_body, DictConfig):
+            self.cfg.inference.extra_body = OmegaConf.to_container(self.cfg.inference.extra_body, resolve=True)
+        else:
+            self.cfg.inference.extra_body = dict(self.cfg.inference.extra_body)
 
         # chat template kwargs goes either into extra body of inference or as a prompt parameter
         if self.cfg.chat_template_kwargs:
@@ -319,7 +355,7 @@ class GenerationTask:
         # Setup hf_tokenizer for counting prompt tokens
         self.hf_tokenizer = None
         if self.cfg.count_prompt_tokens:
-            self.hf_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer)
+            self.hf_tokenizer = AutoTokenizer.from_pretrained(self.tokenizer, trust_remote_code=True)
 
             if self.hf_tokenizer is None:
                 raise ValueError("Tokenizer could not be initialized. Needed for counting prompt tokens.")
@@ -380,18 +416,66 @@ class GenerationTask:
     def setup_llm(self):
         self.sandbox = get_sandbox(**self.cfg.sandbox) if self.cfg.sandbox is not None else None
 
+        # Determine data_dir for resolving relative paths (e.g., images, audio)
+        # Always resolve relative to input file's parent directory
+        if self.cfg.input_file:
+            self.data_dir = str(Path(self.cfg.input_file).parent)
+        else:
+            self.data_dir = None
+
+        output_dir = str(Path(self.cfg.output_file).parent)
+
+        # Determine if audio processing is needed
+        # Benchmarks that need audio set enable_audio=true in their GENERATION_ARGS
+        needs_audio = self.cfg.enable_audio
+
+        # Build server config, potentially switching to vllm_multimodal for audio tasks
+        server_config = dict(self.cfg.server)
+        if needs_audio and server_config.get("server_type") not in ["vllm", "vllm_multimodal"]:
+            LOG.warning(
+                f"enable_audio is set but server_type is '{server_config.get('server_type')}'. "
+                "Audio processing is only supported for vllm_multimodal server types. "
+                "Audio will not be processed."
+            )
+        if needs_audio and server_config.get("server_type") in [
+            "vllm",
+            "vllm_multimodal",
+        ]:  # helps with backward compatibility
+            if server_config.get("server_type") == "vllm":
+                LOG.warning("Auto-switching server_type from 'vllm' to 'vllm_multimodal' for audio processing")
+            server_config["server_type"] = "vllm_multimodal"
+            # Pass audio chunking config
+            server_config.update(
+                {
+                    "enable_audio_chunking": self.cfg.enable_audio_chunking,
+                    "audio_chunk_task_types": self.cfg.audio_chunk_task_types,
+                    "chunk_audio_threshold_sec": self.cfg.chunk_audio_threshold_sec,
+                }
+            )
+
         if self.cfg.code_execution:
-            llm = get_code_execution_model(**self.cfg.server, tokenizer=self.tokenizer, sandbox=self.sandbox)
+            llm = get_code_execution_model(
+                **server_config,
+                tokenizer=self.tokenizer,
+                sandbox=self.sandbox,
+                data_dir=self.data_dir or "",
+                output_dir=output_dir,
+            )
         elif self.cfg.tool_modules is not None:
             llm = get_tool_calling_model(
-                **self.cfg.server,
+                **server_config,
                 tool_modules=self.cfg.tool_modules,
                 tool_overrides=self.cfg.tool_overrides,
+                schema_overrides=self.cfg.schema_overrides,
                 tokenizer=self.tokenizer,
                 additional_config={"sandbox": self.cfg.sandbox},
+                data_dir=self.data_dir or "",
+                output_dir=output_dir,
             )
         else:
-            llm = get_model(**self.cfg.server, tokenizer=self.tokenizer)
+            llm = get_model(
+                **server_config, tokenizer=self.tokenizer, data_dir=self.data_dir or "", output_dir=output_dir
+            )
 
         if self.cfg.parallel_thinking.mode is not None:
             # We don't want to override these key variables which overlap with self.cfg
@@ -525,6 +609,25 @@ class GenerationTask:
         for output in outputs:
             fout.write(json.dumps(output) + "\n")
 
+    def drop_fields_from_messages(self, output):
+        """Remove specified content types from messages to keep output files smaller.
+
+        Filters out content types listed in drop_content_types config f.e. base64 data.
+        """
+        # Skip if output doesn't have messages (e.g., text completion mode or error cases)
+        if "messages" not in output:
+            return
+
+        for message in output["messages"]:
+            # Skip if content is not a list (e.g., string content in system messages)
+            if not isinstance(message.get("content"), list):
+                continue
+
+            # Filter out content types specified in drop_content_types config
+            message["content"] = [
+                content for content in message["content"] if content.get("type") not in self.cfg.drop_content_types
+            ]
+
     async def postprocess_single_output(self, output, original_data_point):
         # to make it easier to follow up with other generations and limit accidental errors, we are adding
         # all of the original data to the output file alongside the new generations
@@ -540,6 +643,10 @@ class GenerationTask:
         for key in output:
             original_data_point.pop(key, None)
         output.update(original_data_point)
+
+        # Drop specified content types (f.e base64 audio) from output to reduce file size
+        self.drop_fields_from_messages(output)
+
         if self.cfg.parse_reasoning:
             parse_reasoning(
                 output,
@@ -760,8 +867,8 @@ GENERATION_TASK_CLASS = GenerationTask
 
 # Update the hydra main to use the class method
 @hydra.main(version_base=None, config_name="base_generation_config")
-def generate(cfg: GenerateSolutionsConfig):
-    cfg = GenerateSolutionsConfig(_init_nested=True, **cfg)
+def generate(cfg: GenerationTaskConfig):
+    cfg = GenerationTaskConfig(_init_nested=True, **cfg)
     LOG.info("Config used: %s", cfg)
 
     task = GenerationTask(cfg)
@@ -769,7 +876,7 @@ def generate(cfg: GenerateSolutionsConfig):
 
 
 HELP_MESSAGE = get_help_message(
-    GenerateSolutionsConfig,
+    GenerationTaskConfig,
     server_params=server_params(),
     sandbox_params=sandbox_params(),
 )
