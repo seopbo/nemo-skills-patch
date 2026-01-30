@@ -212,7 +212,7 @@ def test_judge_generations_with_structured_output(tmp_path):
     subprocess.run(cmd, shell=True, check=True)
 
     # checking that output exists and has the expected format
-    with open(f"{tmp_path}/output.jsonl") as fin:
+    with open(f"{tmp_path}/eval-results/hle/output.jsonl") as fin:
         data = [json.loads(line) for line in fin.readlines()]
     judgements = [json.loads(data[i]["judgement"]) for i in range(len(data))]
     expected_keys = {"extracted_final_answer", "reasoning", "correct", "confidence"}
