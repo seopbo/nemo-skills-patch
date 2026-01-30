@@ -21,7 +21,7 @@ GENERATION_ARGS = "++prompt_config=generic/default"
 
 JUDGE_PIPELINE_ARGS = {
     "generation_module": "nemo_skills.inference.eval.arena_judge",
-    "model": "o3-mini-2025-01-31",
+    "model": "gpt-4.1",
     "server_type": "openai",
     "server_address": "https://api.openai.com/v1",
 }

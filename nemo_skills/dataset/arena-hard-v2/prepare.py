@@ -17,37 +17,55 @@ import urllib.request
 from pathlib import Path
 
 URL_QUESTIONS = "https://raw.githubusercontent.com/lmarena/arena-hard-auto/main/data/arena-hard-v2.0/question.jsonl"
-URL_BASELINE = (
-    "https://raw.githubusercontent.com/lmarena/arena-hard-auto/main/data/arena-hard-v2.0/model_answer/o3-mini-2025-01-31.jsonl"
-)
+# Category-specific baselines as per official arena-hard-auto implementation
+URL_BASELINE_HARD_PROMPT = "https://raw.githubusercontent.com/lmarena/arena-hard-auto/main/data/arena-hard-v2.0/model_answer/o3-mini-2025-01-31.jsonl"
+URL_BASELINE_CREATIVE_WRITING = "https://raw.githubusercontent.com/lmarena/arena-hard-auto/main/data/arena-hard-v2.0/model_answer/gemini-2.0-flash-001.jsonl"
+
+# Mapping of category to baseline URL
+CATEGORY_BASELINES = {
+    "hard_prompt": URL_BASELINE_HARD_PROMPT,
+    "creative_writing": URL_BASELINE_CREATIVE_WRITING,
+}
+
+
+def extract_answer_text(data):
+    """Extract the answer text from the baseline model's response format."""
+    messages = data["messages"]
+    for msg in messages:
+        if msg["role"] == "assistant":
+            content = msg["content"]
+            return content["answer"] if isinstance(content, dict) else content
+    return ""
 
 
 if __name__ == "__main__":
     data_dir = Path(__file__).absolute().parent
     data_dir.mkdir(exist_ok=True)
-    questions = str(data_dir / "question.jsonl")
-    baseline = str(data_dir / "o3-mini-2025-01-31.jsonl")
+    questions_file = str(data_dir / "question.jsonl")
     output_file = str(data_dir / "test.jsonl")
-    urllib.request.urlretrieve(URL_QUESTIONS, questions)
-    urllib.request.urlretrieve(URL_BASELINE, baseline)
 
+    # Download questions
+    urllib.request.urlretrieve(URL_QUESTIONS, questions_file)
+
+    # Download and process all baseline files
     baseline_answers = {}
-    with open(baseline, "rt", encoding="utf-8") as fin:
-        for line in fin:
-            data = json.loads(line)
-            messages = data.get("messages", [])
-            answer_text = ""
-            for msg in messages:
-                if msg.get("role") == "assistant":
-                    content = msg.get("content")
-                    answer_text = content.get("answer", "") if isinstance(content, dict) else content
-                    break
+    for category, url in CATEGORY_BASELINES.items():
+        baseline_file = str(data_dir / f"baseline_{category}.jsonl")
+        urllib.request.urlretrieve(url, baseline_file)
 
-            baseline_answers[data["uid"]] = answer_text
+        with open(baseline_file, "rt", encoding="utf-8") as fin:
+            for line in fin:
+                data = json.loads(line)
+                uid = data["uid"]
+                if uid not in baseline_answers:
+                    baseline_answers[uid] = {}
+                baseline_answers[uid][category] = extract_answer_text(data)
 
-    with open(questions, "rt", encoding="utf-8") as fin, open(output_file, "wt", encoding="utf-8") as fout:
+    # Create test.jsonl with category-specific baseline answers
+    with open(questions_file, "rt", encoding="utf-8") as fin, open(output_file, "wt", encoding="utf-8") as fout:
         for line in fin:
             data = json.loads(line)
             data["question"] = data.pop("prompt")
-            data["baseline_answer"] = baseline_answers[data["uid"]]
+            category = data["category"]
+            data["baseline_answer"] = baseline_answers[data["uid"]][category]
             fout.write(json.dumps(data) + "\n")
