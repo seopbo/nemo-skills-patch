@@ -103,7 +103,11 @@ class ArenaJudgeTask(GenerationTask):
 
         # Select the appropriate prompt based on category. If not defined, forcing fall-back to default prompt
         category = data_point.get("category")
-        prompt = self.category_prompts.get(category, self.prompt)
+        if not category:
+            prompt = self.prompt
+        else:
+            # will fail if category not in category_prompts as this is unexpected
+            prompt = self.category_prompts[category]
 
         data_point = deepcopy(data_point)
         filled_prompt = prompt.fill(
