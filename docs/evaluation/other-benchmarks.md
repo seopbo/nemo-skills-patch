@@ -81,7 +81,10 @@ ns eval \
     ++inference.temperature=1.0 \
     ++inference.top_p=1.0 \
     ++inference.tokens_to_generate=65536 \
-    --extra_judge_args="++inference.tokens_to_generate=16000 ++inference.temperature=0"
+    --extra_judge_args=" \
+        ++inference.tokens_to_generate=16000 \
+        ++inference.temperature=0 \
+        ++max_concurrent_requests=1"
 ```
 
 #### Verifying Results
