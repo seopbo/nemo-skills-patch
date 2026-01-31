@@ -84,7 +84,7 @@ ns eval \
     --extra_judge_args=" \
         ++inference.tokens_to_generate=16000 \
         ++inference.temperature=0 \
-        ++max_concurrent_requests=1"
+        ++max_concurrent_requests=16"
 ```
 
 #### Verifying Results

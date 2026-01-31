@@ -92,6 +92,8 @@ class ArenaJudgeTask(GenerationTask):
                 system_message=self.cfg.system_message,
             )
             LOG.info("Prompt used (creative_writing): %s", self.category_prompts["creative_writing"])
+        # registering default prompt explicitly for hard_prompt
+        self.category_prompts["hard_prompt"] = default_prompt
 
         LOG.info("Prompt used (default): %s", default_prompt)
         return default_prompt
