@@ -35,7 +35,7 @@ def extract_answer_text(data):
         if msg["role"] == "assistant":
             content = msg["content"]
             return content["answer"] if isinstance(content, dict) else content
-    return ""
+    raise ValueError("No assistant message found in the data.")
 
 
 if __name__ == "__main__":

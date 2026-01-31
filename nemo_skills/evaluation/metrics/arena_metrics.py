@@ -101,7 +101,7 @@ class ArenaMetrics(BaseMetrics):
 
         # Group scores by category for per-category metrics
         category_scores = defaultdict(list)
-        for score, category in zip(self.scores, self.categories):
+        for score, category in zip(self.scores, self.categories, strict=True):
             category_scores[category].append(score)
 
         # If we have multiple categories, compute per-category metrics
