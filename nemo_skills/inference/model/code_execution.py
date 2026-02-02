@@ -199,6 +199,8 @@ class CodeExecutionWrapper:
                     code_output_tokens = len(self.model.tokenizer.encode(code_output))
                     request["tokens_to_generate"] -= code_output_tokens
                     total_num_generated_tokens += code_output_tokens
+                    if request["tokens_to_generate"] <= 0:
+                        break
                     if is_openai_format:
                         request["prompt"][-2]["content"] += code_output
                     else:
@@ -375,11 +377,7 @@ class CodeExecutionWrapper:
                 current_output_segment = ""
                 async for chunk in model_token_iterator:
                     yield chunk
-                    current_output_segment += chunk.get("generation", "")
-
-                # Check for empty output first
-                if not current_output_segment:
-                    break
+                    current_output_segment += chunk["generation"]
 
                 # openai and trtllm don't show what stop word was triggered, so we assume that it was `code_end`
                 # if there's an unfinished code block
@@ -387,11 +385,13 @@ class CodeExecutionWrapper:
                     current_output_segment += code_end
                     yield {"generation": code_end}
 
-                # Calculate token count using tokenizer (after adding code_end if needed)
+                # Calculate token count for this segment (after adding code_end if needed)
                 num_generated_tokens = len(self.model.tokenizer.encode(current_output_segment))
 
                 request["tokens_to_generate"] -= num_generated_tokens
                 if request["tokens_to_generate"] <= 0:
+                    break
+                if not current_output_segment:
                     break
 
                 # Update the prompt based on format
@@ -433,6 +433,8 @@ class CodeExecutionWrapper:
                     # Account for tokens in the code output
                     code_output_tokens = len(self.model.tokenizer.encode(formatted_code_output))
                     request["tokens_to_generate"] -= code_output_tokens
+                    if request["tokens_to_generate"] <= 0:
+                        break
 
                     # Append executed code's output to the prompt
                     if is_openai_format:

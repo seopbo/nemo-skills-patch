@@ -204,7 +204,11 @@ class BaseModel:
         if tokenizer is None:
             return None
         if isinstance(tokenizer, str):
-            return WrapperAutoTokenizer(tokenizer)
+            try:
+                return WrapperAutoTokenizer(tokenizer)
+            except OSError:
+                LOG.warning(f"Tokenizer not found at '{tokenizer}', trying fallback to server /tokenize endpoint")
+                return None
 
     @abc.abstractmethod
     def _build_chat_request_params(self, **kwargs) -> dict:
