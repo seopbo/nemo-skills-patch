@@ -271,7 +271,7 @@ class Sandbox(abc.ABC):
         except httpx.HTTPError:
             return False
 
-    def wait_for_sandbox(self, wait_timeout: int = 120, http_timeout: int = 5):
+    def wait_for_sandbox(self, wait_timeout: int = 240, http_timeout: int = 5):
         start_time = time.time()
         while not self._check_ready(timeout=http_timeout):
             if time.time() - start_time >= wait_timeout:
