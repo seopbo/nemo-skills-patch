@@ -32,8 +32,8 @@ def eval_if(cfg):
     output_dir.mkdir(parents=True, exist_ok=True)
     cmd = (
         "cd /opt/benchmarks/google-research && python -m instruction_following_eval.evaluation_main "
-        f"--input_data={jsonl_file} "
-        f"--input_response_data={jsonl_file} "
+        f"--input_data={jsonl_path} "
+        f"--input_response_data={jsonl_path} "
         f"--output_dir={output_dir} "
     )
     subprocess.run(cmd, shell=True, check=True)
